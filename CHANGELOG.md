@@ -88,3 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Restic receives only backup settings, never the other secrets in `.env`.
   - `community-stack check`, `plan` and `backup` say when backups are unencrypted or restic is missing; configurations without the setting keep the previous owner-only archives.
   - The Ansible host role installs restic, and CI runs the encrypted backup tests against a real restic binary.
+- **Roadmap Phase 0: Control agent skeleton:**
+  - Design record [ADR 0007](docs/decisions/0007-control-agent.md): a privileged host service performs console actions from a fixed catalog over a local Unix socket.
+  - `community-stack agent serve` with a hardened systemd unit (`services/agent/community-stack-agent.service`); the socket is limited to the console's group and, on Linux, to allowed peer UIDs.
+  - First operations: service status, create backup, verify backup, and a restore drill that restores into a scratch folder, checks it, and deletes it.
+  - The agent checks each request's parameters, the account's role (read-only from the admin database), and for the restore drill the person's password, with five attempts per 15 minutes; it runs one change at a time and writes its own audit log.
+  - Admin console System page for owners and admins, which explains when the agent is not installed.
+  - `deploy-vps.sh` restarts the agent after deploying, when it is installed.

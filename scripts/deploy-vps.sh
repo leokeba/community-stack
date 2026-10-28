@@ -177,6 +177,8 @@ fi
 
 docker inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
 docker inspect community_proxy --format '{{.State.Status}}' | grep -qx running
+# Pick up new agent code if the control agent is installed; does nothing otherwise.
+sudo -n systemctl try-restart community-stack-agent.service 2>/dev/null || true
 printf 'Deployment healthy. Prior image tag: %s\n' "${rollback_tag:-unavailable}"
 REMOTE
 

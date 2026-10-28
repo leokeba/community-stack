@@ -169,6 +169,24 @@ def create_parser() -> argparse.ArgumentParser:
         "--interval", type=float, default=15.0, help="Seconds between runs (default 15)"
     )
 
+    # agent
+    p_agent = subparsers.add_parser(
+        "agent", help="Run the privileged control agent used by the admin console"
+    )
+    agent_subs = p_agent.add_subparsers(dest="agent_action", help="Agent actions")
+    p_agent_serve = agent_subs.add_parser("serve", help="Listen for console requests")
+    p_agent_serve.add_argument("--project-dir", default=".", help="Stack directory")
+    p_agent_serve.add_argument("--socket", help="Socket path (default data/agent/run/agent.sock)")
+    p_agent_serve.add_argument(
+        "--console-uid",
+        type=int,
+        action="append",
+        help="UID allowed to connect (repeatable; default: any process that can open the socket)",
+    )
+    p_agent_serve.add_argument(
+        "--console-gid", type=int, help="Group that owns the socket so the console can reach it"
+    )
+
     # bridge
     p_bridge = subparsers.add_parser("bridge", help="Manage optional WhatsApp bridge integration")
     bridge_subs = p_bridge.add_subparsers(dest="bridge_action", help="Bridge actions")
@@ -261,6 +279,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_doctor(config_path=args.config, env_path=args.env)
     elif args.command == "announce":
         return run_announce(args=args)
+    elif args.command == "agent":
+        from community_stack.commands.agent_cmd import run_agent
+
+        return run_agent(args)
     elif args.command == "bridge":
         return run_bridge(args=args)
     elif args.command == "subscribers":

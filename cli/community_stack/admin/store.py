@@ -30,6 +30,7 @@ PERMISSIONS = {
     "settings": {"owner", "admin"},
     "accounts": {"owner", "admin"},
     "audit": {"owner", "admin"},
+    "system": {"owner", "admin"},
 }
 
 
@@ -41,6 +42,43 @@ def tokens_match(expected: str | None, actual: str | None) -> bool:
     return bool(expected and actual) and hmac.compare_digest(
         expected.encode("utf-8"), actual.encode("utf-8")
     )
+
+
+def password_hash(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS).hex()
+
+
+def read_account(db_path: Path | str, username: str) -> dict[str, Any] | None:
+    """Look up an active account without writing to, or creating, the database.
+
+    The control agent runs as root, so it must never create files the console
+    (running as another user) would then be unable to write.
+    """
+    path = Path(db_path)
+    if not path.is_file():
+        return None
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT username, role, password_salt, password_hash FROM admin_users "
+            "WHERE username = ? AND disabled_at IS NULL",
+            (username,),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def account_password_matches(account: dict[str, Any] | None, password: str) -> bool:
+    if len(password) > 1024:
+        return False
+    salt = bytes.fromhex(account["password_salt"]) if account else bytes(16)
+    actual = password_hash(password, salt)
+    expected = account["password_hash"] if account else "0" * 64
+    return hmac.compare_digest(actual, expected) and account is not None
 
 
 def _now() -> datetime:
@@ -105,9 +143,7 @@ class AdminStore:
 
     @staticmethod
     def _password_hash(password: str, salt: bytes) -> str:
-        return hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
-        ).hex()
+        return password_hash(password, salt)
 
     @staticmethod
     def _validate_password(password: str) -> None:

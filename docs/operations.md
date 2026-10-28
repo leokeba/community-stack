@@ -46,6 +46,8 @@ always remain. Sign-ins, failed sign-ins, account changes, publishing actions
 and settings changes are recorded with time, account and client address on
 the Activity log page, and kept for about 13 months.
 
+### Delivery retries
+
 Each channel delivery is stored as a job before it runs. A temporary failure
 (a network error, HTTP 5xx or 429) on a channel that can safely repeat the
 operation is retried automatically after 30 s, 2 min, 8 min, 32 min and 1 h,
@@ -57,6 +59,33 @@ announcement or disabling a channel cancels its pending retries. Pending jobs
 are listed on the announcement's page under "Scheduled deliveries".
 
 ---
+
+### Control agent
+
+The admin console's System page (owners and admins) shows service status and
+can create a backup, check the latest backup, and run a restore drill. The
+console never touches the server directly: it asks the **control agent**, a
+small privileged service on the host, which accepts only a fixed list of
+operations (see [ADR 0007](decisions/0007-control-agent.md)). Without the agent,
+the System page says so and the rest of the console works as before.
+
+Install it once on the server, from the stack directory:
+
+```bash
+sudo install -m 0644 services/agent/community-stack-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now community-stack-agent
+sudo systemctl status community-stack-agent
+```
+
+The unit assumes the stack lives in `/opt/community-stack`, that the CLI is
+installed in its `.venv`, and that the console runs as UID/GID 1000; edit the
+`ExecStart` line if yours differ. The agent listens on
+`data/agent/run/agent.sock`, which only the console's group can open, and
+records every request in `data/agent/audit.log`. The restore drill asks for the
+person's password again; the agent checks it itself and allows five wrong
+attempts per 15 minutes. `deploy-vps.sh` restarts the agent after a deployment
+if it is installed.
 
 ## 2. Maintenance Windows & Upgrades
 

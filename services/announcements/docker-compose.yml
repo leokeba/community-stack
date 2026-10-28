@@ -17,10 +17,13 @@ services:
       COMMUNITY_STACK_ANNOUNCEMENTS_DB_PATH: /app/data/announcements/announcements.db
       COMMUNITY_STACK_FEED_DIR: /app/data/landing/feed
       COMMUNITY_STACK_CONFIG: /app/community-stack.yaml
+      COMMUNITY_STACK_AGENT_SOCKET: /run/community-stack-agent/agent.sock
     volumes:
       - ../../data/announcements:/app/data/announcements
       - ../../data/landing/feed:/app/data/landing/feed
       - ../../community-stack.yaml:/app/community-stack.yaml:ro
+      # Only the agent's socket directory; the agent's audit log and state stay out of reach.
+      - ../../data/agent/run:/run/community-stack-agent
     networks:
       - proxy_net
       - announcements_internal

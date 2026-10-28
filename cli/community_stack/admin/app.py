@@ -26,6 +26,7 @@ from community_stack.admin.store import (
     can,
     tokens_match,
 )
+from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.models import ModelValidationError
 from community_stack.announcements.publisher import AnnouncementPublisher
@@ -39,6 +40,7 @@ LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 WORKER_INTERVAL_SECONDS = 15.0
+DEFAULT_AGENT_SOCKET = "/run/community-stack-agent/agent.sock"
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,7 @@ def create_app(
     setup_token: str | None = None,
     run_worker: bool | None = None,
     worker_interval: float | None = None,
+    agent_socket: Path | str | None = None,
 ) -> FastAPI:
     if setup_token is None:
         setup_token = os.environ.get("COMMUNITY_STACK_ADMIN_SETUP_TOKEN")
@@ -69,6 +72,9 @@ def create_app(
     )
     feed_dir = feed_dir or os.environ.get("COMMUNITY_STACK_FEED_DIR", "data/landing/feed")
     config_path = config_path or os.environ.get("COMMUNITY_STACK_CONFIG", "community-stack.yaml")
+    agent = AgentClient(
+        agent_socket or os.environ.get("COMMUNITY_STACK_AGENT_SOCKET", DEFAULT_AGENT_SOCKET)
+    )
     storage = AnnouncementStorage(db_path=db_path)
     auth_store = AdminStore(db_path)
     publisher = AnnouncementPublisher(
@@ -109,6 +115,7 @@ def create_app(
     app.state.storage = storage
     app.state.auth_store = auth_store
     app.state.publisher = publisher
+    app.state.agent = agent
 
     @app.exception_handler(LoginRequired)
     async def login_required(_request: Request, _exc: LoginRequired) -> Response:
@@ -647,6 +654,67 @@ def create_app(
                 saved=False,
             ),
             status_code=400,
+        )
+
+    async def system_page(
+        request: Request,
+        session: dict[str, Any],
+        outcome: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        status, agent_error = None, None
+        if agent.available():
+            try:
+                status = await run_in_threadpool(agent.call, "status.get", session["username"])
+            except (AgentUnavailable, AgentRefused) as exc:
+                agent_error = str(exc)
+        return render(
+            request,
+            "system.html",
+            page(
+                session,
+                agent_available=agent.available(),
+                agent_error=agent_error,
+                status=status,
+                outcome=outcome,
+            ),
+            status_code=status_code,
+        )
+
+    async def run_system_operation(
+        request: Request,
+        session: dict[str, Any],
+        op: str,
+        title: str,
+        password: str | None = None,
+    ) -> HTMLResponse:
+        try:
+            result = await run_in_threadpool(agent.call, op, session["username"], None, password)
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(request, session["username"], f"system.{op}", outcome="refused")
+            return await system_page(request, session, {"title": title, "error": str(exc)}, 400)
+        audit(request, session["username"], f"system.{op}", outcome="succeeded")
+        return await system_page(request, session, {"title": title, "result": result})
+
+    @app.get("/admin/system")
+    async def system(request: Request) -> Response:
+        return await system_page(request, require(request, "system"))
+
+    @app.post("/admin/system/backup")
+    async def system_backup(request: Request) -> Response:
+        session, _ = await checked_form(request, "system")
+        return await run_system_operation(request, session, "backup.create", "Backup")
+
+    @app.post("/admin/system/verify")
+    async def system_verify(request: Request) -> Response:
+        session, _ = await checked_form(request, "system")
+        return await run_system_operation(request, session, "backup.verify", "Backup check")
+
+    @app.post("/admin/system/drill")
+    async def system_drill(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        return await run_system_operation(
+            request, session, "restore.drill", "Restore drill", form.get("password", "")
         )
 
     @app.get("/admin/audit")

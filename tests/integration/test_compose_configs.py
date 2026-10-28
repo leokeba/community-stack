@@ -82,6 +82,8 @@ def test_admin_app_is_internal_and_has_no_host_ports():
     assert "announcements_internal" in app["networks"]
     assert data["networks"]["announcements_internal"]["internal"] is True
     assert "env_file" not in app, "The public admin app must not receive every secret"
+    assert "../../data/agent/run:/run/community-stack-agent" in app["volumes"]
+    assert not any("docker.sock" in volume for volume in app["volumes"])
     assert set(app["environment"]).isdisjoint(
         {"POSTGRES_PASSWORD", "SYNAPSE_REGISTRATION_SHARED_SECRET", "RESTIC_PASSWORD"}
     )

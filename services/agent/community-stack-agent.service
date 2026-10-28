@@ -1,0 +1,43 @@
+# Privileged control agent for the admin console (docs/decisions/0007-control-agent.md).
+# Install: sudo install -m 0644 services/agent/community-stack-agent.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now community-stack-agent
+# Adjust the paths and the console UID/GID (COMMUNITY_STACK_UID/GID, default 1000) if yours differ.
+
+[Unit]
+Description=Community Stack control agent
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/community-stack
+ExecStart=/opt/community-stack/.venv/bin/community-stack agent serve --project-dir /opt/community-stack --console-uid 1000 --console-gid 1000
+Restart=on-failure
+RestartSec=5
+
+# restic and the Docker CLI need a home and a cache outside the protected paths.
+StateDirectory=community-stack-agent
+CacheDirectory=community-stack-agent
+Environment=HOME=/var/lib/community-stack-agent
+Environment=XDG_CACHE_HOME=/var/cache/community-stack-agent
+
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/community-stack
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

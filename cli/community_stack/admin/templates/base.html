@@ -40,6 +40,7 @@
       <a href="/admin/announcements">Announcements</a>
       {% if perms.settings %}<a href="/admin/settings">Settings</a>{% endif %}
       {% if perms.accounts %}<a href="/admin/accounts">Accounts</a>{% endif %}
+      {% if perms.system %}<a href="/admin/system">System</a>{% endif %}
       {% if perms.audit %}<a href="/admin/audit">Activity log</a>{% endif %}
       <a href="/admin/account">My account</a>
       <span class="muted">{{ username }} ({{ role }})</span>
