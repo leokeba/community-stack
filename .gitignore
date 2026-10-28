@@ -35,6 +35,10 @@ data/
 backups/
 .community-stack/
 
-# OS artifacts
+# OS and editor artifacts
 .DS_Store
 Thumbs.db
+.vscode/
+
+# Local deployment instance config
+community-stack.yaml
