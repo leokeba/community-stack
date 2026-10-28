@@ -236,3 +236,25 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     assert main(["bridge", "disable"]) == 1
     # bridge disable with confirm succeeds
     assert main(["bridge", "disable", "--confirm"]) == 0
+
+    # subscribers add, list, unsubscribe
+    assert (
+        main(
+            [
+                "subscribers",
+                "add",
+                "--channel",
+                "email",
+                "--dest",
+                "cli_test@example.org",
+                "--topics",
+                "alerts",
+            ]
+        )
+        == 0
+    )
+    assert main(["subscribers", "list"]) == 0
+    assert (
+        main(["subscribers", "unsubscribe", "--channel", "email", "--dest", "cli_test@example.org"])
+        == 0
+    )

@@ -18,6 +18,7 @@ from community_stack.commands.plan_cmd import run_plan
 from community_stack.commands.restore_cmd import run_restore
 from community_stack.commands.status_cmd import run_status
 from community_stack.commands.stubs import run_doctor
+from community_stack.commands.subscribers_cmd import run_subscribers
 from community_stack.commands.upgrade_cmd import run_upgrade
 
 
@@ -158,6 +159,27 @@ def create_parser() -> argparse.ArgumentParser:
     p_b_disable.add_argument("--confirm", action="store_true", help="Explicit confirmation")
     bridge_subs.add_parser("list-rooms", help="List allowlisted Matrix rooms mapped to WhatsApp")
 
+    # subscribers
+    p_subs = subparsers.add_parser(
+        "subscribers", help="Manage opt-in email and SMS broadcast subscriptions"
+    )
+    subs_subparsers = p_subs.add_subparsers(dest="subscriber_action", help="Subscriber actions")
+
+    p_s_list = subs_subparsers.add_parser("list", help="List subscribers")
+    p_s_list.add_argument("--channel", choices=["email", "sms"], help="Filter by channel")
+    p_s_list.add_argument("--all", action="store_true", help="Include unsubscribed contacts")
+
+    p_s_add = subs_subparsers.add_parser("add", help="Add an opt-in subscriber")
+    p_s_add.add_argument("--channel", required=True, choices=["email", "sms"], help="Channel type")
+    p_s_add.add_argument("--dest", required=True, help="Email address or phone number")
+    p_s_add.add_argument("--topics", help="Comma-separated topic subscriptions")
+
+    p_s_unsub = subs_subparsers.add_parser("unsubscribe", help="Unsubscribe a contact")
+    p_s_unsub.add_argument(
+        "--channel", required=True, choices=["email", "sms"], help="Channel type"
+    )
+    p_s_unsub.add_argument("--dest", required=True, help="Email address or phone number")
+
     return parser
 
 
@@ -204,6 +226,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_announce(args=args)
     elif args.command == "bridge":
         return run_bridge(args=args)
+    elif args.command == "subscribers":
+        return run_subscribers(args=args)
     else:
         parser.print_help()
         return 2

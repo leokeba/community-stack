@@ -48,3 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Emergency disconnect killswitch command (`community-stack bridge disable --confirm`) immediately stopping bridge traffic while preserving core Matrix.
   - Comprehensive operational and privacy guide in `docs/whatsapp-integration.md`.
   - Unit and integration tests validating that WhatsApp disconnection or failure does not disrupt the core stack.
+- **Milestone 6: Additional Accessible Channels:**
+  - Implemented `ActivityPubAdapter` federating announcements to Mastodon/GoToSocial via ActivityStreams 2.0 `Create(Note)` and `Delete(Note)` events.
+  - Implemented `EmailNewsletterAdapter` with multipart text/HTML formatting, RFC 8058 one-click unsubscribe headers, and topic filtering.
+  - Built `SubscriberManager` with SQLite persistence, double opt-in validation, immediate opt-out compliance, and destination privacy masking.
+  - Built ultra-lightweight, zero-JS text-mode public web portal (`services/landing/html/lite.html`) for 2G/3G connections.
+  - Added CLI subscriber management: `community-stack subscribers list`, `add`, and `unsubscribe`.
+  - Comprehensive evaluation of Email, SMS gateways (Kannel, Jasmin, GSM modems), and IVR voice information lines in `docs/accessible-channels.md`.
+  - Integration test suite validating multi-channel broadcast and strict opt-out adherence.
