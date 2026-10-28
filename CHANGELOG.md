@@ -124,3 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Agent operations `health.get` (disk space, latest backup age, certificate expiry for the web and Matrix domains, container state and health) and `logs.get` (last 50, 200 or 500 lines of one service).
   - Logs are redacted in the agent: `.env` values, saved channel credentials, bearer tokens and Telegram bot tokens.
   - Console Health page for owners and admins.
+- **Roadmap Phase 1: Email newsletter through listmonk:**
+  - listmonk connector on the Channels page (address, API user and token, list IDs) with a connection test that checks the lists exist.
+  - Each announcement becomes one Markdown campaign, with its image and a link to the online version, started immediately; the announcement ID in the campaign name makes retries reuse it instead of sending twice.
+  - Edits send one "Update" email per revision and withdrawals one correction email.

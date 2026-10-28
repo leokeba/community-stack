@@ -73,8 +73,8 @@ which the announcement page points out.
 
 ### Connecting channels
 
-Owners and admins connect Mastodon, Bluesky, a Telegram channel, Discord and
-Slack on the console's **Channels** page, which lists the steps for each one.
+Owners and admins connect Mastodon, Bluesky, a Telegram channel, Discord,
+Slack and a [listmonk](https://listmonk.app/) newsletter on the console's **Channels** page, which lists the steps for each one.
 Credentials are stored in the announcements database on the server, are never
 shown again after saving, and are deleted on disconnect; leave a secret field
 blank to keep the saved value. "Test connection" checks the credentials without
@@ -87,14 +87,18 @@ on by default and can be turned off on the Settings page.
 | Bluesky | Shortened to 300 characters with a link | Not sent (Bluesky has no edits) | Post deleted |
 | Telegram channel | Shortened to 4,096 characters with a link | Message edited | Message deleted |
 | Discord channel | Shortened to 2,000 characters with a link | Message edited | Message deleted |
-| Slack channel | Shortened to 4,000 characters with a link | Not sent | Not sent |
+| Slack channel | Shortened to 3,000 characters with a link | Not sent | Not sent |
+| Email newsletter (listmonk) | Full text and image, sent to the chosen lists | Follow-up email | Correction email |
 
 Server addresses must use HTTPS and resolve to public addresses, so a
 connection cannot be pointed at services inside the server. Telegram, Discord
 and Slack posts are only retried automatically after a rate-limit refusal; other
 failed posts are not retried, because the platform may already have received
-them. These connectors are tested against recorded API behaviour, not yet
-against live accounts.
+them. listmonk must be reachable over HTTPS from the internet; the connector
+uses an API user and sends one Markdown campaign per announcement, named with
+the announcement ID so a retry reuses the campaign instead of emailing
+everyone twice. These connectors are tested against recorded API behaviour,
+not yet against live accounts.
 
 ### Delivery retries
 

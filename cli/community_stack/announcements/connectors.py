@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.base import ChannelAdapter
+from community_stack.announcements.adapters.listmonk import ListmonkAdapter
 from community_stack.announcements.adapters.messaging import (
     DiscordWebhookAdapter,
     SlackWebhookAdapter,
@@ -84,6 +85,23 @@ def _validate_webhook(name: str, hosts: set[str], path_prefix: str):
     return validate
 
 
+def _validate_listmonk(values: dict[str, str]) -> dict[str, str]:
+    url = values.get("base_url", "").strip().rstrip("/")
+    http.assert_public_https(url)
+    user = values.get("api_user", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,64}", user):
+        raise ValueError("Enter the API user's name exactly as listmonk shows it.")
+    lists = [item.strip() for item in values.get("list_ids", "").split(",") if item.strip()]
+    if not lists or len(lists) > 10 or not all(item.isdigit() for item in lists):
+        raise ValueError("Enter one or more list IDs as numbers, separated by commas.")
+    return {
+        "base_url": url,
+        "api_user": user,
+        "api_token": _token(values, "api_token", "The API token"),
+        "list_ids": ", ".join(lists),
+    }
+
+
 CONNECTORS: dict[str, ConnectorType] = {
     connector.kind: connector
     for connector in (
@@ -158,6 +176,32 @@ CONNECTORS: dict[str, ConnectorType] = {
                 "/api/webhooks/",
             ),
             build=lambda c: DiscordWebhookAdapter(c["webhook_url"]),
+        ),
+        ConnectorType(
+            kind="listmonk",
+            label="Email newsletter (listmonk)",
+            steps=(
+                "In listmonk, open Admin > Users and add an API user that can send campaigns and read lists.",
+                "Copy the API token listmonk shows once after creating the user.",
+                "Under Lists, note the ID of each list that should receive announcements.",
+            ),
+            fields=(
+                ConnectorField(
+                    "base_url", "listmonk address", placeholder="https://lists.example.org"
+                ),
+                ConnectorField("api_user", "API user"),
+                ConnectorField("api_token", "API token", secret=True),
+                ConnectorField("list_ids", "List IDs", placeholder="1, 3"),
+            ),
+            validate=_validate_listmonk,
+            build=lambda c: ListmonkAdapter(
+                c["base_url"],
+                c["api_user"],
+                c["api_token"],
+                [int(i) for i in c["list_ids"].split(",")],
+            ),
+            caveat="Emails go to the whole list as soon as an announcement is published. "
+            "Edits and withdrawals send a follow-up email, because email cannot be unsent.",
         ),
         ConnectorType(
             kind="slack",
