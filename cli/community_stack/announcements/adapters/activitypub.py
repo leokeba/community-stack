@@ -46,6 +46,7 @@ class ActivityPubAdapter(ChannelAdapter):
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
             label="Fediverse (ActivityPub)",
+            supports_media=True,
             update_mode=UpdateMode.IN_PLACE,
             withdraw_mode=WithdrawMode.DELETE,
         )
@@ -94,6 +95,19 @@ class ActivityPubAdapter(ChannelAdapter):
             "url": announcement.canonical_url or note_id,
             "tag": [{"type": "Hashtag", "name": f"#{tag}"} for tag in announcement.tags],
         }
+        image = announcement.image
+        image_url = image.public_url(announcement.canonical_url) if image else None
+        if image_url:
+            note["attachment"] = [
+                {
+                    "type": "Image",
+                    "mediaType": image.content_type,
+                    "url": image_url,
+                    "name": image.alt,
+                    "width": image.width,
+                    "height": image.height,
+                }
+            ]
 
         activity = {
             "@context": "https://www.w3.org/ns/activitystreams",

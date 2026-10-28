@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import secrets
 import socket
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,6 +20,38 @@ from community_stack.announcements.models import Announcement
 Transport = Callable[[str, str, dict[str, str], Any], tuple[int, Any]]
 
 TIMEOUT_SECONDS = 15
+
+
+@dataclass(frozen=True)
+class Multipart:
+    """A multipart/form-data payload: text fields plus (field, filename, type, bytes) files."""
+
+    fields: dict[str, str]
+    files: tuple[tuple[str, str, str, bytes], ...]
+
+    def encode(self) -> tuple[bytes, str]:
+        boundary = secrets.token_hex(16)
+        parts = []
+        for name, value in self.fields.items():
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n".encode()
+            )
+        for name, filename, content_type, content in self.files:
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
+                f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode()
+                + content
+                + b"\r\n"
+            )
+        parts.append(f"--{boundary}--\r\n".encode())
+        return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+@dataclass(frozen=True)
+class RawBody:
+    content: bytes
+    content_type: str
 
 
 class UnsafeURLError(ValueError):
@@ -60,10 +94,16 @@ def send(method: str, url: str, headers: dict[str, str], payload: Any) -> tuple[
         assert_public_https(url)
     except UnsafeURLError as exc:
         return 0, {"error": str(exc)}
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request_headers = {"User-Agent": "community-stack", **headers}
-    if data is not None:
+    if isinstance(payload, Multipart):
+        data, request_headers["Content-Type"] = payload.encode()
+    elif isinstance(payload, RawBody):
+        data, request_headers["Content-Type"] = payload.content, payload.content_type
+    elif payload is not None:
+        data = json.dumps(payload).encode("utf-8")
         request_headers.setdefault("Content-Type", "application/json")
+    else:
+        data = None
     request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:

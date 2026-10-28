@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import shutil
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -50,6 +51,7 @@ class WebFeedAdapter(ChannelAdapter):
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
             label="Public web feed",
+            supports_media=True,
             update_mode=UpdateMode.IN_PLACE,
             withdraw_mode=WithdrawMode.DELETE,
         )
@@ -81,6 +83,7 @@ class WebFeedAdapter(ChannelAdapter):
                 announcement.canonical_url = self.canonical_url_for(announcement)
         active.sort(key=lambda a: a.published_at, reverse=True)
 
+        self._publish_images(active)
         self._generate_html(active)
         active_ids = {announcement.id for announcement in active}
         for announcement in announcements:
@@ -91,6 +94,30 @@ class WebFeedAdapter(ChannelAdapter):
         self._generate_rss(active)
         self._generate_atom(active)
         self._generate_json_feed(active)
+
+    def _publish_images(self, announcements: list[Announcement]) -> None:
+        """Copy published announcements' images to the public feed and remove all others."""
+        media_dir = self.output_dir / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        wanted = {a.image.filename: a.image for a in announcements if a.image}
+        for existing in media_dir.iterdir():
+            if existing.name not in wanted:
+                existing.unlink(missing_ok=True)
+        for filename, image in wanted.items():
+            target = media_dir / filename
+            if not target.exists() and image.path.is_file():
+                shutil.copyfile(image.path, target)
+
+    @staticmethod
+    def _figure(announcement: Announcement, src: str) -> str:
+        image = announcement.image
+        if not image:
+            return ""
+        return (
+            f'<figure><img src="{html.escape(src, quote=True)}" alt="{html.escape(image.alt, quote=True)}" '
+            f'width="{image.width}" height="{image.height}" loading="lazy" '
+            'style="max-width:100%;height:auto"></figure>'
+        )
 
     def _generate_html(self, announcements: list[Announcement]) -> None:
         items_html = ""
@@ -107,6 +134,7 @@ class WebFeedAdapter(ChannelAdapter):
                   {author_badge}
                 </div>
               </header>
+              {self._figure(a, f"media/{a.image.filename}" if a.image else "")}
               <div class="body">
                 {render_html(a.body)}
               </div>
@@ -156,6 +184,11 @@ class WebFeedAdapter(ChannelAdapter):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(announcement.title)} - {html.escape(self.community_name)}</title>
   <link rel="canonical" href="{html.escape(self.canonical_url_for(announcement))}">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="{html.escape(announcement.title, quote=True)}">
+  <meta property="og:description" content="{html.escape(to_plain_text(announcement.body)[:200], quote=True)}">
+  <meta property="og:url" content="{html.escape(self.canonical_url_for(announcement), quote=True)}">
+  {self._og_image(announcement)}
 </head>
 <body>
   <main>
@@ -165,6 +198,7 @@ class WebFeedAdapter(ChannelAdapter):
       <time datetime="{html.escape(announcement.published_at)}">{html.escape(announcement.published_at[:10])}</time>
       {"<p>Updated <time datetime='" + html.escape(announcement.updated_at) + "'>" + html.escape(announcement.updated_at[:10]) + "</time></p>" if announcement.updated_at != announcement.published_at else ""}
       {author}
+      {self._figure(announcement, f"/feed/media/{announcement.image.filename}" if announcement.image else "")}
       <div>{body}</div>
     </article>
     <nav aria-label="Announcement feeds">
@@ -180,6 +214,15 @@ class WebFeedAdapter(ChannelAdapter):
             detail_path = self.output_dir / "announcements" / announcement.id / "index.html"
             detail_path.parent.mkdir(parents=True, exist_ok=True)
             detail_path.write_text(page, encoding="utf-8")
+
+    def _og_image(self, announcement: Announcement) -> str:
+        if not announcement.image:
+            return ""
+        url = f"{self.base_url}/feed/media/{announcement.image.filename}"
+        return (
+            f'<meta property="og:image" content="{html.escape(url, quote=True)}">\n'
+            f'  <meta property="og:image:alt" content="{html.escape(announcement.image.alt, quote=True)}">'
+        )
 
     def _generate_rss(self, announcements: list[Announcement]) -> None:
         rss = ET.Element("rss", version="2.0")
@@ -286,6 +329,7 @@ class WebFeedAdapter(ChannelAdapter):
                     "date_published": a.published_at,
                     "date_modified": a.updated_at,
                     "author": {"name": a.author} if a.author else None,
+                    "image": f"{self.base_url}/feed/media/{a.image.filename}" if a.image else None,
                 }
                 for a in announcements
             ],

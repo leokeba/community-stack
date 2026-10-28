@@ -46,6 +46,9 @@ class Announcement:
     scheduled_at: str | None = None
     # Optional text to send instead of title + body, keyed by channel name.
     channel_text: dict[str, str] = field(default_factory=dict)
+    image_id: str | None = None
+    # Filled in by storage from the media table; not part of the announcement record.
+    image: Any = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.status, str) and not isinstance(self.status, AnnouncementStatus):
@@ -114,6 +117,7 @@ class Announcement:
     def to_dict(self) -> dict[str, Any]:
         """Convert announcement to standard dictionary representation."""
         data = asdict(self)
+        data.pop("image", None)
         data["status"] = self.status.value
         return data
 

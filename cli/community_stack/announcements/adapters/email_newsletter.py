@@ -48,8 +48,20 @@ class EmailNewsletterAdapter(ChannelAdapter):
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
             label="Email newsletter",
+            supports_media=True,
             update_mode=UpdateMode.FOLLOW_UP,
             withdraw_mode=WithdrawMode.NOTICE,
+        )
+
+    @staticmethod
+    def _image_html(announcement: Announcement) -> str:
+        image = announcement.image
+        url = image.public_url(announcement.canonical_url) if image else None
+        if not url:
+            return ""
+        return (
+            f'<p><img src="{html.escape(url, quote=True)}" alt="{html.escape(image.alt, quote=True)}" '
+            f'width="{min(image.width, 600)}" style="max-width:100%;height:auto"></p>'
         )
 
     def build_email_message(self, announcement: Announcement) -> EmailMessage:
@@ -73,6 +85,7 @@ class EmailNewsletterAdapter(ChannelAdapter):
 <html>
 <body>
   <h2>📢 {html.escape(announcement.title)}</h2>
+  {self._image_html(announcement)}
   {render_html(announcement.body)}
   {"<p><em>— " + html.escape(announcement.author) + "</em></p>" if announcement.author else ""}
   <hr>

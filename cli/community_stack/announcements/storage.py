@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from community_stack.announcements.media import MediaImage, new_media_id
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 
 
@@ -16,6 +17,7 @@ class AnnouncementStorage:
     def __init__(self, db_path: Path | str = "data/announcements/announcements.db") -> None:
         self.db_path = Path(db_path).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.media_dir = self.db_path.parent / "media"
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -78,6 +80,8 @@ class AnnouncementStorage:
 
             if "scheduled_at" not in announcement_columns:
                 conn.execute("ALTER TABLE announcements ADD COLUMN scheduled_at TEXT")
+            if "image_id" not in announcement_columns:
+                conn.execute("ALTER TABLE announcements ADD COLUMN image_id TEXT")
             if "channel_text_json" not in announcement_columns:
                 conn.execute(
                     "ALTER TABLE announcements ADD COLUMN channel_text_json TEXT NOT NULL DEFAULT '{}'"
@@ -121,6 +125,19 @@ class AnnouncementStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS delivery_attempts_announcement_idx
                 ON delivery_attempts (announcement_id, attempted_at, attempt_id);
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS media (
+                    id TEXT PRIMARY KEY,
+                    announcement_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    width INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    alt_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    created_by TEXT
+                );
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS channel_connections (
@@ -173,8 +190,8 @@ class AnnouncementStorage:
                 INSERT INTO announcements (
                     id, title, body, published_at, language, status,
                     canonical_url, expires_at, audience, author, tags_json,
-                    created_at, updated_at, scheduled_at, channel_text_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, scheduled_at, channel_text_json, image_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     body=excluded.body,
@@ -188,7 +205,8 @@ class AnnouncementStorage:
                     tags_json=excluded.tags_json,
                     updated_at=excluded.updated_at,
                     scheduled_at=excluded.scheduled_at,
-                    channel_text_json=excluded.channel_text_json
+                    channel_text_json=excluded.channel_text_json,
+                    image_id=excluded.image_id
                 ;
                 """,
                 (
@@ -207,9 +225,45 @@ class AnnouncementStorage:
                     now,
                     ann.scheduled_at,
                     json.dumps(ann.channel_text),
+                    ann.image_id,
                 ),
             )
             conn.commit()
+
+    def _from_row(self, conn: sqlite3.Connection, row: sqlite3.Row) -> Announcement:
+        announcement = Announcement(
+            id=row["id"],
+            title=row["title"],
+            body=row["body"],
+            published_at=row["published_at"],
+            language=row["language"],
+            status=AnnouncementStatus(row["status"]),
+            canonical_url=row["canonical_url"],
+            expires_at=row["expires_at"],
+            audience=row["audience"],
+            author=row["author"],
+            tags=json.loads(row["tags_json"]),
+            updated_at=row["updated_at"],
+            scheduled_at=row["scheduled_at"],
+            channel_text=json.loads(row["channel_text_json"] or "{}"),
+            image_id=row["image_id"],
+        )
+        if announcement.image_id:
+            announcement.image = self._media(conn, announcement.image_id)
+        return announcement
+
+    def _media(self, conn: sqlite3.Connection, media_id: str) -> MediaImage | None:
+        row = conn.execute("SELECT * FROM media WHERE id = ?", (media_id,)).fetchone()
+        if row is None:
+            return None
+        return MediaImage(
+            id=row["id"],
+            path=self.media_dir / row["filename"],
+            alt=row["alt_text"],
+            content_type=row["content_type"],
+            width=row["width"],
+            height=row["height"],
+        )
 
     def get_announcement(self, ann_id: str) -> Announcement | None:
         """Fetch announcement by unique ID."""
@@ -221,22 +275,7 @@ class AnnouncementStorage:
             row = cursor.fetchone()
             if not row:
                 return None
-            return Announcement(
-                id=row["id"],
-                title=row["title"],
-                body=row["body"],
-                published_at=row["published_at"],
-                language=row["language"],
-                status=AnnouncementStatus(row["status"]),
-                canonical_url=row["canonical_url"],
-                expires_at=row["expires_at"],
-                audience=row["audience"],
-                author=row["author"],
-                tags=json.loads(row["tags_json"]),
-                updated_at=row["updated_at"],
-                scheduled_at=row["scheduled_at"],
-                channel_text=json.loads(row["channel_text_json"] or "{}"),
-            )
+            return self._from_row(conn, row)
 
     def list_announcements(
         self,
@@ -261,24 +300,7 @@ class AnnouncementStorage:
         with self._get_connection() as conn:
             cursor = conn.execute(query, tuple(params))
             for row in cursor.fetchall():
-                results.append(
-                    Announcement(
-                        id=row["id"],
-                        title=row["title"],
-                        body=row["body"],
-                        published_at=row["published_at"],
-                        language=row["language"],
-                        status=AnnouncementStatus(row["status"]),
-                        canonical_url=row["canonical_url"],
-                        expires_at=row["expires_at"],
-                        audience=row["audience"],
-                        author=row["author"],
-                        tags=json.loads(row["tags_json"]),
-                        updated_at=row["updated_at"],
-                        scheduled_at=row["scheduled_at"],
-                        channel_text=json.loads(row["channel_text_json"] or "{}"),
-                    )
-                )
+                results.append(self._from_row(conn, row))
         return results
 
     def record_delivery(
@@ -598,3 +620,63 @@ class AnnouncementStorage:
     def delete_connection(self, kind: str) -> None:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM channel_connections WHERE kind = ?", (kind,))
+
+    def save_image(self, announcement_id: str, image, alt: str, actor: str | None) -> MediaImage:
+        """Store a processed image and attach it to the announcement, replacing any old one."""
+        self.media_dir.mkdir(mode=0o750, parents=True, exist_ok=True)
+        media_id = new_media_id()
+        filename = f"{media_id}.{image.extension}"
+        (self.media_dir / filename).write_bytes(image.content)
+        with self._get_connection() as conn:
+            previous = conn.execute(
+                "SELECT image_id FROM announcements WHERE id = ?", (announcement_id,)
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO media (id, announcement_id, filename, content_type, width, height,
+                    alt_text, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    media_id,
+                    announcement_id,
+                    filename,
+                    image.content_type,
+                    image.width,
+                    image.height,
+                    alt,
+                    datetime.now(timezone.utc).isoformat(),
+                    actor,
+                ),
+            )
+            conn.execute(
+                "UPDATE announcements SET image_id = ? WHERE id = ?", (media_id, announcement_id)
+            )
+            if previous and previous["image_id"]:
+                self._delete_media(conn, previous["image_id"])
+            return self._media(conn, media_id)
+
+    def set_image_alt(self, media_id: str, alt: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE media SET alt_text = ? WHERE id = ?", (alt, media_id))
+
+    def remove_image(self, announcement_id: str) -> None:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT image_id FROM announcements WHERE id = ?", (announcement_id,)
+            ).fetchone()
+            conn.execute(
+                "UPDATE announcements SET image_id = NULL WHERE id = ?", (announcement_id,)
+            )
+            if row and row["image_id"]:
+                self._delete_media(conn, row["image_id"])
+
+    def get_media(self, media_id: str) -> MediaImage | None:
+        with self._get_connection() as conn:
+            return self._media(conn, media_id)
+
+    def _delete_media(self, conn: sqlite3.Connection, media_id: str) -> None:
+        row = conn.execute("SELECT filename FROM media WHERE id = ?", (media_id,)).fetchone()
+        conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
+        if row:
+            (self.media_dir / row["filename"]).unlink(missing_ok=True)

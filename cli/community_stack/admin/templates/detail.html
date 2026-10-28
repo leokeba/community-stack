@@ -6,8 +6,40 @@
 <p class="muted">Status: <strong>{{ announcement.status.value }}</strong> · {{ announcement.published_at[:10] }}</p>
 <article>
   {% if announcement.author %}<p><strong>By {{ announcement.author }}</strong></p>{% endif %}
+  {% if announcement.image %}
+  <figure>
+    <img src="/admin/media/{{ announcement.image.id }}" alt="{{ announcement.image.alt }}" width="{{ announcement.image.width }}" height="{{ announcement.image.height }}" style="max-width:100%;height:auto">
+    <figcaption class="muted">Description: {{ announcement.image.alt }}</figcaption>
+  </figure>
+  {% endif %}
   <div>{{ body_html }}</div>
 </article>
+{% if perms.edit and announcement.status.value in ["draft", "scheduled"] %}
+<section class="card" aria-labelledby="image-heading">
+  <h2 id="image-heading">Image</h2>
+  {% if announcement.image %}
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/image/alt">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="image-alt">Description for people who cannot see the image</label>
+    <textarea id="image-alt" name="alt" maxlength="1000" rows="2" required>{{ announcement.image.alt }}</textarea>
+    <p><button type="submit">Save description</button></p>
+  </form>
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/image/remove">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p><button type="submit">Remove image</button></p>
+  </form>
+  {% endif %}
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/image" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="image-file">{{ "Replace the image" if announcement.image else "Add an image" }} (JPEG, PNG, WebP or GIF, up to 10 MB)</label>
+    <input id="image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required>
+    <label for="new-image-alt">Description for people who cannot see the image</label>
+    <textarea id="new-image-alt" name="alt" maxlength="1000" rows="2" required></textarea>
+    <p class="muted">Location and camera details are removed from the file, and large images are resized.</p>
+    <p><button type="submit">Upload image</button></p>
+  </form>
+</section>
+{% endif %}
 {% if perms.edit and announcement.status.value != "withdrawn" %}
 <p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
 {% endif %}
@@ -18,7 +50,7 @@
   <tbody>
   {% for check in checks %}
   <tr>
-    <td>{{ check.capabilities.label }}<details><summary>What is sent</summary><pre style="white-space: pre-wrap">{{ check.preview }}</pre></details></td>
+    <td>{{ check.capabilities.label }}{% if announcement.image and not check.capabilities.supports_media %}<br><span class="muted">The image is not sent to this channel.</span>{% endif %}<details><summary>What is sent</summary><pre style="white-space: pre-wrap">{{ check.preview }}</pre></details></td>
     <td>{% if check.over_limit and check.capabilities.shortens_long_text %}{{ check.text_length }} characters: shortened to {{ check.capabilities.max_text_length }} with a link to the full announcement{% elif check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
     <td>{{ check.capabilities.update_description }}</td>
     <td>{{ check.capabilities.withdraw_description }}</td>

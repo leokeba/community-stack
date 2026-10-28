@@ -15,7 +15,13 @@ from typing import Any
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -36,6 +42,13 @@ from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS, merge_values
 from community_stack.announcements.formatting import render_html
+from community_stack.announcements.media import (
+    MAX_UPLOAD_BYTES,
+    MEDIA_ID,
+    MediaError,
+    process_image,
+    validate_alt,
+)
 from community_stack.announcements.models import (
     Announcement,
     AnnouncementStatus,
@@ -413,6 +426,79 @@ def create_app(
             title=announcement.title,
         )
         return RedirectResponse(f"/admin/announcements/{announcement.id}", status_code=303)
+
+    def editable_announcement(announcement_id: str):
+        try:
+            announcement = publisher.preview(announcement_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Announcement not found.") from None
+        if announcement.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+            raise HTTPException(
+                status_code=409, detail="Images can only be changed before publication."
+            )
+        return announcement
+
+    @app.post("/admin/announcements/{announcement_id}/image")
+    async def upload_image(request: Request, announcement_id: str) -> Response:
+        session = require(request, "edit")
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES + 65536:
+            raise HTTPException(status_code=413, detail="Images must be 10 MB or smaller.")
+        form = await request.form()
+        if not tokens_match(session["csrf_token"], str(form.get("csrf_token", ""))):
+            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+        editable_announcement(announcement_id)
+        upload = form.get("image")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="Choose an image to upload.")
+        try:
+            alt = validate_alt(str(form.get("alt", "")))
+            data = await upload.read(MAX_UPLOAD_BYTES + 1)
+            processed = await run_in_threadpool(process_image, data)
+        except MediaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        image = storage.save_image(announcement_id, processed, alt, session["username"])
+        audit(
+            request,
+            session["username"],
+            "announcement.image_added",
+            announcement_id,
+            width=image.width,
+            height=image.height,
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/announcements/{announcement_id}/image/alt")
+    async def change_image_alt(request: Request, announcement_id: str) -> Response:
+        session, form = await checked_form(request, "edit")
+        announcement = editable_announcement(announcement_id)
+        if not announcement.image:
+            raise HTTPException(status_code=404, detail="This announcement has no image.")
+        try:
+            storage.set_image_alt(announcement.image.id, validate_alt(form.get("alt", "")))
+        except MediaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(request, session["username"], "announcement.image_described", announcement_id)
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/announcements/{announcement_id}/image/remove")
+    async def remove_image(request: Request, announcement_id: str) -> Response:
+        session, _ = await checked_form(request, "edit")
+        editable_announcement(announcement_id)
+        storage.remove_image(announcement_id)
+        audit(request, session["username"], "announcement.image_removed", announcement_id)
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.get("/admin/media/{media_id}")
+    async def media(request: Request, media_id: str) -> Response:
+        require(request, "view")
+        image = storage.get_media(media_id) if MEDIA_ID.fullmatch(media_id) else None
+        if image is None or not image.path.is_file():
+            raise HTTPException(status_code=404, detail="Image not found.")
+        return FileResponse(
+            image.path,
+            media_type=image.content_type,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.post("/admin/preview")
     async def preview(request: Request) -> Response:

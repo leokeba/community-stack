@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from urllib.parse import quote
 
 from community_stack.announcements.adapters import http
@@ -17,7 +18,8 @@ from community_stack.announcements.models import Announcement
 
 TELEGRAM_MAX_CHARACTERS = 4096
 DISCORD_MAX_CHARACTERS = 2000
-SLACK_MAX_CHARACTERS = 4000
+# Slack section blocks, used to show an image under the text, hold 3,000 characters.
+SLACK_MAX_CHARACTERS = 3000
 # Announcement text must never ping @everyone or roles in Discord.
 DISCORD_NO_MENTIONS = {"parse": []}
 
@@ -144,6 +146,7 @@ class DiscordWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
         return ChannelCapabilities(
             label="Discord channel",
             max_text_length=DISCORD_MAX_CHARACTERS,
+            supports_media=True,
             shortens_long_text=True,
             custom_text=True,
             update_mode=UpdateMode.IN_PLACE,
@@ -165,9 +168,20 @@ class DiscordWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
         )
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
-        status, body = self._transport(
-            "POST", f"{self.webhook_url}?wait=true", {}, self._message(announcement)
-        )
+        message = self._message(announcement)
+        image = announcement.image
+        if image:
+            # Uploading the file (rather than linking it) lets Discord show the description.
+            message["attachments"] = [
+                {"id": 0, "filename": image.filename, "description": image.alt}
+            ]
+            payload = http.Multipart(
+                {"payload_json": json.dumps(message)},
+                (("files[0]", image.filename, image.content_type, image.read_bytes()),),
+            )
+        else:
+            payload = message
+        status, body = self._transport("POST", f"{self.webhook_url}?wait=true", {}, payload)
         if 200 <= status < 300 and isinstance(body, dict) and body.get("id"):
             return DeliveryResult(success=True, external_id=str(body["id"]), idempotent=True)
         return self._error(status, body, "post", idempotent=_rate_limited(status))
@@ -231,6 +245,7 @@ class SlackWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
         return ChannelCapabilities(
             label="Slack channel",
             max_text_length=SLACK_MAX_CHARACTERS,
+            supports_media=True,
             shortens_long_text=True,
             custom_text=True,
             update_mode=UpdateMode.NONE,
@@ -239,7 +254,18 @@ class SlackWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
         text = slack_escape(self.preview_text(announcement))
-        status, body = self._transport("POST", self.webhook_url, {}, {"text": text})
+        message: dict = {"text": text}
+        image_url = (
+            announcement.image.public_url(announcement.canonical_url)
+            if announcement.image
+            else None
+        )
+        if image_url:
+            message["blocks"] = [
+                {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+                {"type": "image", "image_url": image_url, "alt_text": announcement.image.alt},
+            ]
+        status, body = self._transport("POST", self.webhook_url, {}, message)
         if status == 200:
             return DeliveryResult(success=True, idempotent=True)
         return DeliveryResult(

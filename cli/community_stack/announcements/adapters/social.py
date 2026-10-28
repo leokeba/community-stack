@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -19,6 +20,8 @@ from community_stack.announcements.models import Announcement
 
 MASTODON_MAX_CHARACTERS = 500
 BLUESKY_MAX_CHARACTERS = 300
+BLUESKY_MAX_IMAGE_BYTES = 1_000_000
+MASTODON_MEDIA_POLLS = 10
 TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz"
 
 
@@ -46,6 +49,7 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
         return ChannelCapabilities(
             label="Mastodon",
             max_text_length=MASTODON_MAX_CHARACTERS,
+            supports_media=True,
             shortens_long_text=True,
             custom_text=True,
             update_mode=UpdateMode.IN_PLACE,
@@ -58,12 +62,43 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
             headers["Idempotency-Key"] = idempotency_key
         return self._transport(method, f"{self.instance_url}{path}", headers, payload)
 
-    def _status(self, announcement: Announcement) -> dict:
-        return {
+    def _status(self, announcement: Announcement, media_id: str | None) -> dict:
+        status = {
             "status": self.preview_text(announcement),
             "visibility": "public",
             "language": announcement.language.split("-")[0],
         }
+        if media_id:
+            status["media_ids"] = [media_id]
+        return status
+
+    def _upload_image(self, announcement: Announcement) -> str | DeliveryResult | None:
+        image = announcement.image
+        if not image:
+            return None
+        status, body = self._call(
+            "POST",
+            "/api/v2/media",
+            http.Multipart(
+                {"description": image.alt},
+                (("file", image.filename, image.content_type, image.read_bytes()),),
+            ),
+        )
+        media_id = str(body.get("id", "")) if isinstance(body, dict) else ""
+        if status not in (200, 202) or not media_id:
+            return DeliveryResult(
+                success=False,
+                error=f"Mastodon image upload failed: {http.error_text(status, body)}",
+                retryable=http.retryable(status),
+                idempotent=True,
+            )
+        # Large images are processed in the background; they cannot be attached until done.
+        for _ in range(MASTODON_MEDIA_POLLS if status == 202 else 0):
+            time.sleep(1)
+            poll_status, _ = self._call("GET", f"/api/v1/media/{quote(media_id, safe='')}")
+            if poll_status == 200:
+                break
+        return media_id
 
     def _result(self, status: int, body, idempotent: bool, action: str) -> DeliveryResult:
         if 200 <= status < 300:
@@ -78,11 +113,14 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
         )
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
+        media_id = self._upload_image(announcement)
+        if isinstance(media_id, DeliveryResult):
+            return media_id
         # Mastodon keeps idempotency keys for an hour, so a retry does not post twice.
         status, body = self._call(
             "POST",
             "/api/v1/statuses",
-            self._status(announcement),
+            self._status(announcement, media_id),
             idempotency_key=f"community-stack-{announcement.id}",
         )
         return self._result(status, body, idempotent=True, action="post")
@@ -93,8 +131,13 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
     def update_post(self, announcement: Announcement, external_id: str | None) -> DeliveryResult:
         if not external_id:
             return self.publish(announcement)
+        media_id = self._upload_image(announcement)
+        if isinstance(media_id, DeliveryResult):
+            return media_id
         status, body = self._call(
-            "PUT", f"/api/v1/statuses/{quote(external_id, safe='')}", self._status(announcement)
+            "PUT",
+            f"/api/v1/statuses/{quote(external_id, safe='')}",
+            self._status(announcement, media_id),
         )
         return self._result(status, body, idempotent=True, action="edit")
 
@@ -153,6 +196,7 @@ class BlueskyAdapter(http.ShortTextChannel, ChannelAdapter):
         return ChannelCapabilities(
             label="Bluesky",
             max_text_length=BLUESKY_MAX_CHARACTERS,
+            supports_media=True,
             shortens_long_text=True,
             custom_text=True,
             update_mode=UpdateMode.NONE,
@@ -199,18 +243,53 @@ class BlueskyAdapter(http.ShortTextChannel, ChannelAdapter):
             ]
         return record
 
+    def _image_embed(self, announcement: Announcement, token: str) -> dict | DeliveryResult | None:
+        image = announcement.image
+        if not image:
+            return None
+        content, content_type = image.bytes_within(BLUESKY_MAX_IMAGE_BYTES)
+        status, body = self._transport(
+            "POST",
+            f"{self.service_url}/xrpc/com.atproto.repo.uploadBlob",
+            {"Authorization": f"Bearer {token}"},
+            http.RawBody(content, content_type),
+        )
+        if status != 200 or not isinstance(body, dict) or "blob" not in body:
+            return DeliveryResult(
+                success=False,
+                error=f"Bluesky image upload failed: {http.error_text(status, body)}",
+                retryable=http.retryable(status),
+                idempotent=True,
+            )
+        return {
+            "$type": "app.bsky.embed.images",
+            "images": [
+                {
+                    "alt": image.alt,
+                    "image": body["blob"],
+                    "aspectRatio": {"width": image.width, "height": image.height},
+                }
+            ],
+        }
+
     def publish(self, announcement: Announcement) -> DeliveryResult:
         session = self._session()
         if isinstance(session, DeliveryResult):
             return session
         token, did = session
+        record = self._record(announcement)
+        embed = self._image_embed(announcement, token)
+        if isinstance(embed, DeliveryResult):
+            return embed
+        if embed:
+            record["embed"] = embed
         status, body = self._xrpc(
             "com.atproto.repo.putRecord",
             {
                 "repo": did,
                 "collection": "app.bsky.feed.post",
                 "rkey": deterministic_tid(announcement),
-                "record": self._record(announcement),
+                "record": record,
             },
             token,
         )

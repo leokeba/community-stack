@@ -115,3 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The web feed, Atom and JSON feeds, email, Matrix and ActivityPub get formatted HTML; other channels get plain text without Markdown symbols.
   - Live preview in the editor of the formatted announcement and of the exact text each channel will receive, with character counts and shortening notices.
   - Optional custom text per channel for Mastodon, Bluesky, Telegram, Discord and Slack.
+- **Roadmap Phase 1: Images with descriptions:**
+  - One image per draft or scheduled announcement, uploaded on its page with a required description; JPEG, PNG, WebP or GIF up to 10 MB.
+  - Uploads are checked with Pillow, rotated upright, stripped of EXIF and other metadata (including GPS location), resized to 1600 px, and protected against decompression bombs.
+  - Images are private until publication, copied to the public feed with Open Graph tags when published, and removed when withdrawn.
+  - Mastodon and Bluesky upload the image natively with its description (Bluesky re-encoded under 1 MB); Discord attaches it with its description; Slack, ActivityPub and email reference the public image with its description. Matrix and Telegram do not send images yet.
