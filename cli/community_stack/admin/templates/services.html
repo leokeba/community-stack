@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Services and settings{% endblock %}
+{% block content %}
+<h1>Services and settings</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not agent_available %}
+<div class="panel">
+  <h2>The system agent is not running</h2>
+  <p>Service settings are changed by a separate, privileged agent on the server, so this page never needs direct access to the server itself.</p>
+  <p class="muted">Ask the person who manages the server to install and start it; the steps are in docs/operations.md under "Control agent".</p>
+</div>
+{% elif values %}
+<p>Changes are previewed before they are made. The server takes a backup first, and if a service does not come back healthy the previous settings are restored automatically.</p>
+<form class="card" method="post" action="/admin/services/review">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for setting in settings %}
+  <label for="setting-{{ loop.index }}">{{ setting.label }}{% if setting.dangerous %} (needs your password){% endif %}</label>
+  {% if setting.kind == "bool" %}
+  <select id="setting-{{ loop.index }}" name="setting:{{ setting.key }}">
+    <option value="true" {% if values[setting.key] %}selected{% endif %}>On</option>
+    <option value="false" {% if not values[setting.key] %}selected{% endif %}>Off</option>
+  </select>
+  {% elif setting.kind == "choice" %}
+  <select id="setting-{{ loop.index }}" name="setting:{{ setting.key }}">
+    {% for choice in setting.choices %}<option value="{{ choice }}" {% if values[setting.key] == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}
+  </select>
+  {% elif setting.kind == "int" %}
+  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="number" min="{{ setting.minimum }}" max="{{ setting.maximum }}" value="{{ values[setting.key] }}" required>
+  {% else %}
+  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" list="timezones" value="{{ values[setting.key] }}" required>
+  {% endif %}
+  <p class="muted">{{ setting.help }}</p>
+  {% endfor %}
+  <datalist id="timezones">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
+  <p><button type="submit">Review changes</button></p>
+</form>
+{% if status and status.containers %}
+<h2>Running services</h2>
+<table>
+  <thead><tr><th>Service</th><th>State</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ container.state }}</td><td>{{ container.status }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+<p class="muted">Domains, Matrix registration and federation, and the WhatsApp bridge are still set up from the command line.</p>
+{% endif %}
+{% endblock %}

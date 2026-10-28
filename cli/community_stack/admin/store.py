@@ -390,3 +390,14 @@ class AdminStore:
             event["details"] = json.loads(event.pop("details_json"))
             events.append(event)
         return events
+
+    def has_event(self, action: str, **details: Any) -> bool:
+        """Whether an event with this action and these detail values was ever recorded."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT details_json FROM admin_audit_events WHERE action = ?", (action,)
+            ).fetchall()
+        return any(
+            all(json.loads(row["details_json"]).get(k) == v for k, v in details.items())
+            for row in rows
+        )

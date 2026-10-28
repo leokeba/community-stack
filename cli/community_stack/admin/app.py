@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -28,12 +29,15 @@ from community_stack.admin.store import (
     tokens_match,
 )
 from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
+from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS, merge_values
-from community_stack.announcements.models import ModelValidationError
+from community_stack.announcements.models import AnnouncementStatus, ModelValidationError
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.config import ConfigError, load_config
+from community_stack.config_edit import get_value
 
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
 
@@ -222,11 +226,14 @@ def create_app(
     @app.get("/admin")
     async def dashboard(request: Request) -> Response:
         session = require(request, "view")
+        steps = setup_steps() if can(session["role"], "system") else []
         return render(
             request,
             "dashboard.html",
             page(
                 session,
+                setup_done=sum(step["done"] for step in steps),
+                setup_total=len(steps),
                 announcements=storage.list_announcements(limit=10),
                 failed_count=len(storage.get_failed_deliveries()),
                 queued_count=len(storage.get_active_jobs()),
@@ -866,6 +873,153 @@ def create_app(
         return await run_system_operation(
             request, session, "restore.drill", "Restore drill", form.get("password", "")
         )
+
+    async def services_page(
+        request: Request,
+        session: dict[str, Any],
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        values, status = None, None
+        if agent.available():
+            try:
+                config = await run_in_threadpool(agent.call, "config.get", session["username"])
+                values = config["values"]
+                status = await run_in_threadpool(agent.call, "status.get", session["username"])
+            except (AgentUnavailable, AgentRefused) as exc:
+                error = error or str(exc)
+        return render(
+            request,
+            "services.html",
+            page(
+                session,
+                agent_available=agent.available(),
+                settings=SETTINGS.values(),
+                values=values,
+                status=status,
+                timezones=sorted(available_timezones()),
+                error=error,
+            ),
+            status_code=status_code,
+        )
+
+    def submitted_changes(form: dict[str, str]) -> dict[str, str]:
+        return {key: form[f"setting:{key}"] for key in SETTINGS if f"setting:{key}" in form}
+
+    @app.get("/admin/services")
+    async def services(request: Request) -> Response:
+        return await services_page(request, require(request, "system"))
+
+    @app.post("/admin/services/review")
+    async def review_services(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        changes = submitted_changes(form)
+        try:
+            plan = await run_in_threadpool(
+                agent.call, "config.plan", session["username"], {"changes": changes}
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            return await services_page(request, session, str(exc), 400)
+        if not plan["changes"]:
+            return await services_page(request, session, "Nothing was changed.", 400)
+        applied = {change["key"]: form[f"setting:{change['key']}"] for change in plan["changes"]}
+        return render(
+            request, "services_review.html", page(session, plan=plan, changes=applied, result=None)
+        )
+
+    @app.post("/admin/services/apply")
+    async def apply_services(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        changes = submitted_changes(form)
+        try:
+            result = await run_in_threadpool(
+                agent.call,
+                "config.apply",
+                session["username"],
+                {"changes": changes},
+                form.get("password") or None,
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "system.config.apply",
+                outcome="failed",
+                settings=sorted(changes),
+            )
+            return render(
+                request,
+                "services_review.html",
+                page(session, plan=None, changes=changes, result={"error": str(exc)}),
+                status_code=400,
+            )
+        audit(
+            request,
+            session["username"],
+            "system.config.apply",
+            outcome="succeeded",
+            settings=sorted(changes),
+        )
+        return render(
+            request, "services_review.html", page(session, plan=None, changes={}, result=result)
+        )
+
+    def setup_steps() -> list[dict[str, Any]]:
+        try:
+            config = load_config(config_path) if Path(config_path).is_file() else {}
+        except ConfigError:
+            config = {}
+        managers = [
+            a
+            for a in auth_store.list_accounts()
+            if a["role"] in ("owner", "admin") and not a["disabled_at"]
+        ]
+        published = storage.list_announcements(
+            status=AnnouncementStatus.PUBLISHED, limit=1
+        ) or storage.list_announcements(status=AnnouncementStatus.UPDATED, limit=1)
+        return [
+            {"label": "Create the first owner account", "done": True, "link": None},
+            {
+                "label": "Add a second owner or admin, so the community is never locked out",
+                "done": len(managers) >= 2,
+                "link": "/admin/accounts",
+            },
+            {
+                "label": "Install the system agent on the server",
+                "done": agent.available(),
+                "link": "/admin/system",
+            },
+            {
+                "label": "Set the community time zone",
+                "done": "timezone" in config.get("project", {}),
+                "link": "/admin/services",
+            },
+            {
+                "label": "Turn on encrypted backups",
+                "done": get_value(config, ("operations", "backups", "encryption")) == "restic",
+                "link": "/admin/services",
+            },
+            {
+                "label": "Run a restore drill",
+                "done": auth_store.has_event("system.restore.drill", outcome="succeeded"),
+                "link": "/admin/system",
+            },
+            {
+                "label": "Connect a publishing channel",
+                "done": bool(storage.list_connections()),
+                "link": "/admin/channels",
+            },
+            {
+                "label": "Publish your first announcement",
+                "done": bool(published),
+                "link": "/admin/announcements/new",
+            },
+        ]
+
+    @app.get("/admin/start")
+    async def start(request: Request) -> Response:
+        session = require(request, "system")
+        return render(request, "start.html", page(session, steps=setup_steps()))
 
     @app.get("/admin/audit")
     async def audit_log(request: Request) -> Response:

@@ -104,3 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Long announcements are shortened to each channel's limit with a link to the full announcement; edits and withdrawals use the post ID each channel returned, and channels that cannot edit or delete are skipped instead of reporting a false success.
   - Bluesky posts use a stable record key, and Mastodon posts an idempotency key, so retries cannot post twice; Discord posts never ping, and Slack text is escaped.
   - Connector URLs must be HTTPS and resolve to public addresses, at connection time and before every request.
+- **Roadmap Phase 1: Service settings and setup checklist:**
+  - Console Services page to change the community time zone, backup retention and encryption, and to turn Element and Matrix on or off, through new agent operations `config.get`, `config.plan` and `config.apply`.
+  - Every change is reviewed with the exact configuration diff, then backed up, written in place (keeping comments and the file mounted into containers), applied, health-checked, and rolled back automatically if a service does not come back healthy.
+  - Stopping Matrix requires the person's password, checked by the agent; enabling restic encryption requires restic and `RESTIC_PASSWORD` on the server.
+  - Get started checklist (accounts, agent, time zone, encrypted backups, restore drill, channel, first announcement), linked from the dashboard until complete.
+  - The community time zone is read on each use, so changes apply without restarting the console.

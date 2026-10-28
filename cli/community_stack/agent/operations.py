@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from community_stack import docker
+from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
 
@@ -53,6 +56,10 @@ class AgentContext:
         return self.project_dir / "data" / "announcements" / "announcements.db"
 
     @property
+    def services_dir(self) -> Path:
+        return self.project_dir / "services"
+
+    @property
     def audit_path(self) -> Path:
         return self.project_dir / "data" / "agent" / "audit.log"
 
@@ -68,10 +75,16 @@ class Operation:
     handler: Callable[[AgentContext, dict[str, str]], dict[str, Any]]
     params: tuple[Param, ...] = field(default_factory=tuple)
     summary: str = ""
+    # For structured parameters: validates and returns them, raising OperationError.
+    custom_validate: Callable[[dict], dict] | None = None
+    # For operations whose danger depends on the request, such as stopping Matrix.
+    needs_password: Callable[[dict], bool] | None = None
 
-    def validate(self, params: Any) -> dict[str, str]:
+    def validate(self, params: Any) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise OperationError("Parameters must be an object.")
+        if self.custom_validate is not None:
+            return self.custom_validate(params)
         allowed = {param.name: param for param in self.params}
         unknown = sorted(set(params) - set(allowed))
         if unknown:
@@ -138,6 +151,36 @@ def restore_drill(context: AgentContext, params: dict[str, str]) -> dict[str, An
         shutil.rmtree(target, ignore_errors=True)
 
 
+def _changes_param(params: dict) -> dict[str, Any]:
+    if set(params) != {"changes"}:
+        raise OperationError("Send the settings to change as 'changes'.")
+    try:
+        settings_catalog.parse_changes(params["changes"])
+    except settings_catalog.SettingsError as exc:
+        raise OperationError(str(exc)) from exc
+    return {"changes": params["changes"]}
+
+
+def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
+    return {"values": settings_catalog.current_values(config)}
+
+
+def config_plan(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        plan = settings_catalog.build_plan(context, params["changes"])
+    except settings_catalog.SettingsError as exc:
+        raise OperationError(str(exc)) from exc
+    return settings_catalog.public_plan(plan)
+
+
+def config_apply(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return settings_catalog.apply_changes(context, params["changes"])
+    except settings_catalog.SettingsError as exc:
+        raise OperationError(str(exc)) from exc
+
+
 CATALOG: dict[str, Operation] = {
     op.name: op
     for op in (
@@ -162,6 +205,30 @@ CATALOG: dict[str, Operation] = {
             backup_verify,
             params=(Param("snapshot_id", SNAPSHOT_ID),),
             summary="Check that a snapshot is intact and complete.",
+        ),
+        Operation(
+            "config.get",
+            READ,
+            "system",
+            config_get,
+            summary="Read the settings the console may change.",
+        ),
+        Operation(
+            "config.plan",
+            READ,
+            "system",
+            config_plan,
+            custom_validate=_changes_param,
+            summary="Show what a settings change would do, without doing it.",
+        ),
+        Operation(
+            "config.apply",
+            CHANGE,
+            "system",
+            config_apply,
+            custom_validate=_changes_param,
+            needs_password=lambda params: settings_catalog.requires_password(params["changes"]),
+            summary="Back up, change settings, start or stop services, and roll back on failure.",
         ),
         Operation(
             "restore.drill",

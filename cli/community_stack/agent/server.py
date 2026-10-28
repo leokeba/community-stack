@@ -69,7 +69,9 @@ class AgentService:
         account = read_account(self.context.admin_db_path, actor)
         if account is None or not can(account["role"], operation.permission):
             return self._finish(request, "refused", "This account may not run this operation.")
-        if operation.risk == DANGEROUS:
+        if operation.risk == DANGEROUS or (
+            operation.needs_password is not None and operation.needs_password(params)
+        ):
             refusal = self._check_password(actor, account, request.get("password"))
             if refusal:
                 return self._finish(request, "refused", refusal)

@@ -92,6 +92,26 @@ are listed on the announcement's page under "Scheduled deliveries".
 
 ---
 
+### Services and settings
+
+With the control agent installed, owners and admins change settings on the
+console's **Services** page: the community time zone, how long backups are
+kept, backup encryption, and whether Element and Matrix run. Every change is
+shown as a review first, including the exact lines of `community-stack.yaml`
+that will change. Applying it:
+
+1. takes a safety backup (if that fails, nothing is changed);
+2. saves the previous configuration as `community-stack.yaml.previous` and
+   writes the new one in place, keeping its comments;
+3. starts or stops the affected service and waits up to three minutes for it
+   to be healthy;
+4. restores the previous configuration and service state if it is not.
+
+Stopping Matrix stops all community chat, so it asks for the person's password.
+Domains, Matrix registration and federation, and the WhatsApp bridge are still
+configured from the command line. The **Get started** page lists the remaining
+setup steps, and the dashboard links to it until they are done.
+
 ### Control agent
 
 The admin console's System page (owners and admins) shows service status and

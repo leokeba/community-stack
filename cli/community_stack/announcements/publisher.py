@@ -63,7 +63,6 @@ class AnnouncementPublisher:
     ) -> None:
         self.config_path = Path(config_path)
         self.max_attempts = max_attempts
-        self.timezone = community_timezone(self.config_path)
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
 
@@ -71,6 +70,11 @@ class AnnouncementPublisher:
             self.adapters = adapters
         else:
             self.adapters = self._load_default_adapters()
+
+    @property
+    def timezone(self) -> ZoneInfo:
+        """Read on each use, so a time zone changed from the console applies at once."""
+        return community_timezone(self.config_path)
 
     def _load_default_adapters(self) -> list[ChannelAdapter]:
         adapters: list[ChannelAdapter] = []

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Get started{% endblock %}
+{% block content %}
+<h1>Get started</h1>
+<p>{{ steps|selectattr("done")|list|length }} of {{ steps|length }} steps done.</p>
+<ol>
+{% for step in steps %}
+  <li>{% if step.done %}<span aria-label="Done">✓</span> {{ step.label }}{% else %}{% if step.link %}<a href="{{ step.link }}">{{ step.label }}</a>{% else %}{{ step.label }}{% endif %}{% endif %}</li>
+{% endfor %}
+</ol>
+{% endblock %}

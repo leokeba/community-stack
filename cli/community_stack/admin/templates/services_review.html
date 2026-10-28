@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Review changes{% endblock %}
+{% block content %}
+{% if result %}
+  {% if result.error %}
+  <h1>The change was not made</h1>
+  <p class="error" role="alert">{{ result.error }}</p>
+  {% else %}
+  <h1>Changes applied</h1>
+  <div class="notice" role="status"><ul>{% for step in result.steps %}<li>{{ step }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  <p><a href="/admin/services">Back to services and settings</a></p>
+{% else %}
+<h1>Review changes</h1>
+<table>
+  <thead><tr><th>Setting</th><th>Now</th><th>After</th></tr></thead>
+  <tbody>
+  {% for change in plan.changes %}
+  <tr><td>{{ change.label }}</td><td>{{ change["from"] }}</td><td><strong>{{ change.to }}</strong></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% for warning in plan.warnings %}<p class="error">{{ warning }}</p>{% endfor %}
+<details>
+  <summary>Exact configuration change</summary>
+  <pre>{{ plan.diff }}</pre>
+</details>
+<form class="card" method="post" action="/admin/services/apply">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for key, value in changes.items() %}<input type="hidden" name="setting:{{ key }}" value="{{ value }}">{% endfor %}
+  {% if plan.needs_password %}
+  <label for="apply-password">Confirm with your password</label>
+  <input id="apply-password" name="password" type="password" autocomplete="current-password" required>
+  {% endif %}
+  <p>A backup is taken first. If a service does not come back healthy, the previous settings are restored.</p>
+  <p><button type="submit">Apply changes</button> <a href="/admin/services">Cancel</a></p>
+</form>
+{% endif %}
+{% endblock %}

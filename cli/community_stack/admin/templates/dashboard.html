@@ -2,6 +2,9 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 <h1>Publishing dashboard</h1>
+{% if setup_total and setup_done < setup_total %}
+<p class="notice"><a href="/admin/start">Finish setting up</a>: {{ setup_done }} of {{ setup_total }} steps done.</p>
+{% endif %}
 <p>Delivery failures needing attention: <strong>{{ failed_count }}</strong></p>
 <p>Deliveries waiting for an automatic retry: <strong>{{ queued_count }}</strong></p>
 <p>{% if perms.edit %}<a href="/admin/announcements/new">Create a draft</a> · {% endif %}<a href="/admin/announcements">View all announcements</a></p>
