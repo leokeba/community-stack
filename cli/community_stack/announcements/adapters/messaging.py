@@ -27,8 +27,10 @@ def _rate_limited(status: int) -> bool:
     return status == 429
 
 
-class TelegramAdapter(ChannelAdapter):
+class TelegramAdapter(http.ShortTextChannel, ChannelAdapter):
     """Posts to a Telegram channel through a bot that is an administrator there."""
+
+    max_characters = TELEGRAM_MAX_CHARACTERS
 
     def __init__(
         self, bot_token: str, chat_id: str, transport: http.Transport | None = None
@@ -47,6 +49,7 @@ class TelegramAdapter(ChannelAdapter):
             label="Telegram channel",
             max_text_length=TELEGRAM_MAX_CHARACTERS,
             shortens_long_text=True,
+            custom_text=True,
             update_mode=UpdateMode.IN_PLACE,
             withdraw_mode=WithdrawMode.DELETE,
         )
@@ -72,7 +75,7 @@ class TelegramAdapter(ChannelAdapter):
             "sendMessage",
             {
                 "chat_id": self.chat_id,
-                "text": http.compose_post(announcement, TELEGRAM_MAX_CHARACTERS),
+                "text": self.preview_text(announcement),
             },
         )
         if status == 200 and body.get("ok"):
@@ -92,7 +95,7 @@ class TelegramAdapter(ChannelAdapter):
             {
                 "chat_id": self.chat_id,
                 "message_id": int(external_id),
-                "text": http.compose_post(announcement, TELEGRAM_MAX_CHARACTERS),
+                "text": self.preview_text(announcement),
             },
         )
         if (status == 200 and body.get("ok")) or "message is not modified" in str(
@@ -123,8 +126,10 @@ class TelegramAdapter(ChannelAdapter):
         return HealthResult(ok=False, details=f"Telegram refused: {detail}")
 
 
-class DiscordWebhookAdapter(ChannelAdapter):
+class DiscordWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
     """Posts to a Discord channel through a channel webhook."""
+
+    max_characters = DISCORD_MAX_CHARACTERS
 
     def __init__(self, webhook_url: str, transport: http.Transport | None = None) -> None:
         self.webhook_url = webhook_url.rstrip("/")
@@ -140,13 +145,14 @@ class DiscordWebhookAdapter(ChannelAdapter):
             label="Discord channel",
             max_text_length=DISCORD_MAX_CHARACTERS,
             shortens_long_text=True,
+            custom_text=True,
             update_mode=UpdateMode.IN_PLACE,
             withdraw_mode=WithdrawMode.DELETE,
         )
 
     def _message(self, announcement: Announcement) -> dict:
         return {
-            "content": http.compose_post(announcement, DISCORD_MAX_CHARACTERS),
+            "content": self.preview_text(announcement),
             "allowed_mentions": DISCORD_NO_MENTIONS,
         }
 
@@ -207,8 +213,10 @@ def slack_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-class SlackWebhookAdapter(ChannelAdapter):
+class SlackWebhookAdapter(http.ShortTextChannel, ChannelAdapter):
     """Posts to a Slack channel through an incoming webhook (no edits or deletion)."""
+
+    max_characters = SLACK_MAX_CHARACTERS
 
     def __init__(self, webhook_url: str, transport: http.Transport | None = None) -> None:
         self.webhook_url = webhook_url
@@ -224,12 +232,13 @@ class SlackWebhookAdapter(ChannelAdapter):
             label="Slack channel",
             max_text_length=SLACK_MAX_CHARACTERS,
             shortens_long_text=True,
+            custom_text=True,
             update_mode=UpdateMode.NONE,
             withdraw_mode=WithdrawMode.NONE,
         )
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
-        text = slack_escape(http.compose_post(announcement, SLACK_MAX_CHARACTERS))
+        text = slack_escape(self.preview_text(announcement))
         status, body = self._transport("POST", self.webhook_url, {}, {"text": text})
         if status == 200:
             return DeliveryResult(success=True, idempotent=True)

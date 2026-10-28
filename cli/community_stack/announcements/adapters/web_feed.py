@@ -17,6 +17,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 
@@ -107,7 +108,7 @@ class WebFeedAdapter(ChannelAdapter):
                 </div>
               </header>
               <div class="body">
-                <p>{html.escape(a.body).replace(chr(10), "<br>")}</p>
+                {render_html(a.body)}
               </div>
             </article>
             """
@@ -143,7 +144,7 @@ class WebFeedAdapter(ChannelAdapter):
                 if announcement.author
                 else ""
             )
-            body = html.escape(announcement.body).replace("\n", "<br>\n")
+            body = render_html(announcement.body)
             channel_links = " ".join(
                 f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
                 for label, url in self.channel_links.items()
@@ -212,7 +213,7 @@ class WebFeedAdapter(ChannelAdapter):
             item_guid.text = a.id
 
             item_desc = ET.SubElement(item, "description")
-            item_desc.text = a.body
+            item_desc.text = to_plain_text(a.body)
 
             item_pub = ET.SubElement(item, "pubDate")
             published = self._parse_datetime(a.published_at)
@@ -263,8 +264,8 @@ class WebFeedAdapter(ChannelAdapter):
             e_published = ET.SubElement(entry, "published")
             e_published.text = a.published_at
 
-            content = ET.SubElement(entry, "content", type="text")
-            content.text = a.body
+            content = ET.SubElement(entry, "content", type="html")
+            content.text = render_html(a.body)
 
         tree = ET.ElementTree(feed)
         tree.write(self.output_dir / "atom.xml", encoding="utf-8", xml_declaration=True)
@@ -279,7 +280,8 @@ class WebFeedAdapter(ChannelAdapter):
                 {
                     "id": a.id,
                     "title": a.title,
-                    "content_text": a.body,
+                    "content_text": to_plain_text(a.body),
+                    "content_html": render_html(a.body),
                     "url": a.canonical_url or f"{self.base_url}/feed/announcements.html#{a.id}",
                     "date_published": a.published_at,
                     "date_modified": a.updated_at,

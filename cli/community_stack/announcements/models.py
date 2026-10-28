@@ -44,6 +44,8 @@ class Announcement:
     author: str | None = None
     tags: list[str] = field(default_factory=list)
     scheduled_at: str | None = None
+    # Optional text to send instead of title + body, keyed by channel name.
+    channel_text: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if isinstance(self.status, str) and not isinstance(self.status, AnnouncementStatus):
@@ -87,6 +89,12 @@ class Announcement:
             raise ModelValidationError(
                 "Announcement update time must be an ISO 8601 timestamp."
             ) from exc
+
+        for channel, text in self.channel_text.items():
+            if not re.match(r"^[a-z0-9_]{1,40}$", channel):
+                raise ModelValidationError("Invalid channel name for custom text.")
+            if len(text) > 5_000:
+                raise ModelValidationError("Custom channel text is limited to 5,000 characters.")
 
         if self.scheduled_at:
             try:

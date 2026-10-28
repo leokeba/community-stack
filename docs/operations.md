@@ -47,6 +47,20 @@ always remain. Sign-ins, failed sign-ins, account changes, publishing actions
 and settings changes are recorded with time, account and client address on
 the Activity log page, and kept for about 13 months.
 
+### Writing announcements
+
+Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,
+`- list item` and `[link text](https://…)`. Line breaks are kept as typed. Raw
+HTML is not allowed and is shown as text. The public feed, email, Matrix and
+ActivityPub get the formatted version; Mastodon, Bluesky, Telegram, Discord,
+Slack and WhatsApp get clean plain text without Markdown symbols.
+
+The editor previews the formatted announcement and exactly what each channel
+will receive, with character counts, as you type. For channels with a length
+limit you can write custom text, for example a short version with hashtags for
+Mastodon; leave it empty to send the title and message, shortened with a link
+when too long. The announcement page shows the same previews after saving.
+
 ### Connecting channels
 
 Owners and admins connect Mastodon, Bluesky, a Telegram channel, Discord and

@@ -22,8 +22,10 @@ BLUESKY_MAX_CHARACTERS = 300
 TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz"
 
 
-class MastodonAdapter(ChannelAdapter):
+class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
     """Posts to a Mastodon (or Mastodon API compatible) account with a user access token."""
+
+    max_characters = MASTODON_MAX_CHARACTERS
 
     def __init__(
         self,
@@ -45,6 +47,7 @@ class MastodonAdapter(ChannelAdapter):
             label="Mastodon",
             max_text_length=MASTODON_MAX_CHARACTERS,
             shortens_long_text=True,
+            custom_text=True,
             update_mode=UpdateMode.IN_PLACE,
             withdraw_mode=WithdrawMode.DELETE,
         )
@@ -57,7 +60,7 @@ class MastodonAdapter(ChannelAdapter):
 
     def _status(self, announcement: Announcement) -> dict:
         return {
-            "status": http.compose_post(announcement, MASTODON_MAX_CHARACTERS),
+            "status": self.preview_text(announcement),
             "visibility": "public",
             "language": announcement.language.split("-")[0],
         }
@@ -124,8 +127,10 @@ def deterministic_tid(announcement: Announcement) -> str:
     return "".join(TID_ALPHABET[(value >> shift) & 31] for shift in range(60, -1, -5))
 
 
-class BlueskyAdapter(ChannelAdapter):
+class BlueskyAdapter(http.ShortTextChannel, ChannelAdapter):
     """Posts to a Bluesky account using an app password."""
+
+    max_characters = BLUESKY_MAX_CHARACTERS
 
     def __init__(
         self,
@@ -149,6 +154,7 @@ class BlueskyAdapter(ChannelAdapter):
             label="Bluesky",
             max_text_length=BLUESKY_MAX_CHARACTERS,
             shortens_long_text=True,
+            custom_text=True,
             update_mode=UpdateMode.NONE,
             withdraw_mode=WithdrawMode.DELETE,
         )
@@ -171,9 +177,8 @@ class BlueskyAdapter(ChannelAdapter):
             idempotent=True,
         )
 
-    @staticmethod
-    def _record(announcement: Announcement) -> dict:
-        text = http.compose_post(announcement, BLUESKY_MAX_CHARACTERS)
+    def _record(self, announcement: Announcement) -> dict:
+        text = self.preview_text(announcement)
         record = {
             "$type": "app.bsky.feed.post",
             "text": text,

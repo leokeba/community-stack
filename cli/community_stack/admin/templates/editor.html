@@ -3,18 +3,36 @@
 {% block content %}
 <h1>{{ "Edit announcement" if announcement else "Create a draft" }}</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-<form class="card" method="post" action="{{ '/admin/announcements/' ~ announcement.id ~ '/update' if announcement else '/admin/announcements/new' }}">
+<form class="card" method="post" data-preview-url="/admin/preview" action="{{ '/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new' }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label for="title">Announcement title</label>
   <input id="title" name="title" type="text" maxlength="200" value="{{ announcement.title if announcement else '' }}" required>
   <label for="body">Message</label>
-  <textarea id="body" name="body" maxlength="50000" required>{{ announcement.body if announcement else '' }}</textarea>
+  <textarea id="body" name="body" maxlength="50000" aria-describedby="body-help" required>{{ announcement.body if announcement else '' }}</textarea>
+  <p id="body-help" class="muted">Formatting: <code>## Heading</code>, <code>**bold**</code>, <code>*italic*</code>, <code>- list item</code>, <code>[link text](https://…)</code>. Channels without formatting get clean plain text.</p>
   <label for="author">Author or group (optional)</label>
   <input id="author" name="author" type="text" value="{{ announcement.author if announcement else '' }}">
-  {% if not announcement or announcement.status.value in ["draft", "scheduled"] %}
+  {% if not announcement or announcement.status.value in ["draft", "scheduled"] or announcement.status is not defined %}
   <label for="tags">Tags, separated by commas (optional)</label>
-  <input id="tags" name="tags" type="text" value="{{ announcement.tags|join(', ') if announcement else '' }}">
+  <input id="tags" name="tags" type="text" value="{{ announcement.tags|join(', ') if announcement and announcement.tags is not string else (announcement.tags if announcement else '') }}">
   {% endif %}
-  <p><button type="submit">{{ "Save changes" if announcement else "Save draft" }}</button></p>
+  {% if custom_channels %}
+  <details {% if custom_channels|selectattr("value")|list %}open{% endif %}>
+    <summary>Custom text per channel (optional)</summary>
+    <p class="muted">Leave empty to send the title and message, shortened with a link if they are too long.</p>
+    {% for channel in custom_channels %}
+    <label for="channel-text-{{ channel.name }}">{{ channel.label }} (up to {{ channel.limit }} characters)</label>
+    <textarea id="channel-text-{{ channel.name }}" name="channel_text:{{ channel.name }}" maxlength="5000" rows="4">{{ channel.value }}</textarea>
+    {% endfor %}
+  </details>
+  {% endif %}
+  <p><button type="submit">{{ "Save changes" if announcement and announcement.id else "Save draft" }}</button></p>
 </form>
+<section aria-labelledby="preview-heading" hidden data-preview-panel>
+  <h2 id="preview-heading">Preview</h2>
+  <article id="live-preview" aria-live="polite"></article>
+  <h3>On each channel</h3>
+  <div id="channel-previews"></div>
+</section>
+<script src="/admin/static/editor.js" defer></script>
 {% endblock %}

@@ -13,6 +13,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.formatting import to_plain_text
 from community_stack.announcements.models import Announcement
 
 # Longest text message WhatsApp accepts, in characters.
@@ -50,7 +51,7 @@ class WhatsAppAnnouncementAdapter(ChannelAdapter):
         )
 
     def render_text(self, announcement: Announcement) -> str:
-        text_body = f"📢 *{announcement.title}*\n\n{announcement.body}"
+        text_body = f"📢 *{announcement.title}*\n\n{to_plain_text(announcement.body)}"
         if announcement.canonical_url:
             text_body += f"\n\nAuthoritative Link: {announcement.canonical_url}"
         if announcement.author:

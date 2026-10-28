@@ -78,6 +78,10 @@ class AnnouncementStorage:
 
             if "scheduled_at" not in announcement_columns:
                 conn.execute("ALTER TABLE announcements ADD COLUMN scheduled_at TEXT")
+            if "channel_text_json" not in announcement_columns:
+                conn.execute(
+                    "ALTER TABLE announcements ADD COLUMN channel_text_json TEXT NOT NULL DEFAULT '{}'"
+                )
 
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(delivery_states)")}
             if "operation" not in columns:
@@ -169,8 +173,8 @@ class AnnouncementStorage:
                 INSERT INTO announcements (
                     id, title, body, published_at, language, status,
                     canonical_url, expires_at, audience, author, tags_json,
-                    created_at, updated_at, scheduled_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, scheduled_at, channel_text_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     body=excluded.body,
@@ -183,7 +187,8 @@ class AnnouncementStorage:
                     author=excluded.author,
                     tags_json=excluded.tags_json,
                     updated_at=excluded.updated_at,
-                    scheduled_at=excluded.scheduled_at
+                    scheduled_at=excluded.scheduled_at,
+                    channel_text_json=excluded.channel_text_json
                 ;
                 """,
                 (
@@ -201,6 +206,7 @@ class AnnouncementStorage:
                     now,
                     now,
                     ann.scheduled_at,
+                    json.dumps(ann.channel_text),
                 ),
             )
             conn.commit()
@@ -229,6 +235,7 @@ class AnnouncementStorage:
                 tags=json.loads(row["tags_json"]),
                 updated_at=row["updated_at"],
                 scheduled_at=row["scheduled_at"],
+                channel_text=json.loads(row["channel_text_json"] or "{}"),
             )
 
     def list_announcements(
@@ -269,6 +276,7 @@ class AnnouncementStorage:
                         tags=json.loads(row["tags_json"]),
                         updated_at=row["updated_at"],
                         scheduled_at=row["scheduled_at"],
+                        channel_text=json.loads(row["channel_text_json"] or "{}"),
                     )
                 )
         return results

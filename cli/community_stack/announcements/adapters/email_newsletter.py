@@ -14,6 +14,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement
 from community_stack.subscriptions.manager import SubscriberManager
 
@@ -59,7 +60,7 @@ class EmailNewsletterAdapter(ChannelAdapter):
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
         # Plain text version
-        plain_body = f"{announcement.title}\n\n{announcement.body}"
+        plain_body = f"{announcement.title}\n\n{to_plain_text(announcement.body)}"
         if announcement.author:
             plain_body += f"\n\n— {announcement.author}"
         plain_body += (
@@ -72,7 +73,7 @@ class EmailNewsletterAdapter(ChannelAdapter):
 <html>
 <body>
   <h2>📢 {html.escape(announcement.title)}</h2>
-  <p>{html.escape(announcement.body)}</p>
+  {render_html(announcement.body)}
   {"<p><em>— " + html.escape(announcement.author) + "</em></p>" if announcement.author else ""}
   <hr>
   <p style="font-size: 0.85em; color: #666;">

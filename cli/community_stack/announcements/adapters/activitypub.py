@@ -17,6 +17,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.formatting import render_html
 from community_stack.announcements.models import Announcement
 
 
@@ -78,7 +79,7 @@ class ActivityPubAdapter(ChannelAdapter):
     def build_create_activity(self, announcement: Announcement) -> dict:
         """Construct standard ActivityStreams 2.0 Create(Note) activity."""
         note_id = announcement.canonical_url or f"{self.actor_id}/notes/{announcement.id}"
-        formatted_content = f"<p><strong>{html.escape(announcement.title)}</strong></p><p>{html.escape(announcement.body)}</p>"
+        formatted_content = f"<p><strong>{html.escape(announcement.title)}</strong></p>{render_html(announcement.body)}"
         if announcement.author:
             formatted_content += f"<p><em>— {html.escape(announcement.author)}</em></p>"
 

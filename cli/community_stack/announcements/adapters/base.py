@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 
+from community_stack.announcements.formatting import to_plain_text
 from community_stack.announcements.models import Announcement
 
 
@@ -64,6 +65,7 @@ class ChannelCapabilities:
     max_text_length: int | None = None
     supports_media: bool = False
     shortens_long_text: bool = False
+    custom_text: bool = False
     update_mode: UpdateMode = UpdateMode.NONE
     withdraw_mode: WithdrawMode = WithdrawMode.NONE
 
@@ -83,6 +85,7 @@ class ChannelCheck:
     name: str
     capabilities: ChannelCapabilities
     text_length: int
+    preview: str = ""
 
     @property
     def over_limit(self) -> bool:
@@ -128,8 +131,12 @@ class ChannelAdapter(ABC):
         return ChannelCapabilities(label=self.name)
 
     def render_text(self, announcement: Announcement) -> str:
-        """Plain text this channel will show, used for length checks and previews."""
-        return f"{announcement.title}\n\n{announcement.body}"
+        """The full plain text this channel would send, before any shortening."""
+        return f"{announcement.title}\n\n{to_plain_text(announcement.body)}"
+
+    def preview_text(self, announcement: Announcement) -> str:
+        """Exactly the text this channel will send."""
+        return self.render_text(announcement)
 
     def check(self, announcement: Announcement) -> ChannelCheck:
         """Check an announcement against this channel's limits."""
@@ -137,4 +144,5 @@ class ChannelAdapter(ABC):
             name=self.name,
             capabilities=self.capabilities,
             text_length=len(self.render_text(announcement)),
+            preview=self.preview_text(announcement),
         )

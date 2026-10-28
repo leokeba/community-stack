@@ -110,3 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Stopping Matrix requires the person's password, checked by the agent; enabling restic encryption requires restic and `RESTIC_PASSWORD` on the server.
   - Get started checklist (accounts, agent, time zone, encrypted backups, restore drill, channel, first announcement), linked from the dashboard until complete.
   - The community time zone is read on each use, so changes apply without restarting the console.
+- **Roadmap Phase 1: Editor with formatting and channel previews:**
+  - Announcement messages are Markdown (headings, emphasis, lists, links), rendered with raw HTML disabled; line breaks keep working as before.
+  - The web feed, Atom and JSON feeds, email, Matrix and ActivityPub get formatted HTML; other channels get plain text without Markdown symbols.
+  - Live preview in the editor of the formatted announcement and of the exact text each channel will receive, with character counts and shortening notices.
+  - Optional custom text per channel for Mastodon, Bluesky, Telegram, Discord and Slack.

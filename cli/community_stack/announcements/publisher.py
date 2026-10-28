@@ -155,6 +155,7 @@ class AnnouncementPublisher:
         body: str,
         author: str | None = None,
         tags: list[str] | None = None,
+        channel_text: dict[str, str] | None = None,
     ) -> Announcement:
         """Create and persist a draft without dispatching it to any channel."""
         ann = Announcement(
@@ -163,6 +164,7 @@ class AnnouncementPublisher:
             author=author,
             tags=tags or [],
             status=AnnouncementStatus.DRAFT,
+            channel_text=channel_text or {},
         )
         self.storage.save_announcement(ann)
         return ann
@@ -339,6 +341,7 @@ class AnnouncementPublisher:
         body: str | None = None,
         author: str | None = None,
         tags: list[str] | None = None,
+        channel_text: dict[str, str] | None = None,
     ) -> tuple[Announcement, dict[str, DeliveryResult]]:
         """Update an existing announcement across all channels."""
         ann = self.preview(announcement_id)
@@ -353,6 +356,8 @@ class AnnouncementPublisher:
             ann.author = author
         if tags is not None:
             ann.tags = tags
+        if channel_text is not None:
+            ann.channel_text = channel_text
 
         if ann.status in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
             ann.validate()

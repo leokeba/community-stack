@@ -15,8 +15,10 @@ from typing import Any
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
 
 from community_stack.admin.store import (
@@ -33,7 +35,12 @@ from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS, merge_values
-from community_stack.announcements.models import AnnouncementStatus, ModelValidationError
+from community_stack.announcements.formatting import render_html
+from community_stack.announcements.models import (
+    Announcement,
+    AnnouncementStatus,
+    ModelValidationError,
+)
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import ConfigError, load_config
@@ -46,6 +53,7 @@ PREAUTH_CSRF_COOKIE = "community_admin_csrf"
 LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 WORKER_INTERVAL_SECONDS = 15.0
 DEFAULT_AGENT_SOCKET = "/run/community-stack-agent/agent.sock"
 
@@ -119,6 +127,7 @@ def create_app(
     app = FastAPI(
         title="Community Announcements Admin", docs_url=None, redoc_url=None, lifespan=lifespan
     )
+    app.mount("/admin/static", StaticFiles(directory=STATIC_DIR), name="admin-static")
     app.state.storage = storage
     app.state.auth_store = auth_store
     app.state.publisher = publisher
@@ -218,6 +227,35 @@ def create_app(
 
     def parse_tags(form: dict[str, str]) -> list[str]:
         return [item.strip() for item in form.get("tags", "").split(",") if item.strip()]
+
+    def custom_text_channels():
+        enabled = storage.get_channel_settings()
+        return [
+            adapter
+            for adapter in publisher.adapters
+            if adapter.capabilities.custom_text and enabled.get(adapter.name, True)
+        ]
+
+    def parse_channel_text(form: dict[str, str]) -> dict[str, str]:
+        return {
+            adapter.name: form[f"channel_text:{adapter.name}"].strip()
+            for adapter in custom_text_channels()
+            if form.get(f"channel_text:{adapter.name}", "").strip()
+        }
+
+    def editor_page(session: dict[str, Any], announcement: Any, error: str | None) -> dict:
+        saved = getattr(announcement, "channel_text", None) or {}
+        submitted = announcement if isinstance(announcement, dict) else {}
+        channels = [
+            {
+                "name": adapter.name,
+                "label": adapter.capabilities.label,
+                "limit": adapter.capabilities.max_text_length,
+                "value": submitted.get(f"channel_text:{adapter.name}", saved.get(adapter.name, "")),
+            }
+            for adapter in custom_text_channels()
+        ]
+        return page(session, announcement=announcement, error=error, custom_channels=channels)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -350,7 +388,7 @@ def create_app(
     @app.get("/admin/announcements/new")
     async def new_announcement_page(request: Request) -> Response:
         session = require(request, "edit")
-        return render(request, "editor.html", page(session, announcement=None, error=None))
+        return render(request, "editor.html", editor_page(session, None, None))
 
     @app.post("/admin/announcements/new")
     async def create_announcement(request: Request) -> Response:
@@ -361,13 +399,11 @@ def create_app(
                 body=form.get("body", ""),
                 author=form.get("author") or None,
                 tags=parse_tags(form),
+                channel_text=parse_channel_text(form),
             )
         except ModelValidationError as exc:
             return render(
-                request,
-                "editor.html",
-                page(session, announcement=form, error=str(exc)),
-                status_code=400,
+                request, "editor.html", editor_page(session, form, str(exc)), status_code=400
             )
         audit(
             request,
@@ -377,6 +413,36 @@ def create_app(
             title=announcement.title,
         )
         return RedirectResponse(f"/admin/announcements/{announcement.id}", status_code=303)
+
+    @app.post("/admin/preview")
+    async def preview(request: Request) -> Response:
+        _, form = await checked_form(request, "edit")
+        try:
+            draft = Announcement(
+                title=form.get("title", "").strip() or "(no title yet)",
+                body=form.get("body", "").strip() or "(no message yet)",
+                author=form.get("author") or None,
+                channel_text=parse_channel_text(form),
+            )
+        except ModelValidationError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "html": render_html(draft.body),
+                "channels": [
+                    {
+                        "name": check.name,
+                        "label": check.capabilities.label,
+                        "length": check.text_length,
+                        "limit": check.capabilities.max_text_length,
+                        "over_limit": check.over_limit,
+                        "shortened": check.over_limit and check.capabilities.shortens_long_text,
+                        "preview": check.preview,
+                    }
+                    for check in publisher.channel_checks(draft)
+                ],
+            }
+        )
 
     @app.get("/admin/announcements/{announcement_id}")
     async def announcement_detail(request: Request, announcement_id: str) -> Response:
@@ -398,6 +464,7 @@ def create_app(
             page(
                 session,
                 announcement=announcement,
+                body_html=Markup(render_html(announcement.body)),
                 scheduled_local=scheduled_local,
                 timezone_name=str(publisher.timezone),
                 now_local=datetime.now(publisher.timezone).strftime("%Y-%m-%dT%H:%M"),
@@ -417,7 +484,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         if announcement.status.value == "withdrawn":
             raise HTTPException(status_code=409, detail="Withdrawn announcements cannot be edited.")
-        return render(request, "editor.html", page(session, announcement=announcement, error=None))
+        return render(request, "editor.html", editor_page(session, announcement, None))
 
     @app.post("/admin/announcements/{announcement_id}/update")
     async def update_announcement(request: Request, announcement_id: str) -> Response:
@@ -429,6 +496,7 @@ def create_app(
                 body=form.get("body"),
                 author=form.get("author") or None,
                 tags=parse_tags(form) if "tags" in form else None,
+                channel_text=parse_channel_text(form),
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None

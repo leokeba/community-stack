@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
+from community_stack.announcements.formatting import to_plain_text
 from community_stack.announcements.models import Announcement
 
 # (method, url, headers, json payload) -> (HTTP status or 0 for network errors, decoded body)
@@ -95,10 +96,29 @@ def error_text(status: int, body: Any, *keys: str) -> str:
     return f"HTTP {status}"
 
 
-def compose_post(announcement: Announcement, limit: int) -> str:
-    """Title and body, shortened with a link to the full announcement when too long."""
-    full = f"{announcement.title}\n\n{announcement.body}"
+def channel_text(announcement: Announcement, channel: str | None = None) -> str:
+    """The channel's custom text if one was written, else the title and plain-text body."""
+    custom = announcement.channel_text.get(channel or "", "").strip()
+    return custom or f"{announcement.title}\n\n{to_plain_text(announcement.body)}"
+
+
+def compose_post(announcement: Announcement, limit: int, channel: str | None = None) -> str:
+    """The channel's text, shortened with a link to the full announcement when too long."""
+    full = channel_text(announcement, channel)
     if len(full) <= limit:
         return full
     suffix = f"… {announcement.canonical_url}" if announcement.canonical_url else "…"
     return full[: max(limit - len(suffix), 0)].rstrip() + suffix
+
+
+class ShortTextChannel:
+    """Mixin for channels with a text limit that take custom per-channel text."""
+
+    name: str
+    max_characters: int
+
+    def render_text(self, announcement: Announcement) -> str:
+        return channel_text(announcement, self.name)
+
+    def preview_text(self, announcement: Announcement) -> str:
+        return compose_post(announcement, self.max_characters, self.name)

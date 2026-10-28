@@ -9,6 +9,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from community_stack.announcements.formatting import render_html
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 
@@ -56,7 +57,7 @@ class OfflineArchiveExporter:
                 <span>ID: {html.escape(a.id)}</span> {author_html}
               </div>
               <div class="body">
-                <p>{html.escape(a.body)}</p>
+                {render_html(a.body)}
               </div>
             </article>
             """

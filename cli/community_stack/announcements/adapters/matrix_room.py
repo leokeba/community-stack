@@ -17,6 +17,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement
 
 
@@ -48,7 +49,7 @@ class MatrixRoomAdapter(ChannelAdapter):
         )
 
     def render_text(self, announcement: Announcement) -> str:
-        return f"📢 {announcement.title}\n\n{announcement.body}"
+        return f"📢 {announcement.title}\n\n{to_plain_text(announcement.body)}"
 
     def _http_request(
         self, method: str, path: str, payload: dict | None = None
@@ -86,9 +87,8 @@ class MatrixRoomAdapter(ChannelAdapter):
         txn_id = f"pub_{announcement.id}"
         path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
 
-        formatted_html = (
-            f"<h3>📢 {html.escape(announcement.title)}</h3>"
-            f"<p>{html.escape(announcement.body).replace(chr(10), '<br>')}</p>"
+        formatted_html = f"<h3>📢 {html.escape(announcement.title)}</h3>" + render_html(
+            announcement.body
         )
         if announcement.author:
             formatted_html += f"<p><em>— {html.escape(announcement.author)}</em></p>"
@@ -123,13 +123,12 @@ class MatrixRoomAdapter(ChannelAdapter):
         txn_id = f"upd_{announcement.id}_{revision}"
         path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
 
-        formatted_html = (
-            f"<h3>📢 [UPDATED] {html.escape(announcement.title)}</h3>"
-            f"<p>{html.escape(announcement.body).replace(chr(10), '<br>')}</p>"
+        formatted_html = f"<h3>📢 [UPDATED] {html.escape(announcement.title)}</h3>" + render_html(
+            announcement.body
         )
         payload = {
             "msgtype": "m.notice",
-            "body": f"📢 [UPDATED] {announcement.title}\n\n{announcement.body}",
+            "body": f"📢 [UPDATED] {announcement.title}\n\n{to_plain_text(announcement.body)}",
             "format": "org.matrix.custom.html",
             "formatted_body": formatted_html,
             "org.community_stack.announcement_id": announcement.id,

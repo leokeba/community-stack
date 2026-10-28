@@ -6,7 +6,7 @@
 <p class="muted">Status: <strong>{{ announcement.status.value }}</strong> · {{ announcement.published_at[:10] }}</p>
 <article>
   {% if announcement.author %}<p><strong>By {{ announcement.author }}</strong></p>{% endif %}
-  <div style="white-space: pre-wrap">{{ announcement.body }}</div>
+  <div>{{ body_html }}</div>
 </article>
 {% if perms.edit and announcement.status.value != "withdrawn" %}
 <p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
@@ -18,7 +18,7 @@
   <tbody>
   {% for check in checks %}
   <tr>
-    <td>{{ check.capabilities.label }}</td>
+    <td>{{ check.capabilities.label }}<details><summary>What is sent</summary><pre style="white-space: pre-wrap">{{ check.preview }}</pre></details></td>
     <td>{% if check.over_limit and check.capabilities.shortens_long_text %}{{ check.text_length }} characters: shortened to {{ check.capabilities.max_text_length }} with a link to the full announcement{% elif check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
     <td>{{ check.capabilities.update_description }}</td>
     <td>{{ check.capabilities.withdraw_description }}</td>
