@@ -28,14 +28,6 @@
     proto: tcp
     comment: "HTTPS secure ingress"
 
-- name: Allow Matrix federation port 8448 if federation is enabled
-  community.general.ufw:
-    rule: allow
-    port: "8448"
-    proto: tcp
-    comment: "Matrix direct federation"
-  when: services.matrix.federation | default(false)
-
 - name: Enable UFW firewall
   community.general.ufw:
     state: enabled

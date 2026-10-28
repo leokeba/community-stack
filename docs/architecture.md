@@ -40,7 +40,7 @@ Services are packaged as independent Docker Compose modules coordinated by the C
 ```
        [ Public Internet ]
                |
-               | (Ports 80, 443, 8448)
+               | (Ports 80, 443)
                v
       +-----------------+
       |  Caddy Ingress  | (proxy_net)

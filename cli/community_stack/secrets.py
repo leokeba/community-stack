@@ -159,9 +159,11 @@ RESTIC_PASSWORD={restic_pw}
 # S3_SECRET_KEY=
 # S3_BUCKET_URL=
 """
-    with open(path, "w", encoding="utf-8") as f:
+    # Create with 0600 so the secrets are never briefly readable by others
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(content)
 
-    # Set 0600 permissions on POSIX
+    # Also tighten a pre-existing file overwritten with force=True
     if os.name == "posix":
         path.chmod(0o600)

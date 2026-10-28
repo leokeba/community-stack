@@ -1,9 +1,10 @@
 """Authentication, CSRF, and publishing integration tests for the admin application."""
 
 import re
+import sqlite3
 from pathlib import Path
 
-from community_stack.admin.app import AdminStore, create_app
+from community_stack.admin.app import LOGIN_IP_LIMIT, AdminStore, create_app
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from fastapi.testclient import TestClient
 
@@ -244,3 +245,58 @@ def test_delivery_error_and_safe_retry_are_visible_to_admin(tmp_path):
     assert "temporary Matrix outage" in healthy_detail.text
     assert "delivered" in healthy_detail.text
     assert "Delivery attempt history" in healthy_detail.text
+
+
+def test_unauthenticated_pages_do_not_create_sessions(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    for _ in range(3):
+        assert client.get("/admin/login").status_code == 200
+        client.cookies.clear()
+    with sqlite3.connect(tmp_path / "announcements.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0] == 0
+
+
+def test_login_rate_limit_applies_per_client_across_usernames(tmp_path):
+    db_path = tmp_path / "announcements.db"
+    AdminStore(db_path).create_admin("organizer", "a-long-safe-test-password")
+    client = TestClient(
+        create_app(
+            db_path=db_path,
+            feed_dir=tmp_path / "feed",
+            config_path=tmp_path / "missing.yaml",
+            setup_token="unused",
+        ),
+        base_url="https://community.test",
+        follow_redirects=False,
+    )
+    csrf_token = extract_csrf(client.get("/admin/login"))
+    for attempt in range(LOGIN_IP_LIMIT):
+        response = client.post(
+            "/admin/login",
+            data={"csrf_token": csrf_token, "username": f"guess-{attempt}", "password": "x"},
+        )
+        assert response.status_code == 401
+    limited = client.post(
+        "/admin/login",
+        data={
+            "csrf_token": csrf_token,
+            "username": "organizer",
+            "password": "a-long-safe-test-password",
+        },
+    )
+    assert limited.status_code == 429
+
+
+def test_setup_rejects_non_ascii_token_without_server_error(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    csrf_token = extract_csrf(client.get("/admin/setup"))
+    response = client.post(
+        "/admin/setup",
+        data={
+            "csrf_token": csrf_token,
+            "setup_token": "jeton-é",
+            "username": "organizer",
+            "password": "a-long-safe-test-password",
+        },
+    )
+    assert response.status_code == 403

@@ -81,6 +81,18 @@ def test_admin_app_is_internal_and_has_no_host_ports():
     assert "proxy_net" in app["networks"]
     assert "announcements_internal" in app["networks"]
     assert data["networks"]["announcements_internal"]["internal"] is True
+    assert "env_file" not in app, "The public admin app must not receive every secret"
+    assert set(app["environment"]).isdisjoint(
+        {"POSTGRES_PASSWORD", "SYNAPSE_REGISTRATION_SHARED_SECRET", "RESTIC_PASSWORD"}
+    )
+
+
+def test_proxy_does_not_expose_plain_http_federation_port():
+    with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
+        ports = yaml.safe_load(stream)["services"]["caddy"]["ports"]
+    assert ports == ["80:80", "443:443"]
+    caddyfile = Path("services/proxy/Caddyfile").read_text(encoding="utf-8")
+    assert not any(line.startswith(":8448") for line in caddyfile.splitlines())
 
 
 def test_caddyfile_exists_and_contains_routes():

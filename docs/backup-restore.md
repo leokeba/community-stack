@@ -25,14 +25,14 @@ Every snapshot created by `community-stack backup` captures:
    - Canonical announcements, delivery history, admin accounts, sessions, and publishing settings (`data/announcements/announcements.db`).
    - Element Web branding and client configuration (`data/element`).
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
-4. **Encrypted Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
+4. **Secrets (`.env`, unencrypted):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
 5. **Snapshot Manifest (`manifest.json`):** Timestamp, project identifier, and integrity checksum metadata.
 
 The announcement database and generated public feeds are included because the
 backup archives the entire `data/` directory. The announcement SQLite file is
 captured with SQLite's online backup API so a concurrent organizer write does
-not leave a partial database in the snapshot. Protect these encrypted snapshots
-as sensitive data: the SQLite database contains password hashes and
+not leave a partial database in the snapshot. Snapshots are owner-only but not
+encrypted; protect them as sensitive data: the SQLite database contains password hashes and
 authentication/session records as well as public announcement content.
 
 ---

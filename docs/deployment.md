@@ -19,7 +19,6 @@ Before deploying TLS certificates with Caddy, configure your DNS provider with t
 |---|---|---|---|
 | A / AAAA | `community.example.org` | `<server-ip>` | Public web portal, Element Web, Announcements |
 | A / AAAA | `matrix.example.org` | `<server-ip>` | Matrix homeserver Client-Server API |
-| SRV (optional) | `_matrix-fed._tcp.example.org` | `0 10 8448 matrix.example.org` | Matrix direct federation (if enabled) |
 
 ---
 
@@ -116,9 +115,13 @@ before deploying.
 
 For Matrix delivery, configure `services.announcements.channels.matrix_room`
 only after verifying that the target room is the public announcements room.
-Set `public_announcement_room: true`, define the token environment variable
-named by `access_token_env` in `.env`, and keep the token out of YAML. Matrix
-delivery is disabled by default and has not been verified against a live server.
+Set `public_announcement_room: true`, set `access_token_env` to
+`COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN`, define that variable in `.env`,
+and keep the token out of YAML. The announcements container does not load
+`.env` wholesale; it receives only the setup token and
+`COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN`, so a different variable name must
+also be added to `services/announcements/docker-compose.yml`. Matrix delivery
+is disabled by default and has not been verified against a live server.
 
 ---
 
@@ -205,8 +208,9 @@ Only the following public ports should ever be exposed:
 | 22 | TCP | SSH | Recommend key-based authentication only |
 | 80 | TCP | Caddy | Automated ACME Let's Encrypt challenges |
 | 443 | TCP | Caddy | HTTPS ingress for all web & Matrix traffic |
-| 8448 | TCP | Matrix Synapse | Federation port (optional, only if federation: true) |
 
 All database and application ports remain internal to Docker networks and are
-**never** bound to host ports. Only Caddy publishes ports 80, 443, and optional
-8448.
+**never** bound to host ports. Only Caddy publishes ports 80 and 443. Matrix
+federation uses port 443 through `/.well-known/matrix/server` delegation.
+Docker-published ports bypass UFW, so do not publish extra ports expecting the
+host firewall to filter them.

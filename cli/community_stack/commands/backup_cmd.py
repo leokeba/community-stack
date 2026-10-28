@@ -11,7 +11,7 @@ def run_backup(
     config_path: Path | str = "community-stack.yaml",
     env_path: Path | str = ".env",
 ) -> int:
-    """Create an encrypted, timestamped backup snapshot."""
+    """Create an owner-only, timestamped backup snapshot."""
     print("Initiating Community Stack backup snapshot...\n")
     try:
         engine = BackupEngine(config_path=config_path, env_path=env_path)

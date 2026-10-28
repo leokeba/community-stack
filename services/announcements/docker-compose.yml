@@ -7,11 +7,13 @@ services:
       dockerfile: services/announcements/Dockerfile
     container_name: community_announcements
     restart: unless-stopped
-    env_file:
-      - ../../.env
     user: "${COMMUNITY_STACK_UID:-1000}:${COMMUNITY_STACK_GID:-1000}"
+    # Pass only what this public-facing app needs; never load the whole .env.
     environment:
       COMMUNITY_STACK_ADMIN_SETUP_TOKEN: ${COMMUNITY_STACK_ADMIN_SETUP_TOKEN:-}
+      COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN: ${COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN:-}
+      # Only Caddy can reach this container (no host port), so trust Docker bridge peers.
+      FORWARDED_ALLOW_IPS: ${COMMUNITY_STACK_FORWARDED_ALLOW_IPS:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       COMMUNITY_STACK_ANNOUNCEMENTS_DB_PATH: /app/data/announcements/announcements.db
       COMMUNITY_STACK_FEED_DIR: /app/data/landing/feed
       COMMUNITY_STACK_CONFIG: /app/community-stack.yaml

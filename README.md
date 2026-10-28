@@ -20,7 +20,7 @@ The **Community Communications Stack** is not another chat application—it is a
 - **🛡️ Privacy by Separation:** Public bulletins, open community discussion, and sensitive internal coordination live in distinct, strictly isolated zones. Internal rooms are never exposed or bridged.
 - **📱 Optional WhatsApp Bridge:** A separately configured `mautrix-whatsapp` integration is available; it is not part of the announcement publishing UI and has not been live-service verified here.
 - **📦 Off-Grid & Offline Continuity:** Generate self-contained offline HTML/JSON archives with one command. Distribute them on USB drives or local Wi-Fi captive portals (Raspberry Pi/OpenWrt) during internet blackouts.
-- **🔒 True Disaster Recovery:** Automated, client-side encrypted backups (Restic) and verified non-destructive restore drills ensure that complete server loss does not destroy community identity or history.
+- **🔒 True Disaster Recovery:** Owner-only (0600) backup archives and verified non-destructive restore drills ensure that complete server loss does not destroy community identity or history.
 - **⚙️ Friendly Unified CLI:** Manage the entire infrastructure with a single Python command: `community-stack`. All outputs, logs, and diagnostic reports feature automated secret redaction.
 
 ---
@@ -31,7 +31,7 @@ The stack is organized into four modular layers with isolated Docker networks:
 
 ```text
        [ Public Internet ]
-               │ (Ports 80, 443, optional 8448)
+               │ (Ports 80, 443)
                ▼
       ┌─────────────────┐
       │  Caddy Ingress  │ (Automated ACME TLS)
@@ -112,7 +112,7 @@ Infrastructure & Lifecycle:
   doctor        Run non-destructive diagnostics with automated secret redaction
 
 Backup & Recovery:
-  backup        Create a client-side encrypted backup snapshot (with DB dump)
+  backup        Create an owner-only backup snapshot (with DB dump)
   backup verify Verify archive completeness, manifest, and cryptographic integrity
   restore       Safely restore a snapshot to an isolated directory (--confirm required)
 

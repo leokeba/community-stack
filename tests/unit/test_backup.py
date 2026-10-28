@@ -108,3 +108,18 @@ def test_restore_to_isolated_target(test_env, tmp_path):
     if os.name == "posix":
         mode = (restore_target / ".env").stat().st_mode & 0o777
         assert mode == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permissions only")
+def test_snapshot_archive_is_owner_only_regardless_of_umask(test_env):
+    _project_dir, config_file, env_file = test_env
+    engine = BackupEngine(config_path=config_file, env_path=env_file)
+    previous = os.umask(0o022)
+    try:
+        engine.create_snapshot()
+    finally:
+        os.umask(previous)
+    archives = list(engine.backup_dir.glob("snap_*.tar.gz"))
+    assert archives
+    assert all(archive.stat().st_mode & 0o777 == 0o600 for archive in archives)
+    assert engine.backup_dir.stat().st_mode & 0o077 == 0

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.models import ModelValidationError
@@ -21,9 +23,12 @@ from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 
 SESSION_COOKIE = "community_admin_session"
+PREAUTH_CSRF_COOKIE = "community_admin_csrf"
 SESSION_TTL = timedelta(hours=12)
 LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_LIMIT = 5
+LOGIN_IP_LIMIT = 20
+ANY_USERNAME = "\0any"
 PASSWORD_ITERATIONS = 310_000
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -161,7 +166,7 @@ class AdminStore:
     def _attempt_key(client_host: str, username: str) -> str:
         return hashlib.sha256(f"{client_host}\0{username}".encode()).hexdigest()
 
-    def is_rate_limited(self, client_host: str, username: str) -> bool:
+    def is_rate_limited(self, client_host: str, username: str, limit: int = LOGIN_LIMIT) -> bool:
         since = (datetime.now(timezone.utc) - LOGIN_WINDOW).isoformat()
         key = self._attempt_key(client_host, username)
         with self._connect() as conn:
@@ -176,7 +181,7 @@ class AdminStore:
                 """,
                 (key, since),
             ).fetchone()["count"]
-        return attempts >= LOGIN_LIMIT
+        return attempts >= limit
 
     def record_failed_attempt(self, client_host: str, username: str) -> None:
         with self._connect() as conn:
@@ -194,6 +199,12 @@ class AdminStore:
                 "DELETE FROM admin_login_attempts WHERE attempt_key = ?",
                 (self._attempt_key(client_host, username),),
             )
+
+
+def tokens_match(expected: str | None, actual: str | None) -> bool:
+    return bool(expected and actual) and hmac.compare_digest(
+        expected.encode("utf-8"), actual.encode("utf-8")
+    )
 
 
 def create_app(
@@ -235,11 +246,11 @@ def create_app(
         return auth_store.get_session(request.cookies.get(SESSION_COOKIE))
 
     def csrf_valid(session: dict[str, Any] | None, value: str | None) -> bool:
-        return bool(session and value and hmac.compare_digest(session["csrf_token"], value))
+        return bool(session) and tokens_match(session["csrf_token"], value)
 
-    def set_cookie(response: Response, token: str) -> None:
+    def set_cookie(response: Response, token: str, name: str = SESSION_COOKIE) -> None:
         response.set_cookie(
-            SESSION_COOKIE,
+            name,
             token,
             max_age=int(SESSION_TTL.total_seconds()),
             httponly=True,
@@ -281,6 +292,18 @@ def create_app(
         if not csrf_valid(session, form.get("csrf_token")):
             raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
 
+    # Login and setup use a double-submit cookie so unauthenticated visitors
+    # never create database rows.
+    def preauth_csrf_token(request: Request) -> str:
+        token = request.cookies.get(PREAUTH_CSRF_COOKIE, "")
+        return token if re.fullmatch(r"[A-Za-z0-9_-]{43}", token) else secrets.token_urlsafe(32)
+
+    def preauth_csrf_or_forbidden(request: Request, form: dict[str, str]) -> str:
+        token = request.cookies.get(PREAUTH_CSRF_COOKIE)
+        if not tokens_match(token, form.get("csrf_token")):
+            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+        return token
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -307,12 +330,7 @@ def create_app(
     async def setup_page(request: Request) -> Response:
         if auth_store.has_admin():
             return login_redirect()
-        session = session_for(request)
-        token = request.cookies.get(SESSION_COOKIE)
-        if not session or session["username"]:
-            token, csrf_token = auth_store.new_session(None)
-        else:
-            csrf_token = session["csrf_token"]
+        csrf_token = preauth_csrf_token(request)
         response = render(
             request,
             "setup.html",
@@ -322,8 +340,7 @@ def create_app(
                 "error": None,
             },
         )
-        if token:
-            set_cookie(response, token)
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
         return response
 
     @app.post("/admin/setup")
@@ -331,16 +348,17 @@ def create_app(
         if auth_store.has_admin():
             return login_redirect()
         form = await submitted_form(request)
-        session = session_for(request)
-        csrf_or_forbidden(request, session, form)
+        preauth_csrf_or_forbidden(request, form)
         host = client_host(request)
         if auth_store.is_rate_limited(host, "setup"):
             raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-        if not setup_token or not hmac.compare_digest(form.get("setup_token", ""), setup_token):
+        if not tokens_match(setup_token, form.get("setup_token")):
             auth_store.record_failed_attempt(host, "setup")
             raise HTTPException(status_code=403, detail="Administrator setup token is invalid.")
         try:
-            auth_store.create_admin(form.get("username", ""), form.get("password", ""))
+            await run_in_threadpool(
+                auth_store.create_admin, form.get("username", ""), form.get("password", "")
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         auth_store.clear_failed_attempts(host, "setup")
@@ -352,36 +370,34 @@ def create_app(
 
     @app.get("/admin/login")
     async def login_page(request: Request) -> Response:
-        session = session_for(request)
-        token = request.cookies.get(SESSION_COOKIE)
-        if not session or session["username"]:
-            token, csrf_token = auth_store.new_session(None)
-        else:
-            csrf_token = session["csrf_token"]
+        csrf_token = preauth_csrf_token(request)
         response = render(
             request,
             "login.html",
             {"csrf_token": csrf_token, "error": None},
         )
-        if token:
-            set_cookie(response, token)
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
         return response
 
     @app.post("/admin/login")
     async def login(request: Request) -> Response:
         form = await submitted_form(request)
-        session = session_for(request)
-        csrf_or_forbidden(request, session, form)
+        csrf_token = preauth_csrf_or_forbidden(request, form)
         username = form.get("username", "").strip()
         host = client_host(request)
-        if auth_store.is_rate_limited(host, username):
+        if auth_store.is_rate_limited(host, username) or auth_store.is_rate_limited(
+            host, ANY_USERNAME, LOGIN_IP_LIMIT
+        ):
             raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-        if not auth_store.verify_password(username, form.get("password", "")):
+        if not await run_in_threadpool(
+            auth_store.verify_password, username, form.get("password", "")
+        ):
             auth_store.record_failed_attempt(host, username)
+            auth_store.record_failed_attempt(host, ANY_USERNAME)
             return render(
                 request,
                 "login.html",
-                {"csrf_token": session["csrf_token"], "error": "Login failed."},
+                {"csrf_token": csrf_token, "error": "Login failed."},
                 status_code=401,
             )
         auth_store.clear_failed_attempts(host, username)

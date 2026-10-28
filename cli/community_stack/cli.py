@@ -80,7 +80,7 @@ def create_parser() -> argparse.ArgumentParser:
     p_logs.add_argument("-n", "--tail", type=int, default=100, help="Number of lines to show")
 
     # backup
-    p_backup = subparsers.add_parser("backup", help="Manage encrypted backups")
+    p_backup = subparsers.add_parser("backup", help="Manage backup snapshots")
     p_backup.add_argument(
         "action", nargs="?", default="create", choices=["create", "verify"], help="Backup action"
     )

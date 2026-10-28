@@ -110,9 +110,6 @@ http://localhost, http://127.0.0.1 {
     }
 }
 
-# ------------------------------------------------------------------------------
-# Matrix Direct Federation Port (Optional)
-# ------------------------------------------------------------------------------
-:8448 {
-    reverse_proxy community_synapse:8008
-}
+# Federation is served on 443 via /.well-known/matrix/server delegation. Do not
+# add a bare ":8448" site: it has no hostname, so Caddy would serve it over
+# plain HTTP and expose all Synapse paths, including /_synapse/admin.

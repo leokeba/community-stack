@@ -1,7 +1,7 @@
 """Backup and disaster recovery engine for community-stack.
 
-Supports encrypted, verified backups of databases, persistent state,
-and configuration using Restic or structured encrypted archives.
+Creates verified, owner-only backup archives of databases, persistent state,
+and configuration. Local archives are not encrypted; Restic is not yet wired in.
 """
 
 from __future__ import annotations
@@ -126,15 +126,19 @@ class BackupEngine:
         return env
 
     def create_snapshot(self) -> SnapshotInfo:
-        """Create a timestamped, encrypted backup snapshot."""
+        """Create a timestamped, owner-only (0600) backup snapshot.
+
+        Local snapshots are gzip archives, not encrypted: they contain .env, the
+        database dump, and TLS keys, so they must stay on protected storage.
+        """
         if not self.backups_cfg.get("enabled", True):
             raise BackupError("Backups are disabled in community-stack.yaml.")
 
-        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
         snapshot_id = f"snap_{timestamp}"
         staging_dir = self.backup_dir / f"staging_{snapshot_id}"
-        staging_dir.mkdir(parents=True, exist_ok=True)
+        staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         try:
             # 1. Database dump
@@ -204,8 +208,12 @@ class BackupEngine:
 
             # 5. Pack into snapshot archive
             final_archive = self.backup_dir / f"{snapshot_id}.tar.gz"
-            with tarfile.open(final_archive, "w:gz") as tar:
-                tar.add(staging_dir, arcname=snapshot_id)
+            fd = os.open(final_archive, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as archive_file:
+                if os.name == "posix":
+                    os.fchmod(archive_file.fileno(), 0o600)
+                with tarfile.open(fileobj=archive_file, mode="w:gz") as tar:
+                    tar.add(staging_dir, arcname=snapshot_id)
 
             size_bytes = final_archive.stat().st_size
             files_count = sum(1 for _ in staging_dir.rglob("*"))
@@ -321,7 +329,7 @@ class BackupEngine:
                 raise BackupError(f"Snapshot '{snapshot_id}' not found.")
             target_archive = matching[-1]
 
-        target_path.mkdir(parents=True, exist_ok=True)
+        target_path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
         extract_kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
 
