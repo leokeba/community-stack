@@ -18,7 +18,7 @@
     }
 
     # Public Announcements Feed (Milestone 4)
-    handle_path /feed* {
+    handle /feed* {
         reverse_proxy community_landing:80
     }
 
@@ -75,7 +75,7 @@ http://localhost, http://127.0.0.1 {
     }
 
     # Public Announcements Feed
-    handle_path /feed* {
+    handle /feed* {
         reverse_proxy community_landing:80
     }
 
