@@ -56,3 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added CLI subscriber management: `community-stack subscribers list`, `add`, and `unsubscribe`.
   - Comprehensive evaluation of Email, SMS gateways (Kannel, Jasmin, GSM modems), and IVR voice information lines in `docs/accessible-channels.md`.
   - Integration test suite validating multi-channel broadcast and strict opt-out adherence.
+- **Milestone 7: Multi-Host Resilience & Offline Continuity:**
+  - Implemented `OfflineArchiveExporter` producing self-contained, offline-readable HTML & JSON archives with SHA256 integrity verification.
+  - Built `community-stack archive export` and `community-stack archive verify` CLI commands for USB and local Wi-Fi distribution.
+  - Added Ansible warm standby provisioning playbook (`ansible/playbooks/standby.yml`) pre-pulling container images and configuring independent hosts.
+  - Comprehensive guide in `docs/multi-host-resilience.md` covering independent failure domains, captive portal Wi-Fi setup (OpenWrt/Raspberry Pi), and Meshtastic/LoRa off-grid mesh evaluation.
+  - Unit and integration tests verifying offline archive generation and cryptographic tampering detection.

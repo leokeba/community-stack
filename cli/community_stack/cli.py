@@ -8,6 +8,7 @@ from collections.abc import Sequence
 
 from community_stack import __version__
 from community_stack.commands.announce_cmd import run_announce
+from community_stack.commands.archive_cmd import run_archive
 from community_stack.commands.backup_cmd import run_backup, run_backup_verify
 from community_stack.commands.bridge_cmd import run_bridge
 from community_stack.commands.check_cmd import run_check
@@ -180,6 +181,22 @@ def create_parser() -> argparse.ArgumentParser:
     )
     p_s_unsub.add_argument("--dest", required=True, help="Email address or phone number")
 
+    # archive
+    p_archive = subparsers.add_parser(
+        "archive", help="Export and verify offline public announcement archives"
+    )
+    archive_subs = p_archive.add_subparsers(dest="archive_action", help="Archive actions")
+
+    p_arc_export = archive_subs.add_parser("export", help="Export self-contained offline archive")
+    p_arc_export.add_argument(
+        "-o",
+        "--output",
+        help="Target archive path (default: backups/offline_announcements.zip)",
+    )
+
+    p_arc_verify = archive_subs.add_parser("verify", help="Verify offline archive bundle")
+    p_arc_verify.add_argument("path", help="Path to offline archive file")
+
     return parser
 
 
@@ -228,6 +245,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_bridge(args=args)
     elif args.command == "subscribers":
         return run_subscribers(args=args)
+    elif args.command == "archive":
+        return run_archive(args=args)
     else:
         parser.print_help()
         return 2

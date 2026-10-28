@@ -258,3 +258,9 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
         main(["subscribers", "unsubscribe", "--channel", "email", "--dest", "cli_test@example.org"])
         == 0
     )
+
+    # archive export and verify
+    archive_out = tmp_path / "cli_archive.zip"
+    assert main(["archive", "export", "-o", str(archive_out)]) == 0
+    assert archive_out.is_file()
+    assert main(["archive", "verify", str(archive_out)]) == 0

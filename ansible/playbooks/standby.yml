@@ -1,0 +1,41 @@
+---
+- name: Provision Secondary Warm Standby Host
+  hosts: standby
+  become: true
+  vars_files:
+    - "{{ playbook_dir }}/../../community-stack.yaml"
+
+  roles:
+    - role: host
+    - role: docker
+    - role: firewall
+
+  tasks:
+    - name: Create project directories on standby host
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/community-stack
+        - /opt/community-stack/data
+        - /opt/community-stack/data/matrix
+        - /opt/community-stack/data/postgres
+        - /opt/community-stack/data/caddy
+        - /opt/community-stack/data/landing
+        - /opt/community-stack/backups
+
+    - name: Pre-pull container images on standby host
+      community.docker.docker_image:
+        name: "{{ item }}"
+        source: pull
+      loop:
+        - caddy:2.8.4-alpine
+        - nginx:1.27-alpine
+        - matrixdotorg/synapse:v1.119.0
+        - postgres:16-alpine
+        - vectorim/element-web:v1.11.70
+
+    - name: Report standby readiness
+      ansible.builtin.debug:
+        msg: "Standby host is provisioned with pre-pulled images and ready for backup restoration."
