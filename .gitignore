@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Unit test / coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Local secrets & sensitive files
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+secrets/
+*.secret
+
+# Local runtime & data directories
+data/
+backups/
+.community-stack/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

@@ -1,0 +1,37 @@
+# Community Communications Stack Configuration Example
+# Validated against config/schema.json
+
+project:
+  name: "community"
+  profile: "starter" # starter | community | accessible | resilient
+
+domain:
+  base: "example.org"
+  matrix: "matrix.example.org"
+  web: "community.example.org"
+
+services:
+  matrix:
+    enabled: true
+    federation: false
+    allow_registration: false
+    database_type: "postgres"
+    max_upload_size_mb: 50
+  element:
+    enabled: true
+  announcements:
+    enabled: true
+  whatsapp_bridge:
+    enabled: false
+    mode: "none" # none | announcements_only | selective_bridge
+    mapped_rooms: []
+
+operations:
+  backups:
+    enabled: true
+    schedule: "daily" # hourly | daily | weekly
+    target: "local" # local | s3 | sftp
+    retention_days: 14
+    storage_path: "./backups"
+  monitoring:
+    enabled: true

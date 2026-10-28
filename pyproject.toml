@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "community-stack"
+version = "0.1.0"
+description = "Resilient Community Communications Stack CLI and Automation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [
+    { name = "Community Stack Contributors" }
+]
+dependencies = [
+    "pyyaml>=6.0.1",
+    "jsonschema>=4.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+community-stack = "community_stack.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cli/community_stack"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["cli"]

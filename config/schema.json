@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CommunityStackConfig",
+  "description": "Configuration schema for the Community Communications Stack",
+  "type": "object",
+  "required": ["project", "domain", "services"],
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "type": "object",
+      "required": ["name", "profile"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{1,62}$",
+          "description": "Project deployment name (identifier)"
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["starter", "community", "accessible", "resilient"],
+          "description": "Deployment profile determining service scope"
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "required": ["base"],
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "description": "Base domain name, e.g. example.org"
+        },
+        "matrix": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "description": "Matrix homeserver domain, e.g. matrix.example.org"
+        },
+        "web": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "description": "Public community web portal domain, e.g. community.example.org"
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "required": ["matrix", "element", "announcements"],
+      "additionalProperties": false,
+      "properties": {
+        "matrix": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "federation": { "type": "boolean", "default": false },
+            "allow_registration": { "type": "boolean", "default": false },
+            "database_type": { "type": "string", "enum": ["postgres"], "default": "postgres" },
+            "max_upload_size_mb": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+          }
+        },
+        "element": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        },
+        "announcements": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        },
+        "whatsapp_bridge": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mode": {
+              "type": "string",
+              "enum": ["none", "announcements_only", "selective_bridge"],
+              "default": "none"
+            },
+            "mapped_rooms": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["matrix_room_id", "whatsapp_chat_jid"],
+                "additionalProperties": false,
+                "properties": {
+                  "matrix_room_id": { "type": "string" },
+                  "whatsapp_chat_jid": { "type": "string" },
+                  "description": { "type": "string" }
+                }
+              },
+              "default": []
+            }
+          }
+        }
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backups": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string", "enum": ["hourly", "daily", "weekly"], "default": "daily" },
+            "target": { "type": "string", "enum": ["local", "s3", "sftp"], "default": "local" },
+            "retention_days": { "type": "integer", "minimum": 1, "default": 14 },
+            "storage_path": { "type": "string", "default": "./backups" }
+          }
+        },
+        "monitoring": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
