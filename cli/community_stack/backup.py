@@ -1,7 +1,9 @@
 """Backup and disaster recovery engine for community-stack.
 
-Creates verified, owner-only backup archives of databases, persistent state,
-and configuration. Local archives are not encrypted; Restic is not yet wired in.
+Snapshots databases, persistent state, and configuration. With
+``operations.backups.encryption: restic`` they go into a client-side encrypted
+Restic repository (local, S3 or SFTP); otherwise into owner-only, unencrypted
+local archives.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 import tarfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,10 +31,20 @@ class SnapshotInfo:
     files_count: int
     size_bytes: int
     db_included: bool
+    encrypted: bool = False
+    warnings: list[str] = field(default_factory=list)
 
 
 class BackupError(Exception):
     """Raised when backup or restore operations fail."""
+
+
+RESTIC_TAG = "community-stack"
+# Only these host variables reach restic, so other secrets in .env stay out of it.
+RESTIC_ENV_PASSTHROUGH = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "XDG_CACHE_HOME")
+RESTIC_SETTINGS = ("RESTIC_CACHE_DIR", "RESTIC_REPOSITORY")
+REQUIRED_SNAPSHOT_FILES = ("manifest.json", "community-stack.yaml")
+EXPECTED_SNAPSHOT_FILES = ("data.tar.gz", "postgres_synapse.dump")
 
 
 def is_restic_available() -> bool:
@@ -98,32 +110,86 @@ class BackupEngine:
             self.backup_dir = (self.project_root / raw_storage).resolve()
         else:
             self.backup_dir = Path(raw_storage).resolve()
+        self.target = self.backups_cfg.get("target", "local")
+        self.encryption = self.backups_cfg.get("encryption", "none")
 
     def get_backup_env(self) -> dict[str, str]:
-        """Prepare environment variables for Restic and backup tools."""
-        env = dict(os.environ)
-        if self.env_path.is_file():
-            file_vars = parse_env_file(self.env_path)
-            for k, v in file_vars.items():
-                env[k] = v
+        """Prepare the minimal environment restic needs for the configured target."""
+        file_vars = parse_env_file(self.env_path) if self.env_path.is_file() else {}
 
-        restic_pw = env.get("RESTIC_PASSWORD")
+        def setting(key: str) -> str | None:
+            return file_vars.get(key) or os.environ.get(key)
+
+        env = {key: os.environ[key] for key in RESTIC_ENV_PASSTHROUGH if key in os.environ}
+        for key in RESTIC_SETTINGS:
+            if setting(key):
+                env[key] = setting(key)
+
+        restic_pw = setting("RESTIC_PASSWORD")
         if not restic_pw:
             raise BackupError("RESTIC_PASSWORD is not set in environment or .env file.")
-
         env["RESTIC_PASSWORD"] = restic_pw
-        env["RESTIC_REPOSITORY"] = str(self.backup_dir / "repository")
 
-        # S3 off-host credentials if configured
-        if self.backups_cfg.get("target") == "s3":
-            s3_url = env.get("S3_BUCKET_URL")
+        if self.target == "s3":
+            s3_url = setting("S3_BUCKET_URL")
             if not s3_url:
                 raise BackupError("S3_BUCKET_URL is required when backups.target is 's3'")
             env["RESTIC_REPOSITORY"] = s3_url
-            env["AWS_ACCESS_KEY_ID"] = env.get("S3_ACCESS_KEY", "")
-            env["AWS_SECRET_ACCESS_KEY"] = env.get("S3_SECRET_KEY", "")
-
+            env["AWS_ACCESS_KEY_ID"] = setting("S3_ACCESS_KEY") or ""
+            env["AWS_SECRET_ACCESS_KEY"] = setting("S3_SECRET_KEY") or ""
+        elif self.target == "sftp":
+            if not env.get("RESTIC_REPOSITORY"):
+                raise BackupError(
+                    "RESTIC_REPOSITORY (for example sftp:user@host:/srv/restic) is required "
+                    "when backups.target is 'sftp'"
+                )
+        else:
+            env["RESTIC_REPOSITORY"] = str(self.backup_dir / "repository")
         return env
+
+    def _restic(self, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+        binary = shutil.which("restic", path=env.get("PATH"))
+        if binary is None:
+            raise BackupError(
+                "Backups are set to 'encryption: restic' but restic is not installed. "
+                "Install it (for example 'apt install restic') and try again."
+            )
+        return subprocess.run([binary, *args], env=env, capture_output=True, text=True, check=False)
+
+    def _restic_ok(self, args: list[str], env: dict[str, str], action: str) -> str:
+        result = self._restic(args, env)
+        if result.returncode != 0:
+            detail = (result.stderr.strip().splitlines() or ["no error output"])[-1]
+            raise BackupError(f"restic could not {action}: {detail}")
+        return result.stdout
+
+    def _ensure_restic_repository(self, env: dict[str, str]) -> None:
+        if self._restic(["cat", "config"], env).returncode == 0:
+            return
+        if self.target == "local":
+            self.backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._restic_ok(["init"], env, "initialize the backup repository")
+
+    def _restic_snapshots(self, env: dict[str, str]) -> list[dict]:
+        output = self._restic_ok(
+            ["snapshots", "--json", "--tag", RESTIC_TAG], env, "list snapshots"
+        )
+        snapshots = json.loads(output or "[]") or []
+        for snapshot in snapshots:
+            snapshot["snapshot_tag"] = next(
+                (tag for tag in snapshot.get("tags") or [] if tag.startswith("snap_")), ""
+            )
+        return sorted(snapshots, key=lambda s: s["snapshot_tag"])
+
+    def _find_restic_snapshot(self, env: dict[str, str], snapshot_id: str | None) -> dict:
+        snapshots = self._restic_snapshots(env)
+        if snapshot_id:
+            snapshots = [s for s in snapshots if snapshot_id in s["snapshot_tag"]]
+            if not snapshots:
+                raise BackupError(f"Snapshot '{snapshot_id}' not found.")
+        if not snapshots:
+            raise BackupError("No backup snapshots found.")
+        return snapshots[-1]
 
     def create_snapshot(self) -> SnapshotInfo:
         """Create a timestamped, owner-only (0600) backup snapshot.
@@ -206,6 +272,12 @@ class BackupEngine:
             manifest_file = staging_dir / "manifest.json"
             manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
+            files_count = sum(1 for _ in staging_dir.rglob("*"))
+            if self.encryption == "restic":
+                return self._store_in_restic(
+                    staging_dir, snapshot_id, timestamp, files_count, db_dumped
+                )
+
             # 5. Pack into snapshot archive
             final_archive = self.backup_dir / f"{snapshot_id}.tar.gz"
             fd = os.open(final_archive, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -216,23 +288,72 @@ class BackupEngine:
                     tar.add(staging_dir, arcname=snapshot_id)
 
             size_bytes = final_archive.stat().st_size
-            files_count = sum(1 for _ in staging_dir.rglob("*"))
 
             # 6. Apply retention pruning if configured
             self._prune_snapshots()
 
+            warnings = ["Snapshot is not encrypted. Set operations.backups.encryption: restic."]
+            if self.target != "local":
+                warnings.append(
+                    f"Target '{self.target}' needs encryption: restic; "
+                    "this snapshot was only stored locally."
+                )
             return SnapshotInfo(
                 id=snapshot_id,
                 timestamp=timestamp,
-                target=str(self.backups_cfg.get("target", "local")),
+                target="local",
                 files_count=files_count,
                 size_bytes=size_bytes,
                 db_included=db_dumped,
+                warnings=warnings,
             )
         finally:
             # Clean up staging directory
             if staging_dir.exists():
                 shutil.rmtree(staging_dir, ignore_errors=True)
+
+    def _store_in_restic(
+        self,
+        staging_dir: Path,
+        snapshot_id: str,
+        timestamp: str,
+        files_count: int,
+        db_dumped: bool,
+    ) -> SnapshotInfo:
+        """Back up the staged snapshot into the restic repository and apply retention."""
+        env = self.get_backup_env()
+        self._ensure_restic_repository(env)
+        output = self._restic_ok(
+            ["backup", "--json", "--tag", RESTIC_TAG, "--tag", snapshot_id, str(staging_dir)],
+            env,
+            "create the backup",
+        )
+        summary = next(
+            (
+                line
+                for line in map(json.loads, filter(None, output.splitlines()))
+                if line.get("message_type") == "summary"
+            ),
+            {},
+        )
+        warnings = []
+        retention_days = int(self.backups_cfg.get("retention_days", 14))
+        forget = self._restic(
+            ["forget", "--tag", RESTIC_TAG, "--keep-within", f"{retention_days}d", "--prune"],
+            env,
+        )
+        if forget.returncode != 0:
+            warnings.append("Old snapshots could not be pruned; the new snapshot is safe.")
+        return SnapshotInfo(
+            id=snapshot_id,
+            timestamp=timestamp,
+            target=self.target,
+            files_count=files_count,
+            size_bytes=int(summary.get("data_added", 0)),
+            db_included=db_dumped,
+            encrypted=True,
+            warnings=warnings,
+        )
 
     def _prune_snapshots(self) -> None:
         """Prune old local snapshot archives according to retention_days."""
@@ -251,6 +372,8 @@ class BackupEngine:
 
     def verify_backup(self, snapshot_id: str | None = None) -> tuple[bool, list[str]]:
         """Verify the integrity of a backup snapshot."""
+        if self.encryption == "restic":
+            return self._verify_restic(snapshot_id)
         messages: list[str] = []
 
         if not self.backup_dir.is_dir():
@@ -301,6 +424,41 @@ class BackupEngine:
             messages.append(f"ERROR: Corrupt backup archive {target_archive.name}: {exc}")
             return False, messages
 
+    def _verify_restic(self, snapshot_id: str | None) -> tuple[bool, list[str]]:
+        messages: list[str] = []
+        env = self.get_backup_env()
+        try:
+            snapshot = self._find_restic_snapshot(env, snapshot_id)
+        except BackupError as exc:
+            return False, [f"ERROR: {exc}"]
+        messages.append(
+            f"Verifying encrypted snapshot {snapshot['snapshot_tag']} ({snapshot['short_id']})."
+        )
+        check = self._restic(["check"], env)
+        if check.returncode != 0:
+            messages.append("ERROR: restic repository check failed; the repository is damaged.")
+            return False, messages
+        messages.append("Repository structure and encryption verified by restic.")
+
+        listing = self._restic_ok(["ls", "--json", snapshot["id"]], env, "list the snapshot")
+        root = snapshot["paths"][0].rstrip("/")
+        names = {
+            node["path"][len(root) + 1 :]
+            for node in map(json.loads, filter(None, listing.splitlines()))
+            # Older restic releases mark nodes only with struct_type.
+            if "node" in (node.get("message_type"), node.get("struct_type"))
+            and node.get("path", "").startswith(root + "/")
+        }
+        missing = [name for name in REQUIRED_SNAPSHOT_FILES if name not in names]
+        if missing:
+            messages.append(f"ERROR: Missing {', '.join(missing)} in snapshot.")
+            return False, messages
+        for name in EXPECTED_SNAPSHOT_FILES:
+            if name not in names:
+                messages.append(f"WARNING: Missing {name} in snapshot.")
+        messages.append("All critical recovery components verified present.")
+        return True, messages
+
     def restore_to_target(
         self,
         target_dir: Path | str,
@@ -317,6 +475,20 @@ class BackupEngine:
                 f"Refusing to restore directly onto active project root: {self.project_root}. "
                 "Specify an isolated target directory, e.g. /tmp/community-restore"
             )
+
+        if self.encryption == "restic":
+            env = self.get_backup_env()
+            snapshot = self._find_restic_snapshot(env, snapshot_id)
+            target_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+            scratch = target_path / ".restic-restore"
+            self._restic_ok(
+                ["restore", snapshot["id"], "--target", str(scratch)], env, "restore the snapshot"
+            )
+            restored = scratch / snapshot["paths"][0].lstrip("/")
+            snap_content = target_path / (snapshot["snapshot_tag"] or snapshot["short_id"])
+            shutil.move(str(restored), str(snap_content))
+            shutil.rmtree(scratch, ignore_errors=True)
+            return self._finish_restore(snap_content, target_path)
 
         snapshots = sorted(self.backup_dir.glob("snap_*.tar.gz"))
         if not snapshots:
@@ -343,7 +515,11 @@ class BackupEngine:
         if not extracted_dirs:
             raise BackupError("Snapshot extraction did not yield a valid snapshot directory.")
 
-        snap_content = extracted_dirs[0]
+        return self._finish_restore(extracted_dirs[0], target_path)
+
+    def _finish_restore(self, snap_content: Path, target_path: Path) -> bool:
+        """Unpack a snapshot directory's data, config, secrets and dump into the target."""
+        extract_kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
 
         # Extract nested data.tar.gz if present
         data_tar = snap_content / "data.tar.gz"

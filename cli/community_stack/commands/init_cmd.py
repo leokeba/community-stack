@@ -41,6 +41,7 @@ operations:
     enabled: true
     schedule: "daily"
     target: "local"
+    encryption: "restic" # restic (client-side encrypted) | none (owner-only archives)
     retention_days: 14
     storage_path: "./backups"
   monitoring:

@@ -11,7 +11,7 @@ def run_backup(
     config_path: Path | str = "community-stack.yaml",
     env_path: Path | str = ".env",
 ) -> int:
-    """Create an owner-only, timestamped backup snapshot."""
+    """Create a timestamped backup snapshot, encrypted when restic is configured."""
     print("Initiating Community Stack backup snapshot...\n")
     try:
         engine = BackupEngine(config_path=config_path, env_path=env_path)
@@ -20,10 +20,17 @@ def run_backup(
         print(f"            Snapshot ID:   {snapshot.id}")
         print(f"            Timestamp:     {snapshot.timestamp}")
         print(f"            Target:        {snapshot.target}")
-        print(f"            Archive Size:  {snapshot.size_bytes / 1024:.2f} KB")
+        print(
+            "            Encryption:    "
+            + ("restic (client-side)" if snapshot.encrypted else "none (owner-only archive)")
+        )
+        size_label = "Data Added:   " if snapshot.encrypted else "Archive Size: "
+        print(f"            {size_label} {snapshot.size_bytes / 1024:.2f} KB")
         print(
             f"            Database Dump: {'Included' if snapshot.db_included else 'Offline marker'}"
         )
+        for warning in snapshot.warnings:
+            print(f"  [WARN] {warning}")
         print("\nNext step: verify integrity with: community-stack backup verify")
         return 0
     except BackupError as exc:

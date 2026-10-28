@@ -104,9 +104,10 @@ def run_plan(
         )
         print(f"                 Retention: {backups_cfg.get('retention_days')} days")
         print(f"                 Storage Path: {backups_cfg.get('storage_path')}")
-        print(
-            "                 Encryption: None (owner-only 0600 archives; keep on protected storage)"
-        )
+        if backups_cfg.get("encryption", "none") == "restic":
+            print("                 Encryption: Client-side encrypted repository (restic)")
+        else:
+            print("                 Encryption: None (owner-only archives; set encryption: restic)")
     else:
         print("  Backups:       Disabled")
 

@@ -73,6 +73,33 @@ def check_local_directories(base_dir: Path, result: ValidationResult) -> None:
             )
 
 
+def check_backups(config: dict, result: ValidationResult) -> None:
+    """Warn when backups are unencrypted or restic is missing."""
+    backups = config.get("operations", {}).get("backups", {})
+    if not backups.get("enabled"):
+        return
+    target = backups.get("target", "local")
+    if backups.get("encryption", "none") == "restic":
+        restic_bin = shutil.which("restic")
+        if restic_bin:
+            result.add_info(f"Backups are encrypted with restic: {restic_bin}")
+        else:
+            result.add_warning(
+                "Backups use restic encryption, but restic is not installed. "
+                "Install it (for example 'apt install restic') before the first backup."
+            )
+        return
+    result.add_warning(
+        "Backups are not encrypted. Set operations.backups.encryption to 'restic' "
+        "and install restic."
+    )
+    if target != "local":
+        result.add_warning(
+            f"Backup target '{target}' is only used with restic encryption; "
+            "snapshots are currently stored locally."
+        )
+
+
 def run_checks(
     config_path: Path | str = "community-stack.yaml",
     env_path: Path | str = ".env",
@@ -111,6 +138,7 @@ def run_checks(
 
     # 4. Tool dependencies
     check_tool_dependencies(result)
+    check_backups(config, result)
 
     # 5. DNS checks
     if not skip_dns:

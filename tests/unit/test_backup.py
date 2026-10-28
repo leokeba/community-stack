@@ -14,7 +14,9 @@ def test_env(tmp_path):
 
     config_file = project_dir / "community-stack.yaml"
     config_file.write_text(
-        Path("config/example.yaml").read_text(encoding="utf-8"),
+        Path("config/example.yaml")
+        .read_text(encoding="utf-8")
+        .replace('encryption: "restic"', 'encryption: "none"'),
         encoding="utf-8",
     )
 
@@ -45,7 +47,12 @@ def test_is_restic_available():
 
 def test_get_backup_env_missing_password(tmp_path):
     cfg_file = tmp_path / "community-stack.yaml"
-    cfg_file.write_text(Path("config/example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    cfg_file.write_text(
+        Path("config/example.yaml")
+        .read_text(encoding="utf-8")
+        .replace('encryption: "restic"', 'encryption: "none"'),
+        encoding="utf-8",
+    )
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=pass\n", encoding="utf-8")
 

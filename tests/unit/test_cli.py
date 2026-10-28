@@ -1,5 +1,7 @@
 """Unit tests for community-stack CLI commands."""
 
+import shutil
+
 import pytest
 from community_stack.cli import main
 
@@ -53,7 +55,13 @@ def test_cli_init_command(tmp_path, capsys):
     assert "[CREATE]" in captured3.out
 
 
-def test_cli_check_command(tmp_path, capsys):
+def test_cli_check_command(tmp_path, capsys, monkeypatch):
+    real_which = shutil.which
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name, *a, **k: "/usr/bin/restic" if name == "restic" else real_which(name, *a, **k),
+    )
     main(["init", "--dir", str(tmp_path)])
     config_file = tmp_path / "community-stack.yaml"
     env_file = tmp_path / ".env"
@@ -146,6 +154,12 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     main(["init", "--dir", str(tmp_path)])
     config_file = tmp_path / "community-stack.yaml"
     env_file = tmp_path / ".env"
+    config_file.write_text(
+        config_file.read_text(encoding="utf-8").replace(
+            'encryption: "restic"', 'encryption: "none"'
+        ),
+        encoding="utf-8",
+    )
 
     # install
     assert main(["install", "-c", str(config_file), "-e", str(env_file)]) == 0

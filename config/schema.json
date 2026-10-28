@@ -3,12 +3,19 @@
   "title": "CommunityStackConfig",
   "description": "Configuration schema for the Community Communications Stack",
   "type": "object",
-  "required": ["project", "domain", "services"],
+  "required": [
+    "project",
+    "domain",
+    "services"
+  ],
   "additionalProperties": false,
   "properties": {
     "project": {
       "type": "object",
-      "required": ["name", "profile"],
+      "required": [
+        "name",
+        "profile"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -18,14 +25,21 @@
         },
         "profile": {
           "type": "string",
-          "enum": ["starter", "community", "accessible", "resilient"],
+          "enum": [
+            "starter",
+            "community",
+            "accessible",
+            "resilient"
+          ],
           "description": "Deployment profile determining service scope"
         }
       }
     },
     "domain": {
       "type": "object",
-      "required": ["base"],
+      "required": [
+        "base"
+      ],
       "additionalProperties": false,
       "properties": {
         "base": {
@@ -47,53 +61,94 @@
     },
     "services": {
       "type": "object",
-      "required": ["matrix", "element", "announcements"],
+      "required": [
+        "matrix",
+        "element",
+        "announcements"
+      ],
       "additionalProperties": false,
       "properties": {
         "matrix": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "federation": { "type": "boolean", "default": false },
-            "allow_registration": { "type": "boolean", "default": false },
-            "database_type": { "type": "string", "enum": ["postgres"], "default": "postgres" },
-            "max_upload_size_mb": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "federation": {
+              "type": "boolean",
+              "default": false
+            },
+            "allow_registration": {
+              "type": "boolean",
+              "default": false
+            },
+            "database_type": {
+              "type": "string",
+              "enum": [
+                "postgres"
+              ],
+              "default": "postgres"
+            },
+            "max_upload_size_mb": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
           }
         },
         "element": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" }
+            "enabled": {
+              "type": "boolean"
+            }
           }
         },
         "announcements": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled": {
+              "type": "boolean"
+            },
             "channels": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
                 "web_feed": {
                   "type": "object",
-                  "required": ["enabled"],
+                  "required": [
+                    "enabled"
+                  ],
                   "additionalProperties": false,
                   "properties": {
-                    "enabled": { "type": "boolean" }
+                    "enabled": {
+                      "type": "boolean"
+                    }
                   }
                 },
                 "matrix_room": {
                   "type": "object",
-                  "required": ["enabled"],
+                  "required": [
+                    "enabled"
+                  ],
                   "additionalProperties": false,
                   "properties": {
-                    "enabled": { "type": "boolean" },
+                    "enabled": {
+                      "type": "boolean"
+                    },
                     "homeserver_url": {
                       "type": "string",
                       "pattern": "^https?://[^/]+/?$"
@@ -114,8 +169,14 @@
                   "allOf": [
                     {
                       "if": {
-                        "properties": { "enabled": { "const": true } },
-                        "required": ["enabled"]
+                        "properties": {
+                          "enabled": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "enabled"
+                        ]
                       },
                       "then": {
                         "required": [
@@ -134,25 +195,42 @@
         },
         "whatsapp_bridge": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled": {
+              "type": "boolean"
+            },
             "mode": {
               "type": "string",
-              "enum": ["none", "announcements_only", "selective_bridge"],
+              "enum": [
+                "none",
+                "announcements_only",
+                "selective_bridge"
+              ],
               "default": "none"
             },
             "mapped_rooms": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["matrix_room_id", "whatsapp_chat_jid"],
+                "required": [
+                  "matrix_room_id",
+                  "whatsapp_chat_jid"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "matrix_room_id": { "type": "string" },
-                  "whatsapp_chat_jid": { "type": "string" },
-                  "description": { "type": "string" }
+                  "matrix_room_id": {
+                    "type": "string"
+                  },
+                  "whatsapp_chat_jid": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
                 }
               },
               "default": []
@@ -167,22 +245,61 @@
       "properties": {
         "backups": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "schedule": { "type": "string", "enum": ["hourly", "daily", "weekly"], "default": "daily" },
-            "target": { "type": "string", "enum": ["local", "s3", "sftp"], "default": "local" },
-            "retention_days": { "type": "integer", "minimum": 1, "default": 14 },
-            "storage_path": { "type": "string", "default": "./backups" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "schedule": {
+              "type": "string",
+              "enum": [
+                "hourly",
+                "daily",
+                "weekly"
+              ],
+              "default": "daily"
+            },
+            "target": {
+              "type": "string",
+              "enum": [
+                "local",
+                "s3",
+                "sftp"
+              ],
+              "default": "local"
+            },
+            "encryption": {
+              "type": "string",
+              "enum": [
+                "none",
+                "restic"
+              ],
+              "default": "none"
+            },
+            "retention_days": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 14
+            },
+            "storage_path": {
+              "type": "string",
+              "default": "./backups"
+            }
           }
         },
         "monitoring": {
           "type": "object",
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" }
+            "enabled": {
+              "type": "boolean"
+            }
           }
         }
       }

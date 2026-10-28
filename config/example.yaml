@@ -36,6 +36,7 @@ operations:
     enabled: true
     schedule: "daily" # hourly | daily | weekly
     target: "local" # local | s3 | sftp
+    encryption: "restic" # restic (client-side encrypted) | none (owner-only archives)
     retention_days: 14
     storage_path: "./backups"
   monitoring:

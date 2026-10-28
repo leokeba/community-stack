@@ -82,3 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Accounts page to add accounts, change roles, disable or re-enable access, and reset passwords; My account page to change your own password.
   - Role changes, disabling and password resets apply to existing sessions immediately.
   - Activity log of sign-ins, failed sign-ins, account changes, publishing actions and settings changes, kept for about 13 months.
+- **Roadmap Phase 0: Encrypted backups with restic:**
+  - New `operations.backups.encryption` setting (`restic` or `none`); `community-stack init` and the example configuration default to `restic`.
+  - With restic, snapshots are encrypted on the host into a local, S3 or SFTP repository, verified with `restic check` plus a content listing, restored without leaving a scratch copy, and pruned by retention days. No plaintext archive is kept.
+  - Restic receives only backup settings, never the other secrets in `.env`.
+  - `community-stack check`, `plan` and `backup` say when backups are unencrypted or restic is missing; configurations without the setting keep the previous owner-only archives.
+  - The Ansible host role installs restic, and CI runs the encrypted backup tests against a real restic binary.

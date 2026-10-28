@@ -12,6 +12,7 @@
       - jq
       - rsync
       - htop
+      - restic
     state: present
 
 - name: Set secure kernel sysctl parameters

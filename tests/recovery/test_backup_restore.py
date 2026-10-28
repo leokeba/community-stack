@@ -26,7 +26,10 @@ def test_disaster_recovery_end_to_end(tmp_path):
 
     config_file = prod_dir / "community-stack.yaml"
     config_file.write_text(
-        Path("config/example.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+        Path("config/example.yaml")
+        .read_text(encoding="utf-8")
+        .replace('encryption: "restic"', 'encryption: "none"'),
+        encoding="utf-8",
     )
 
     env_file = prod_dir / ".env"

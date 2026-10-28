@@ -25,15 +25,46 @@ Every snapshot created by `community-stack backup` captures:
    - Canonical announcements, delivery history, admin accounts, sessions, and publishing settings (`data/announcements/announcements.db`).
    - Element Web branding and client configuration (`data/element`).
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
-4. **Secrets (`.env`, unencrypted):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
+4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
 5. **Snapshot Manifest (`manifest.json`):** Timestamp, project identifier, and integrity checksum metadata.
 
 The announcement database and generated public feeds are included because the
 backup archives the entire `data/` directory. The announcement SQLite file is
 captured with SQLite's online backup API so a concurrent organizer write does
-not leave a partial database in the snapshot. Snapshots are owner-only but not
-encrypted; protect them as sensitive data: the SQLite database contains password hashes and
-authentication/session records as well as public announcement content.
+not leave a partial database in the snapshot. The SQLite database contains
+password hashes and authentication/session records as well as public
+announcement content, and `.env` holds every service secret, so snapshots are
+sensitive data.
+
+### Encryption
+
+With `operations.backups.encryption: "restic"` (the default for new
+configurations), each snapshot goes into a [restic](https://restic.net/)
+repository and is encrypted on the host before it is written, locally or to the
+S3 or SFTP target. Nothing is left in plaintext: the staging directory is
+deleted once restic has the snapshot. Retention uses
+`restic forget --keep-within <retention_days>d --prune`.
+
+With `encryption: "none"`, snapshots are gzip archives with owner-only (`0600`)
+permissions but **no encryption**, and off-site targets are ignored. Configs
+written before this setting existed behave this way, and `community-stack
+check` warns about it.
+
+`RESTIC_PASSWORD` in `.env` is the only key to the repository. Keep a copy
+offline (for example in a password manager held by two maintainers): without
+it, encrypted backups cannot be restored.
+
+### Turning on encryption for an existing deployment
+
+1. Install restic on the host (`sudo apt install restic`; the Ansible host role
+   installs it for new hosts).
+2. Check that `RESTIC_PASSWORD` in `.env` is set and stored safely offline.
+3. Add `encryption: "restic"` under `operations.backups` in
+   `community-stack.yaml`.
+4. Run `community-stack backup`, then `community-stack backup verify`, then a
+   restore drill (section 4).
+5. Once the encrypted snapshot is verified, delete the old plaintext
+   `backups/snap_*.tar.gz` archives.
 
 ---
 
@@ -61,6 +92,7 @@ operations:
     enabled: true
     schedule: "daily"
     target: "s3"
+    encryption: "restic"
     retention_days: 30
 ```
 
