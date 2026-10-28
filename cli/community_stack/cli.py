@@ -7,19 +7,16 @@ import sys
 from collections.abc import Sequence
 
 from community_stack import __version__
+from community_stack.commands.backup_cmd import run_backup, run_backup_verify
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.init_cmd import run_init
 from community_stack.commands.install_cmd import run_install
 from community_stack.commands.logs_cmd import run_logs
 from community_stack.commands.plan_cmd import run_plan
+from community_stack.commands.restore_cmd import run_restore
 from community_stack.commands.status_cmd import run_status
-from community_stack.commands.stubs import (
-    run_backup,
-    run_backup_verify,
-    run_doctor,
-    run_restore,
-    run_upgrade,
-)
+from community_stack.commands.stubs import run_doctor
+from community_stack.commands.upgrade_cmd import run_upgrade
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -86,14 +83,25 @@ def create_parser() -> argparse.ArgumentParser:
     p_backup.add_argument(
         "-c", "--config", default="community-stack.yaml", help="Path to config file"
     )
+    p_backup.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
+    p_backup.add_argument("--snapshot", default=None, help="Specific snapshot ID to verify")
 
     # upgrade
     p_upgrade = subparsers.add_parser("upgrade", help="Upgrade an individual service")
     p_upgrade.add_argument("service", help="Name of service to upgrade")
+    p_upgrade.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+    p_upgrade.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
 
     # restore
     p_restore = subparsers.add_parser("restore", help="Restore backup to isolated directory")
     p_restore.add_argument("--target", required=True, help="Target directory for restored data")
+    p_restore.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+    p_restore.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
+    p_restore.add_argument("--snapshot", default=None, help="Specific snapshot ID to restore")
     p_restore.add_argument(
         "--confirm", action="store_true", help="Explicit confirmation to proceed"
     )
@@ -133,12 +141,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_logs(service=args.service, follow=args.follow, tail=args.tail)
     elif args.command == "backup":
         if args.action == "verify":
-            return run_backup_verify()
-        return run_backup(config_path=args.config)
+            return run_backup_verify(
+                config_path=args.config, env_path=args.env, snapshot_id=args.snapshot
+            )
+        return run_backup(config_path=args.config, env_path=args.env)
     elif args.command == "upgrade":
-        return run_upgrade(service=args.service)
+        return run_upgrade(service=args.service, config_path=args.config, env_path=args.env)
     elif args.command == "restore":
-        return run_restore(target=args.target, confirm=args.confirm)
+        return run_restore(
+            target=args.target,
+            config_path=args.config,
+            env_path=args.env,
+            snapshot_id=args.snapshot,
+            confirm=args.confirm,
+        )
     elif args.command == "doctor":
         return run_doctor(config_path=args.config, env_path=args.env)
     else:

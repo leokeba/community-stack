@@ -26,3 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented `community-stack install`, `community-stack status`, and `community-stack logs` CLI commands.
   - End-to-end deployment documentation and firewall/DNS guide (`docs/deployment.md`).
   - Integration test suite for container service configurations, network policies, and healthchecks.
+- **Milestone 3: Backups, Restoration, and Safe Upgrades:**
+  - Implemented encrypted backup engine (`BackupEngine`) backing up PostgreSQL dumps, persistent data, config, and credentials.
+  - Snapshot verification command (`community-stack backup verify`) validating manifest and archive integrity.
+  - Isolated restore command (`community-stack restore --target <dir> --confirm`) with safety guards preventing unconfirmed overwrite of active environments.
+  - Safe service upgrade command (`community-stack upgrade <service>`) with automatic pre-upgrade snapshots.
+  - Comprehensive backup, restore, and disaster recovery runbook (`docs/backup-restore.md`).
+  - End-to-end disaster recovery integration test suite (`tests/recovery/test_backup_restore.py`).

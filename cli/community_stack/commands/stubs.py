@@ -1,4 +1,4 @@
-"""Stub and future milestone handlers for community-stack CLI commands."""
+"""Diagnostic doctor command implementation for community-stack CLI."""
 
 from __future__ import annotations
 
@@ -8,35 +8,6 @@ from community_stack.config import ConfigError, load_config
 from community_stack.redact import redact_dict
 from community_stack.secrets import parse_env_file
 from community_stack.validator import run_checks
-
-
-def run_backup(config_path: Path | str = "community-stack.yaml") -> int:
-    """Execute backup snapshot (Milestone 3)."""
-    print(
-        "[INFO] 'community-stack backup' is targeted for Milestone 3 (Backups, Restoration, Safe Upgrades)."
-    )
-    return 0
-
-
-def run_backup_verify() -> int:
-    """Verify backup integrity (Milestone 3)."""
-    print("[INFO] 'community-stack backup verify' is targeted for Milestone 3.")
-    return 0
-
-
-def run_upgrade(service: str) -> int:
-    """Perform service upgrade (Milestone 3)."""
-    print(f"[INFO] 'community-stack upgrade {service}' is targeted for Milestone 3.")
-    return 0
-
-
-def run_restore(target: str, confirm: bool = False) -> int:
-    """Restore from backup to an isolated target (Milestone 3)."""
-    if not confirm:
-        print("[ERROR] Restore requires explicit confirmation flag --confirm.")
-        return 1
-    print(f"[INFO] 'community-stack restore' targeting '{target}' is targeted for Milestone 3.")
-    return 0
 
 
 def run_doctor(

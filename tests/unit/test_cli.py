@@ -157,13 +157,40 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     assert main(["logs", "matrix"]) == 0
 
     # backup
-    assert main(["backup", "-c", str(config_file)]) == 0
-    assert main(["backup", "verify"]) == 0
+    assert main(["backup", "-c", str(config_file), "-e", str(env_file)]) == 0
+    assert main(["backup", "verify", "-c", str(config_file), "-e", str(env_file)]) == 0
 
     # upgrade
-    assert main(["upgrade", "matrix"]) == 0
+    assert main(["upgrade", "matrix", "-c", str(config_file), "-e", str(env_file)]) == 0
 
     # restore without confirm should fail
-    assert main(["restore", "--target", str(tmp_path / "restore_test")]) == 1
-    # restore with confirm should succeed stub
-    assert main(["restore", "--target", str(tmp_path / "restore_test"), "--confirm"]) == 0
+    assert (
+        main(
+            [
+                "restore",
+                "--target",
+                str(tmp_path / "restore_test"),
+                "-c",
+                str(config_file),
+                "-e",
+                str(env_file),
+            ]
+        )
+        == 1
+    )
+    # restore with confirm should succeed
+    assert (
+        main(
+            [
+                "restore",
+                "--target",
+                str(tmp_path / "restore_test"),
+                "-c",
+                str(config_file),
+                "-e",
+                str(env_file),
+                "--confirm",
+            ]
+        )
+        == 0
+    )
