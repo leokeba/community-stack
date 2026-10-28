@@ -37,6 +37,7 @@ from community_stack.admin.store import (
     tokens_match,
 )
 from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
+from community_stack.agent.health import LOG_LINES, LOG_SERVICES
 from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
@@ -1169,6 +1170,42 @@ def create_app(
                 "link": "/admin/announcements/new",
             },
         ]
+
+    @app.get("/admin/health")
+    async def health_page(request: Request) -> Response:
+        session = require(request, "system")
+        service = request.query_params.get("service")
+        lines = request.query_params.get("lines", "200")
+        health_result, logs, error = None, None, None
+        if agent.available():
+            try:
+                health_result = await run_in_threadpool(
+                    agent.call, "health.get", session["username"]
+                )
+                if service:
+                    logs = await run_in_threadpool(
+                        agent.call,
+                        "logs.get",
+                        session["username"],
+                        {"service": service, "lines": lines},
+                    )
+            except (AgentUnavailable, AgentRefused) as exc:
+                error = str(exc)
+        return render(
+            request,
+            "health.html",
+            page(
+                session,
+                agent_available=agent.available(),
+                health=health_result,
+                logs=logs,
+                error=error,
+                log_services=LOG_SERVICES,
+                log_lines=LOG_LINES,
+                selected_service=service,
+                selected_lines=lines,
+            ),
+        )
 
     @app.get("/admin/start")
     async def start(request: Request) -> Response:

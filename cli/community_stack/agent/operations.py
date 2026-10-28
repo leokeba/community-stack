@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
+from community_stack.agent import health
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
@@ -205,6 +206,24 @@ CATALOG: dict[str, Operation] = {
             backup_verify,
             params=(Param("snapshot_id", SNAPSHOT_ID),),
             summary="Check that a snapshot is intact and complete.",
+        ),
+        Operation(
+            "health.get",
+            READ,
+            "system",
+            health.health_get,
+            summary="Check disk space, backups, certificates and services.",
+        ),
+        Operation(
+            "logs.get",
+            READ,
+            "system",
+            health.logs_get,
+            params=(
+                Param("service", re.compile("|".join(health.LOG_SERVICES)), required=True),
+                Param("lines", re.compile("|".join(health.LOG_LINES))),
+            ),
+            summary="Read a service's recent logs, with secrets removed.",
         ),
         Operation(
             "config.get",

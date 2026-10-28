@@ -116,6 +116,17 @@ are listed on the announcement's page under "Scheduled deliveries".
 
 ---
 
+### Health and logs
+
+The console's **Health** page (owners and admins, through the control agent)
+checks free disk space, how old the latest backup is, the HTTPS certificates of
+the web and Matrix domains, and whether every stack container is running and
+healthy. It also shows the last 50, 200 or 500 lines of any service's logs.
+Before logs leave the agent, every value from `.env`, saved channel
+credentials, bearer tokens and Telegram bot tokens are replaced with
+`[REDACTED]`; logs can still contain IP addresses and account names, which is
+why the page is limited to owners and admins.
+
 ### Services and settings
 
 With the control agent installed, owners and admins change settings on the

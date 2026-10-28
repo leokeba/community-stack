@@ -120,3 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Uploads are checked with Pillow, rotated upright, stripped of EXIF and other metadata (including GPS location), resized to 1600 px, and protected against decompression bombs.
   - Images are private until publication, copied to the public feed with Open Graph tags when published, and removed when withdrawn.
   - Mastodon and Bluesky upload the image natively with its description (Bluesky re-encoded under 1 MB); Discord attaches it with its description; Slack, ActivityPub and email reference the public image with its description. Matrix and Telegram do not send images yet.
+- **Roadmap Phase 1: Health and logs:**
+  - Agent operations `health.get` (disk space, latest backup age, certificate expiry for the web and Matrix domains, container state and health) and `logs.get` (last 50, 200 or 500 lines of one service).
+  - Logs are redacted in the agent: `.env` values, saved channel credentials, bearer tokens and Telegram bot tokens.
+  - Console Health page for owners and admins.
