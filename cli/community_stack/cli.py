@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 
 from community_stack import __version__
+from community_stack.commands.announce_cmd import run_announce
 from community_stack.commands.backup_cmd import run_backup, run_backup_verify
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.init_cmd import run_init
@@ -115,6 +116,36 @@ def create_parser() -> argparse.ArgumentParser:
     )
     p_doctor.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
 
+    # announce
+    p_announce = subparsers.add_parser(
+        "announce", help="Manage and publish canonical community announcements"
+    )
+    announce_subs = p_announce.add_subparsers(dest="announce_action", help="Announcement actions")
+
+    p_ann_list = announce_subs.add_parser("list", help="List recent announcements")
+    p_ann_list.add_argument("--limit", type=int, default=20, help="Max items to list")
+
+    p_ann_create = announce_subs.add_parser("create", help="Publish a new announcement")
+    p_ann_create.add_argument("-t", "--title", required=True, help="Announcement title")
+    p_ann_create.add_argument("-b", "--body", required=True, help="Announcement body content")
+    p_ann_create.add_argument("-a", "--author", help="Author name or organization")
+    p_ann_create.add_argument("--tags", help="Comma-separated tags")
+
+    p_ann_show = announce_subs.add_parser("show", help="Show announcement details")
+    p_ann_show.add_argument("id", help="Announcement ID")
+
+    p_ann_update = announce_subs.add_parser("update", help="Update an announcement")
+    p_ann_update.add_argument("id", help="Announcement ID to update")
+    p_ann_update.add_argument("-t", "--title", help="New title")
+    p_ann_update.add_argument("-b", "--body", help="New body content")
+    p_ann_update.add_argument("-a", "--author", help="New author name")
+
+    p_ann_withdraw = announce_subs.add_parser("withdraw", help="Withdraw an announcement")
+    p_ann_withdraw.add_argument("id", help="Announcement ID to withdraw")
+
+    p_ann_retry = announce_subs.add_parser("retry", help="Retry failed deliveries")
+    p_ann_retry.add_argument("--id", help="Optional specific announcement ID to retry")
+
     return parser
 
 
@@ -157,6 +188,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif args.command == "doctor":
         return run_doctor(config_path=args.config, env_path=args.env)
+    elif args.command == "announce":
+        return run_announce(args=args)
     else:
         parser.print_help()
         return 2

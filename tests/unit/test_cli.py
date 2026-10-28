@@ -194,3 +194,36 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
         )
         == 0
     )
+
+    # announce create
+    assert (
+        main(
+            [
+                "announce",
+                "create",
+                "--title",
+                "Test Announcement",
+                "--body",
+                "This is a test body.",
+                "--author",
+                "Test Author",
+            ]
+        )
+        == 0
+    )
+
+    # announce list
+    assert main(["announce", "list"]) == 0
+
+    # announce show, update, withdraw
+    from community_stack.announcements.storage import AnnouncementStorage
+
+    storage = AnnouncementStorage()
+    anns = storage.list_announcements()
+    assert len(anns) > 0
+    ann_id = anns[0].id
+
+    assert main(["announce", "show", ann_id]) == 0
+    assert main(["announce", "update", ann_id, "--title", "Updated Test Title"]) == 0
+    assert main(["announce", "withdraw", ann_id]) == 0
+    assert main(["announce", "retry"]) == 0

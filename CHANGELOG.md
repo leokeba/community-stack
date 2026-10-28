@@ -33,3 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Safe service upgrade command (`community-stack upgrade <service>`) with automatic pre-upgrade snapshots.
   - Comprehensive backup, restore, and disaster recovery runbook (`docs/backup-restore.md`).
   - End-to-end disaster recovery integration test suite (`tests/recovery/test_backup_restore.py`).
+- **Milestone 4: Canonical Public Announcements:**
+  - Canonical announcement domain model (`Announcement`) with strict field and length validations.
+  - Durable SQLite storage engine (`AnnouncementStorage`) tracking announcements and per-adapter delivery states.
+  - Web & RSS adapter (`WebFeedAdapter`) generating public HTML archive, Atom 1.0, RSS 2.0, and JSON Feed (v1.1).
+  - Matrix announcement room adapter (`MatrixRoomAdapter`) posting formatted notices via Client-Server API with idempotency keys.
+  - Announcement publishing orchestrator (`AnnouncementPublisher`) with failure isolation, bounded retries, and update/withdrawal propagation.
+  - CLI commands: `community-stack announce create`, `list`, `show`, `update`, `withdraw`, and `retry`.
+  - Comprehensive unit and integration test suite verifying multi-channel delivery and adapter failure isolation.
