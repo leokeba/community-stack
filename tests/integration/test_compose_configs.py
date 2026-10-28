@@ -77,6 +77,7 @@ def test_admin_app_is_internal_and_has_no_host_ports():
         data = yaml.safe_load(stream)
     app = data["services"]["announcements"]
     assert "ports" not in app
+    assert app["user"] == "${COMMUNITY_STACK_UID:-1000}:${COMMUNITY_STACK_GID:-1000}"
     assert "proxy_net" in app["networks"]
     assert "announcements_internal" in app["networks"]
     assert data["networks"]["announcements_internal"]["internal"] is True

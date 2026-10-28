@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     env_file:
       - ../../.env
+    user: "${COMMUNITY_STACK_UID:-1000}:${COMMUNITY_STACK_GID:-1000}"
     environment:
       COMMUNITY_STACK_ADMIN_SETUP_TOKEN: ${COMMUNITY_STACK_ADMIN_SETUP_TOKEN:-}
       COMMUNITY_STACK_ANNOUNCEMENTS_DB_PATH: /app/data/announcements/announcements.db

@@ -109,6 +109,10 @@ web domain but requires authentication for all publishing pages. The public
 announcement archive remains unauthenticated at `/feed/announcements.html`.
 The app's SQLite database is mounted from `data/announcements`; generated public
 files are shared read-only with the landing service from `data/landing/feed`.
+The app runs as UID/GID `1000:1000` by default so it can write those host
+directories without root privileges. If the deployment account owns them under
+different IDs, set `COMMUNITY_STACK_UID` and `COMMUNITY_STACK_GID` in `.env`
+before deploying.
 
 For Matrix delivery, configure `services.announcements.channels.matrix_room`
 only after verifying that the target room is the public announcements room.
