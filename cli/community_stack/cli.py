@@ -9,15 +9,15 @@ from collections.abc import Sequence
 from community_stack import __version__
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.init_cmd import run_init
+from community_stack.commands.install_cmd import run_install
+from community_stack.commands.logs_cmd import run_logs
 from community_stack.commands.plan_cmd import run_plan
+from community_stack.commands.status_cmd import run_status
 from community_stack.commands.stubs import (
     run_backup,
     run_backup_verify,
     run_doctor,
-    run_install,
-    run_logs,
     run_restore,
-    run_status,
     run_upgrade,
 )
 

@@ -1,0 +1,19 @@
+services:
+  element:
+    image: vectorim/element-web:v1.11.70
+    container_name: community_element
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/app/config.json:ro
+    networks:
+      - proxy_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  proxy_net:
+    external: true

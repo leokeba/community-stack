@@ -1,0 +1,23 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "https://matrix.example.org",
+      "server_name": "matrix.example.org"
+    },
+    "m.identity_server": {
+      "base_url": ""
+    }
+  },
+  "brand": "Community Chat",
+  "integrations_ui_url": "",
+  "integrations_rest_url": "",
+  "integrations_widgets_urls": [],
+  "bug_report_endpoint_url": "",
+  "default_theme": "dark",
+  "room_directory": {
+    "servers": ["matrix.example.org"]
+  },
+  "setting_defaults": {
+    "breadcrumbs": true
+  }
+}

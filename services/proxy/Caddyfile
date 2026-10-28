@@ -1,0 +1,71 @@
+# Caddyfile for Community Communications Stack
+# Ingress routing with automated ACME TLS
+
+{
+    admin off
+    email {$ACME_EMAIL:admin@example.org}
+}
+
+# ------------------------------------------------------------------------------
+# Public Community Web Portal & Element Web Client
+# ------------------------------------------------------------------------------
+{$WEB_DOMAIN:community.example.org} {
+    encode zstd gzip
+
+    # Element Web Matrix Client
+    handle_path /app* {
+        reverse_proxy community_element:80
+    }
+
+    # Public Announcements Feed (Milestone 4)
+    handle_path /feed* {
+        reverse_proxy community_landing:80
+    }
+
+    # Default: Public Landing Page and Service Directory
+    handle {
+        reverse_proxy community_landing:80
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Matrix Homeserver (Synapse) & Delegation Endpoints
+# ------------------------------------------------------------------------------
+{$MATRIX_DOMAIN:matrix.example.org} {
+    encode zstd gzip
+
+    # Matrix Client-Server API
+    handle /_matrix/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    handle /_synapse/client/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    # Matrix Client Delegation (.well-known/matrix/client)
+    handle /.well-known/matrix/client {
+        header Access-Control-Allow-Origin "*"
+        header Content-Type "application/json"
+        respond `{"m.homeserver":{"base_url":"https://{$MATRIX_DOMAIN:matrix.example.org}"}}` 200
+    }
+
+    # Matrix Server Federation Delegation (.well-known/matrix/server)
+    handle /.well-known/matrix/server {
+        header Access-Control-Allow-Origin "*"
+        header Content-Type "application/json"
+        respond `{"m.server":"{$MATRIX_DOMAIN:matrix.example.org}:443"}` 200
+    }
+
+    # Fallback to landing page
+    handle {
+        respond "Matrix Homeserver Active" 200
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Matrix Direct Federation Port (Optional)
+# ------------------------------------------------------------------------------
+:8448 {
+    reverse_proxy community_synapse:8008
+}

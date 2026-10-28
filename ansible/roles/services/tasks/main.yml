@@ -1,0 +1,18 @@
+---
+- name: Deploy Landing Page Service
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/landing"
+    state: present
+  when: services.landing.enabled | default(true)
+
+- name: Deploy Matrix Synapse and PostgreSQL Service
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/matrix"
+    state: present
+  when: services.matrix.enabled | default(true)
+
+- name: Deploy Element Web Client Service
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/element"
+    state: present
+  when: services.element.enabled | default(true)

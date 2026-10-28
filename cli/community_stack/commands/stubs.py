@@ -10,38 +10,6 @@ from community_stack.secrets import parse_env_file
 from community_stack.validator import run_checks
 
 
-def run_install(
-    config_path: Path | str = "community-stack.yaml", env_path: Path | str = ".env"
-) -> int:
-    """Deploy enabled services (Milestone 2 implementation)."""
-    checks = run_checks(config_path=config_path, env_path=env_path)
-    if not checks.ok:
-        print("[ERROR] Pre-flight checks failed. Fix the issues before installing:")
-        for err in checks.errors:
-            print(f"  - {err}")
-        return 1
-
-    print(
-        "[INFO] 'community-stack install' is targeted for Milestone 2 (Minimal Deployable Infrastructure)."
-    )
-    print(
-        "       Pre-flight checks passed. Next step: deploy Compose services via Milestone 2 playbooks."
-    )
-    return 0
-
-
-def run_status() -> int:
-    """Report service health and container status."""
-    print("[INFO] Service status requires active deployment (Milestone 2).")
-    return 0
-
-
-def run_logs(service: str, follow: bool = False, tail: int = 100) -> int:
-    """Stream or display service logs."""
-    print(f"[INFO] Streaming logs for service '{service}' requires active deployment.")
-    return 0
-
-
 def run_backup(config_path: Path | str = "community-stack.yaml") -> int:
     """Execute backup snapshot (Milestone 3)."""
     print(

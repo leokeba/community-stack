@@ -109,7 +109,40 @@ def test_cli_doctor_command(tmp_path, capsys):
     assert "[REDACTED]" in captured.out
 
 
-def test_cli_stub_commands(tmp_path, capsys):
+def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
+    import subprocess
+
+    from community_stack import docker
+
+    # Mock docker calls so unit tests don't mutate host containers
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(docker, "ensure_network", lambda net="proxy_net": True)
+    monkeypatch.setattr(
+        docker,
+        "run_compose",
+        lambda project_dir, args, env_file=None, capture_output=False: subprocess.CompletedProcess(
+            args=["docker", "compose"], returncode=0, stdout="mock success", stderr=""
+        ),
+    )
+    monkeypatch.setattr(
+        docker,
+        "list_community_containers",
+        lambda: [
+            {
+                "name": "community_proxy",
+                "image": "caddy:2.8.4-alpine",
+                "status": "Up 2 hours",
+                "state": "running",
+            },
+            {
+                "name": "community_synapse",
+                "image": "matrixdotorg/synapse:v1.119.0",
+                "status": "Up 2 hours",
+                "state": "running",
+            },
+        ],
+    )
+
     main(["init", "--dir", str(tmp_path)])
     config_file = tmp_path / "community-stack.yaml"
     env_file = tmp_path / ".env"

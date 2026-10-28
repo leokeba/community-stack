@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Community Communications Portal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="container header-content">
+      <h1>Community Communications</h1>
+      <p class="tagline">Resilient, independent infrastructure for community coordination and public updates.</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card alert-box" id="emergency-banner" style="display: none;">
+      <h2>⚠️ Emergency Advisory</h2>
+      <p id="emergency-text">Notice: Live updates will appear here during network disruptions.</p>
+    </section>
+
+    <section class="services-grid">
+      <div class="card service-card">
+        <h3>💬 Community Chat</h3>
+        <p>Join discussion rooms and coordinate with the community via Matrix & Element Web.</p>
+        <a href="/app" class="btn btn-primary" target="_blank" rel="noopener">Open Web Chat</a>
+      </div>
+
+      <div class="card service-card">
+        <h3>📢 Public Announcements</h3>
+        <p>Read authoritative, verified public announcements without requiring an account.</p>
+        <div class="btn-group">
+          <a href="/feed/announcements.html" class="btn btn-secondary">Read Feed</a>
+          <a href="/feed/atom.xml" class="btn btn-outline" target="_blank">RSS / Atom</a>
+        </div>
+      </div>
+
+      <div class="card service-card">
+        <h3>🛡️ Privacy & Infrastructure</h3>
+        <p>Self-hosted on independent servers. Encrypted, federated, and free of commercial tracking.</p>
+        <a href="#about" class="btn btn-outline">Learn More</a>
+      </div>
+    </section>
+
+    <section class="card" id="about">
+      <h2>About This Infrastructure</h2>
+      <p>
+        This portal operates on the <strong>Community Communications Stack</strong>, an open-source,
+        self-hosted infrastructure layer combining Matrix Synapse, Element Web, Caddy, and independent
+        announcement distribution channels.
+      </p>
+      <ul>
+        <li><strong>Independence:</strong> Operates independently of commercial corporate messaging platforms.</li>
+        <li><strong>Resilience:</strong> Public updates remain readable even during external outages.</li>
+        <li><strong>Separation:</strong> Public news, community rooms, and internal coordination remain distinct.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-content">
+      <p>Powered by Community Communications Stack &bull; Open Source (AGPLv3)</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,41 @@
+---
+- name: Set UFW default policies (deny incoming, allow outgoing)
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: "incoming", policy: "deny" }
+    - { direction: "outgoing", policy: "allow" }
+
+- name: Allow SSH on port 22
+  community.general.ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    comment: "SSH rate-limited"
+
+- name: Allow HTTP (port 80) for ACME TLS challenges
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    comment: "HTTP automated TLS"
+
+- name: Allow HTTPS (port 443)
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    comment: "HTTPS secure ingress"
+
+- name: Allow Matrix federation port 8448 if federation is enabled
+  community.general.ufw:
+    rule: allow
+    port: "8448"
+    proto: tcp
+    comment: "Matrix direct federation"
+  when: services.matrix.federation | default(false)
+
+- name: Enable UFW firewall
+  community.general.ufw:
+    state: enabled
