@@ -1,0 +1,13 @@
+# Build context for services/announcements/Dockerfile (context is the repo root).
+# Bytecode caches can be written by root-run tools on the server and be unreadable
+# to the deploying user; secrets and runtime data never belong in an image.
+**/__pycache__
+**/*.pyc
+.git
+.venv
+.env
+.env.*
+data
+backups
+community-stack.yaml
+community-stack.yaml.previous

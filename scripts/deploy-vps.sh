@@ -74,8 +74,8 @@ printf 'Creating and verifying a restrictive pre-deployment backup...\n'
 ssh "$target" bash -s -- "$remote_dir" <<'REMOTE'
 set -eu
 project_dir=$1
-sudo -n sh -c "umask 077; cd '$project_dir' && .venv/bin/community-stack backup create"
-sudo -n sh -c "cd '$project_dir' && .venv/bin/community-stack backup verify"
+sudo -n env PYTHONDONTWRITEBYTECODE=1 sh -c "umask 077; cd '$project_dir' && .venv/bin/community-stack backup create"
+sudo -n env PYTHONDONTWRITEBYTECODE=1 sh -c "cd '$project_dir' && .venv/bin/community-stack backup verify"
 REMOTE
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/community-stack-deploy.XXXXXX")"

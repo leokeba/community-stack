@@ -89,6 +89,12 @@ def test_admin_app_is_internal_and_has_no_host_ports():
     )
 
 
+def test_image_build_context_excludes_caches_secrets_and_data():
+    ignored = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+    for pattern in ("**/__pycache__", ".env", "data", "backups"):
+        assert pattern in ignored
+
+
 def test_proxy_does_not_expose_plain_http_federation_port():
     with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
         ports = yaml.safe_load(stream)["services"]["caddy"]["ports"]

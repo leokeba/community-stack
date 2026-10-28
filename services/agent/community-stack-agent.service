@@ -20,6 +20,9 @@ StateDirectory=community-stack-agent
 CacheDirectory=community-stack-agent
 Environment=HOME=/var/lib/community-stack-agent
 Environment=XDG_CACHE_HOME=/var/cache/community-stack-agent
+# Running as root from the source tree, Python would leave root-owned __pycache__
+# folders there that the deploying user cannot read.
+Environment=PYTHONDONTWRITEBYTECODE=1
 
 UMask=0077
 NoNewPrivileges=yes
