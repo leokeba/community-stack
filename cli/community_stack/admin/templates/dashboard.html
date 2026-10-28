@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Publishing dashboard</h1>
+<p>Delivery failures needing attention: <strong>{{ failed_count }}</strong></p>
+<p><a href="/admin/announcements/new">Create a draft</a> · <a href="/admin/announcements">View all announcements</a></p>
+<h2>Recent announcements</h2>
+{% if announcements %}
+<table>
+  <thead><tr><th>Title</th><th>Status</th><th>Updated</th></tr></thead>
+  <tbody>
+  {% for announcement in announcements %}
+  <tr>
+    <td><a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
+    <td class="status">{{ announcement.status.value }}</td>
+    <td>{{ announcement.published_at[:10] }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No announcements yet.</p>
+{% endif %}
+{% endblock %}

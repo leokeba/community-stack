@@ -134,6 +134,18 @@ def create_parser() -> argparse.ArgumentParser:
     p_ann_create.add_argument("-a", "--author", help="Author name or organization")
     p_ann_create.add_argument("--tags", help="Comma-separated tags")
 
+    p_ann_draft = announce_subs.add_parser("draft", help="Save a draft without publishing")
+    p_ann_draft.add_argument("-t", "--title", required=True, help="Announcement title")
+    p_ann_draft.add_argument("-b", "--body", required=True, help="Announcement body content")
+    p_ann_draft.add_argument("-a", "--author", help="Author name or organization")
+    p_ann_draft.add_argument("--tags", help="Comma-separated tags")
+
+    p_ann_preview = announce_subs.add_parser("preview", help="Preview a saved announcement")
+    p_ann_preview.add_argument("id", help="Announcement ID")
+
+    p_ann_publish = announce_subs.add_parser("publish", help="Publish a saved draft")
+    p_ann_publish.add_argument("id", help="Draft announcement ID")
+
     p_ann_show = announce_subs.add_parser("show", help="Show announcement details")
     p_ann_show.add_argument("id", help="Announcement ID")
 

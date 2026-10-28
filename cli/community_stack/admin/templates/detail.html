@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ announcement.title }}{% endblock %}
+{% block content %}
+<p><a href="/admin/announcements">&larr; Announcements</a></p>
+<h1>{{ announcement.title }}</h1>
+<p class="muted">Status: <strong>{{ announcement.status.value }}</strong> · {{ announcement.published_at[:10] }}</p>
+<article>
+  {% if announcement.author %}<p><strong>By {{ announcement.author }}</strong></p>{% endif %}
+  <div style="white-space: pre-wrap">{{ announcement.body }}</div>
+</article>
+{% if announcement.status.value != "withdrawn" %}
+<p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
+{% endif %}
+{% if announcement.status.value == "draft" %}
+<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
+  <p><button type="submit">Publish announcement</button></p>
+</form>
+{% endif %}
+{% if announcement.status.value in ["published", "updated"] %}
+<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/withdraw">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label><input type="checkbox" name="confirm" value="withdraw" required> I confirm withdrawal from public channels.</label>
+  <p><button type="submit">Withdraw announcement</button></p>
+</form>
+{% endif %}
+<h2>Channel deliveries</h2>
+{% if deliveries %}
+<table>
+  <thead><tr><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead>
+  <tbody>
+  {% for delivery in deliveries %}
+  <tr>
+    <td>{{ delivery.adapter_name }}</td>
+    <td>{{ delivery.status }}</td>
+    <td>{{ delivery.attempts }}</td>
+    <td>{{ delivery.last_error or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No channel deliveries have been attempted.</p>
+{% endif %}
+{% if deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
+<form method="post" action="/admin/announcements/{{ announcement.id }}/retry">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">Retry safe, idempotent failed deliveries</button>
+</form>
+{% endif %}
+{% if announcement.canonical_url %}
+<p>Public page: <a href="{{ announcement.canonical_url }}">{{ announcement.canonical_url }}</a></p>
+{% endif %}
+{% endblock %}

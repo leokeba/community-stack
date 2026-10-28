@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tarfile
 from dataclasses import dataclass
@@ -150,8 +151,38 @@ class BackupEngine:
             data_dir = self.project_root / "data"
             data_tar = staging_dir / "data.tar.gz"
             if data_dir.is_dir():
+                announcement_db = data_dir / "announcements" / "announcements.db"
+                sqlite_snapshot = staging_dir / "announcements.db.snapshot"
+                if announcement_db.is_file():
+                    try:
+                        with (
+                            sqlite3.connect(announcement_db) as source,
+                            sqlite3.connect(sqlite_snapshot) as destination,
+                        ):
+                            source.backup(destination)
+                    except sqlite3.Error as exc:
+                        raise BackupError(
+                            f"Could not create a consistent announcement database snapshot: {exc}"
+                        ) from exc
+
+                def exclude_live_sqlite_files(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
+                    relative_name = member.name.removeprefix("data/")
+                    if (
+                        relative_name == "announcements/announcements.db"
+                        or relative_name.startswith("announcements/announcements.db-")
+                    ):
+                        return None
+                    return member
+
                 with tarfile.open(data_tar, "w:gz") as tar:
-                    tar.add(data_dir, arcname="data")
+                    tar.add(data_dir, arcname="data", filter=exclude_live_sqlite_files)
+                    if sqlite_snapshot.is_file():
+                        tar.add(
+                            sqlite_snapshot,
+                            arcname="data/announcements/announcements.db",
+                        )
+                if sqlite_snapshot.is_file():
+                    sqlite_snapshot.unlink()
 
             # 3. Securely copy configuration and env
             shutil.copy(self.config_path, staging_dir / "community-stack.yaml")

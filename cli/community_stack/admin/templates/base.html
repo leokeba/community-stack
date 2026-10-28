@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Announcements{% endblock %} · Community Stack</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.5; color: #17212b; background: #f5f7f8; }
+    body { margin: 0; }
+    header, main { max-width: 56rem; margin: auto; padding: 1rem; }
+    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; background: #fff; border-bottom: 1px solid #d5dde2; }
+    header nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+    main { padding-top: 1.5rem; }
+    article, .panel, form.card { background: white; border: 1px solid #d5dde2; border-radius: .4rem; padding: 1rem; margin: 1rem 0; }
+    label { display: block; font-weight: 650; margin: .75rem 0 .25rem; }
+    input, textarea, button { box-sizing: border-box; font: inherit; max-width: 100%; }
+    input[type=text], input[type=password], textarea { width: 100%; padding: .6rem; border: 1px solid #77858f; border-radius: .25rem; }
+    textarea { min-height: 12rem; }
+    button { padding: .55rem .9rem; border: 0; border-radius: .25rem; background: #174f71; color: white; cursor: pointer; }
+    a { color: #075985; }
+    .error { padding: .75rem; background: #fff1f0; border-left: .3rem solid #b42318; }
+    .muted { color: #4a5963; }
+    .status { font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; background: white; }
+    th, td { padding: .55rem; border-bottom: 1px solid #d5dde2; text-align: left; vertical-align: top; }
+    .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+    @media (max-width: 36rem) { table { font-size: .9rem; } th, td { padding: .35rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Community announcements</strong>
+    {% if username %}
+    <nav aria-label="Administration">
+      <a href="/admin">Dashboard</a>
+      <a href="/admin/announcements">Announcements</a>
+      <a href="/admin/settings">Settings</a>
+      <form method="post" action="/admin/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">Log out</button>
+      </form>
+    </nav>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

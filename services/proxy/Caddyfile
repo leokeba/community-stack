@@ -17,6 +17,11 @@
         reverse_proxy community_element:80
     }
 
+    # Authenticated announcement publishing interface
+    handle /admin* {
+        reverse_proxy community_announcements:8080
+    }
+
     # Public Announcements Feed (Milestone 4)
     handle /feed* {
         reverse_proxy community_landing:80
@@ -72,6 +77,10 @@ http://localhost, http://127.0.0.1 {
     # Element Web Matrix Client
     handle_path /app* {
         reverse_proxy community_element:80
+    }
+
+    handle /admin* {
+        reverse_proxy community_announcements:8080
     }
 
     # Public Announcements Feed

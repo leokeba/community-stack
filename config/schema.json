@@ -75,7 +75,61 @@
           "required": ["enabled"],
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" }
+            "enabled": { "type": "boolean" },
+            "channels": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "web_feed": {
+                  "type": "object",
+                  "required": ["enabled"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" }
+                  }
+                },
+                "matrix_room": {
+                  "type": "object",
+                  "required": ["enabled"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "homeserver_url": {
+                      "type": "string",
+                      "pattern": "^https?://[^/]+/?$"
+                    },
+                    "room_id": {
+                      "type": "string",
+                      "pattern": "^![^: ]+:[^: ]+$"
+                    },
+                    "access_token_env": {
+                      "type": "string",
+                      "pattern": "^[A-Z_][A-Z0-9_]*$"
+                    },
+                    "public_announcement_room": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": { "enabled": { "const": true } },
+                        "required": ["enabled"]
+                      },
+                      "then": {
+                        "required": [
+                          "homeserver_url",
+                          "room_id",
+                          "access_token_env",
+                          "public_announcement_room"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "whatsapp_bridge": {

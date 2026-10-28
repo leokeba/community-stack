@@ -14,7 +14,7 @@ def get_compose_files() -> list[Path]:
 
 def test_compose_files_exist():
     files = get_compose_files()
-    expected_services = {"proxy", "landing", "matrix", "element"}
+    expected_services = {"proxy", "landing", "matrix", "element", "announcements"}
     found_services = {f.parent.name for f in files}
     assert expected_services.issubset(found_services), (
         f"Missing services: {expected_services - found_services}"
@@ -71,6 +71,17 @@ def test_database_is_on_internal_network_only():
         )
 
 
+def test_admin_app_is_internal_and_has_no_host_ports():
+    app_compose = Path("services/announcements/docker-compose.yml")
+    with open(app_compose, "r", encoding="utf-8") as stream:
+        data = yaml.safe_load(stream)
+    app = data["services"]["announcements"]
+    assert "ports" not in app
+    assert "proxy_net" in app["networks"]
+    assert "announcements_internal" in app["networks"]
+    assert data["networks"]["announcements_internal"]["internal"] is True
+
+
 def test_caddyfile_exists_and_contains_routes():
     caddyfile = Path("services/proxy/Caddyfile")
     assert caddyfile.is_file()
@@ -78,6 +89,8 @@ def test_caddyfile_exists_and_contains_routes():
     assert "handle_path /app*" in content
     assert "handle /.well-known/matrix/client" in content
     assert "reverse_proxy community_synapse:8008" in content
+    assert "handle /admin*" in content
+    assert "reverse_proxy community_announcements:8080" in content
 
 
 def test_element_config_is_valid_json():

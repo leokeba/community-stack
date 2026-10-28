@@ -17,10 +17,16 @@ This handbook is written for volunteer infrastructure operators managing a live 
 | Verify backup | `uv run community-stack backup verify` | Cryptographic & structural verification |
 | Isolated restore | `uv run community-stack restore --target /tmp/test --confirm` | Non-destructive restore drill |
 | Safe upgrade | `uv run community-stack upgrade matrix` | Takes backup, pulls image, restarts |
-| Publish announcement | `uv run community-stack announce create -t "Title" -b "Body"` | Dispatches to Web, RSS, Matrix, etc. |
+| Draft announcement | `uv run community-stack announce draft -t "Title" -b "Body"` | Saves privately without dispatch |
+| Preview/publish | `uv run community-stack announce preview <id>` then `announce publish <id>` | Default output is local public HTML and feeds |
 | Export offline bundle | `uv run community-stack archive export` | Creates zero-dependency offline archive |
 | Emergency killswitch | `uv run community-stack bridge disable --confirm` | Disconnects WhatsApp bridge immediately |
 | Diagnostic report | `uv run community-stack doctor` | Non-destructive, secret-redacted audit |
+
+The admin UI at `/admin` supports the same publishing lifecycle. Only the local
+web-feed adapter is enabled by default. Matrix delivery requires explicit
+configuration; ActivityPub/email adapter classes are prototypes and have not
+been verified against live services.
 
 ---
 
@@ -28,8 +34,13 @@ This handbook is written for volunteer infrastructure operators managing a live 
 
 ### Maintenance Rules
 1. **Never upgrade without a backup:** `community-stack upgrade` automatically creates a safety snapshot before modifying any container.
-2. **One service at a time:** Upgrade services individually (e.g. `caddy` first, then `matrix`, then `element`).
+2. **One service at a time:** Upgrade services individually (e.g. `caddy` first, then `matrix`, `element`, and `announcements`).
 3. **Off-peak scheduling:** Announce maintenance windows to the community at least 24 hours in advance using `community-stack announce create`.
+
+The announcements application is built locally from the checked-out source:
+take a backup, update the repository, then run
+`uv run community-stack upgrade announcements`. This rebuilds the container
+without pulling an application image from a registry.
 
 ### Upstream Software Release Tracking
 We pin all container images to explicit upstream releases:

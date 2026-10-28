@@ -78,6 +78,12 @@ def get_required_secrets(config: dict[str, Any]) -> list[str]:
     if services.get("whatsapp_bridge", {}).get("enabled", False):
         required.extend(["WHATSAPP_AS_TOKEN", "WHATSAPP_HS_TOKEN"])
 
+    matrix_announcements = (
+        services.get("announcements", {}).get("channels", {}).get("matrix_room", {})
+    )
+    if matrix_announcements.get("enabled", False):
+        required.append(matrix_announcements["access_token_env"])
+
     return required
 
 

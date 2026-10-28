@@ -47,7 +47,13 @@ def run_announce(
 
         try:
             ann, results = publisher.publish(title=title, body=body, author=author, tags=tags)
-            print("  [SUCCESS] Announcement created and dispatched!")
+            failures = sum(not result.success for result in results.values())
+            if failures:
+                print("  [PARTIAL] Announcement saved; one or more channel deliveries failed.")
+            elif results:
+                print("  [SUCCESS] Announcement created and dispatched!")
+            else:
+                print("  [PARTIAL] Announcement saved, but no publishing destinations are enabled.")
             print(f"            ID:           {ann.id}")
             print(f"            Title:        {ann.title}")
             print(f"            Published At: {ann.published_at}")
@@ -56,7 +62,60 @@ def run_announce(
                 status_glyph = "[OK]  " if res.success else "[FAIL]"
                 detail = res.external_id or res.error or "completed"
                 print(f"    {status_glyph} {adapter_name:<14} -> {detail}")
+            return 1 if failures or not results else 0
+        except ModelValidationError as exc:
+            print(f"[ERROR] Validation failed: {exc}")
+            return 1
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+
+    elif action == "draft":
+        title = getattr(args, "title", None)
+        body = getattr(args, "body", None)
+        author = getattr(args, "author", None)
+        raw_tags = getattr(args, "tags", "") or ""
+        tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+
+        try:
+            ann = publisher.create_draft(title=title, body=body, author=author, tags=tags)
+            print(f"Draft saved. Preview it with: community-stack announce preview {ann.id}")
+            print(f"ID: {ann.id}")
             return 0
+        except ModelValidationError as exc:
+            print(f"[ERROR] Validation failed: {exc}")
+            return 1
+
+    elif action == "preview":
+        ann_id = getattr(args, "id", None)
+        try:
+            ann = publisher.preview(ann_id)
+        except KeyError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+
+        print(f"PREVIEW ({ann.status.value}): {ann.title}")
+        if ann.author:
+            print(f"By: {ann.author}")
+        print()
+        print(ann.body)
+        return 0
+
+    elif action == "publish":
+        ann_id = getattr(args, "id", None)
+        try:
+            ann, results = publisher.publish_draft(ann_id)
+            failed = sum(not result.success for result in results.values())
+            print(
+                f"Announcement '{ann.id}' published to {len(results) - failed}/{len(results)} channels."
+            )
+            for adapter_name, result in results.items():
+                outcome = "OK" if result.success else f"FAILED: {result.error}"
+                print(f"  - {adapter_name}: {outcome}")
+            return 1 if failed else 0
+        except (KeyError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 1
         except ModelValidationError as exc:
             print(f"[ERROR] Validation failed: {exc}")
             return 1
@@ -103,14 +162,18 @@ def run_announce(
 
         try:
             ann, results = publisher.update(ann_id, title=title, body=body, author=author)
-            print(f"  [SUCCESS] Announcement '{ann.id}' updated!")
+            failures = sum(not result.success for result in results.values())
+            print(f"  [{'PARTIAL' if failures else 'SUCCESS'}] Announcement '{ann.id}' updated.")
             for adapter_name, res in results.items():
                 status_glyph = "[OK]  " if res.success else "[FAIL]"
                 print(
                     f"    {status_glyph} {adapter_name:<14} -> {res.external_id or res.error or 'ok'}"
                 )
-            return 0
+            return 1 if failures else 0
         except KeyError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        except ValueError as exc:
             print(f"[ERROR] {exc}")
             return 1
         except ModelValidationError as exc:
@@ -125,11 +188,18 @@ def run_announce(
 
         try:
             ann, results = publisher.withdraw(ann_id)
-            print(f"  [SUCCESS] Announcement '{ann.id}' marked WITHDRAWN across channels.")
+            failures = sum(not result.success for result in results.values())
+            print(
+                f"  [{'PARTIAL' if failures else 'SUCCESS'}] "
+                f"Announcement '{ann.id}' marked WITHDRAWN."
+            )
             for adapter_name, res in results.items():
                 print(f"    - {adapter_name:<14}: {'Withdrawn' if res.success else res.error}")
-            return 0
+            return 1 if failures else 0
         except KeyError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        except ValueError as exc:
             print(f"[ERROR] {exc}")
             return 1
 
@@ -137,13 +207,20 @@ def run_announce(
         ann_id = getattr(args, "id", None)
         results = publisher.retry_failed(announcement_id=ann_id)
         if not results:
+            if storage.get_failed_deliveries():
+                print(
+                    "Failed deliveries remain, but none are safely retryable with the "
+                    "currently configured adapters."
+                )
+                return 1
             print("No failed deliveries to retry.")
             return 0
 
-        print(f"Retried {len(results)} failed deliveries:")
+        failed = sum(not result.success for result in results.values())
+        print(f"Retried {len(results)} failed deliveries; {failed} still failing:")
         for key, res in results.items():
             print(f"  - {key}: {'Success' if res.success else res.error}")
-        return 0
+        return 1 if failed else 0
 
     else:
         print(f"Unknown announce action: {action}")

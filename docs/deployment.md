@@ -75,6 +75,11 @@ services:
     enabled: true
   announcements:
     enabled: true
+    channels:
+      web_feed:
+        enabled: true
+      matrix_room:
+        enabled: false
 
 operations:
   backups:
@@ -87,6 +92,29 @@ Verify permissions on your secrets file:
 ```bash
 chmod 600 .env
 ```
+
+### Secure first administrator setup
+
+Generate a one-time random setup token and place it in `.env` as
+`COMMUNITY_STACK_ADMIN_SETUP_TOKEN=<generated-token>`. Keep `.env` mode `0600`.
+Deploy the stack with `uv run community-stack install`, then open
+`https://community.example.org/admin/setup` and enter that token plus a unique
+administrator username and a password of at least 12 characters. Setup is
+disabled after the first administrator is created. Remove the setup-token line
+from `.env` and run `uv run community-stack install` again to remove it from the
+running container environment.
+
+The admin app is routed by Caddy and has no host-published port. It shares the
+web domain but requires authentication for all publishing pages. The public
+announcement archive remains unauthenticated at `/feed/announcements.html`.
+The app's SQLite database is mounted from `data/announcements`; generated public
+files are shared read-only with the landing service from `data/landing/feed`.
+
+For Matrix delivery, configure `services.announcements.channels.matrix_room`
+only after verifying that the target room is the public announcements room.
+Set `public_announcement_room: true`, define the token environment variable
+named by `access_token_env` in `.env`, and keep the token out of YAML. Matrix
+delivery is disabled by default and has not been verified against a live server.
 
 ---
 
@@ -139,6 +167,24 @@ Verify web ingress:
 1. Open `https://community.example.org` in a browser — verify that the public landing page loads with HTTPS.
 2. Open `https://community.example.org/app` — verify that Element Web loads and connects to `https://matrix.example.org`.
 3. Test federation delegation: `curl -s https://matrix.example.org/.well-known/matrix/client`.
+4. Open `/admin` and confirm that unauthenticated requests are redirected to login.
+
+### Publishing service upgrades
+
+The announcements app is built from the checked-out source, not pulled from a
+registry. Before updating, take a backup, update the source, then rebuild the
+app and reload Caddy's mounted configuration:
+
+```bash
+uv run community-stack backup
+git pull --ff-only
+uv run community-stack upgrade announcements
+uv run community-stack upgrade proxy
+```
+
+The announcement database schema is migrated additively at application startup.
+Public files are rebuildable from SQLite and are regenerated after publication,
+withdrawal, or re-enabling the web-feed destination.
 
 ---
 
@@ -153,4 +199,6 @@ Only the following public ports should ever be exposed:
 | 443 | TCP | Caddy | HTTPS ingress for all web & Matrix traffic |
 | 8448 | TCP | Matrix Synapse | Federation port (optional, only if federation: true) |
 
-All database ports (e.g. PostgreSQL port 5432) remain strictly internal to the `matrix_internal` Docker network and are **never** bound to host ports.
+All database and application ports remain internal to Docker networks and are
+**never** bound to host ports. Only Caddy publishes ports 80, 443, and optional
+8448.

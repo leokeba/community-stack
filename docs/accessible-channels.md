@@ -1,6 +1,6 @@
 # Accessible Channels & Multi-Platform Distribution
 
-This document details the architecture, evaluation, and operational considerations for extending the Community Communications Stack beyond smartphone chat applications to reach the broadest possible audience.
+This document records channel design and evaluation. It is not a deployment guide or a claim that external delivery is production-ready. At present, the default announcement publisher generates local public HTML, RSS, Atom, and JSON Feed output. Matrix, ActivityPub, and email adapter code is not enabled by default and has not been verified against live services.
 
 ---
 
@@ -11,13 +11,13 @@ Commercial messaging platforms exclude substantial segments of the public:
 - Elderly, vision-impaired, or non-technical community members.
 - People living in areas with severe mobile network throttling or power outages.
 
-The stack provides independent channel adapters so the **same canonical announcement** can reach diverse mediums without manual re-typing or platform lock-in.
+The publishing domain is intended to provide independent adapters so the **same canonical announcement** can reach diverse mediums. Only the local web/feed destination is currently enabled by default.
 
 ---
 
 ## 2. ActivityPub Federation (Fediverse)
 
-The `ActivityPubAdapter` translates canonical announcements into standard ActivityStreams 2.0 `Create(Note)` objects.
+The `ActivityPubAdapter` prototype translates canonical announcements into ActivityStreams 2.0 `Create(Note)` objects. It is not configured by the default publisher and has not been verified against a live federated service.
 - **Audience:** Users of Mastodon, Misskey, GoToSocial, Pixelfed, and the wider fediverse.
 - **Protocol:** W3C ActivityPub standard.
 - **Privacy:** Public by design. No private community rooms are federated over ActivityPub.
@@ -25,7 +25,7 @@ The `ActivityPubAdapter` translates canonical announcements into standard Activi
 
 ---
 
-## 3. Email Delivery & Newsletter Evaluation
+## 3. Email Delivery & Newsletter Evaluation (Not Live-Enabled)
 
 Email remains the most ubiquitous open communications medium.
 
@@ -78,7 +78,7 @@ A voice information line allows anyone with a basic landline or feature phone to
 
 ## 6. Subscriber Management & Privacy
 
-Managed via `community-stack subscribers`:
+Subscriber records can be managed via `community-stack subscribers`. This does not mean announcement email delivery is operational: the email adapter's default transport is a mock/local success path and is not enabled by the default publisher.
 - Storage: Dedicated local SQLite database (`data/subscriptions/subscribers.db`).
 - Privacy: Destination masking (`j***@example.org`, `+1234****567`) in all CLI commands and logs.
 - Strict Opt-Out: Immediate suppression upon receiving an unsubscribe request.

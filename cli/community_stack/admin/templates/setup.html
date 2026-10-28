@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Initial setup{% endblock %}
+{% block content %}
+<h1>Set up the first administrator</h1>
+{% if not setup_available %}
+<p class="error">Administrator setup is disabled. Configure COMMUNITY_STACK_ADMIN_SETUP_TOKEN on the server before continuing.</p>
+{% else %}
+<p>Setup is available only until the first administrator account is created. Keep the setup token private.</p>
+<form class="card" method="post" action="/admin/setup">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="setup_token">One-time setup token</label>
+  <input id="setup_token" name="setup_token" type="password" autocomplete="off" required>
+  <label for="username">Administrator username</label>
+  <input id="username" name="username" type="text" maxlength="80" autocomplete="username" required>
+  <label for="password">Password (at least 12 characters)</label>
+  <input id="password" name="password" type="password" minlength="12" autocomplete="new-password" required>
+  <p><button type="submit">Create administrator</button></p>
+</form>
+{% endif %}
+{% endblock %}

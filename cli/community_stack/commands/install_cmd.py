@@ -73,6 +73,10 @@ def run_install(
     if services_cfg.get("element", {}).get("enabled", True):
         services_to_deploy.append("element")
 
+    # Public announcement portal and authenticated publishing interface
+    if services_cfg.get("announcements", {}).get("enabled", True):
+        services_to_deploy.append("announcements")
+
     # WhatsApp bridge
     if services_cfg.get("whatsapp_bridge", {}).get("enabled", False):
         services_to_deploy.append("whatsapp_bridge")

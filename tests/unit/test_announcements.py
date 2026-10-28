@@ -17,7 +17,7 @@ def test_announcement_model_valid():
         tags=["alert", "weather"],
     )
     assert ann.title == "Emergency Weather Alert"
-    assert ann.status == AnnouncementStatus.PUBLISHED
+    assert ann.status == AnnouncementStatus.DRAFT
     assert ann.id.startswith("ann_")
 
 
@@ -41,6 +41,9 @@ def test_announcement_model_validation_failures():
     # Invalid canonical URL
     with pytest.raises(ModelValidationError, match="Canonical URL must start with"):
         Announcement(title="Valid", body="Valid", canonical_url="ftp://invalid.url")
+
+    with pytest.raises(ModelValidationError, match="must be public"):
+        Announcement(title="Private", body="Not for publication", audience="private")
 
 
 def test_announcement_storage_crud(tmp_path):

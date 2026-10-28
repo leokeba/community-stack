@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import html
 import json
 import urllib.error
 import urllib.request
@@ -70,9 +72,12 @@ class MatrixRoomAdapter(ChannelAdapter):
         txn_id = f"pub_{announcement.id}"
         path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
 
-        formatted_html = f"<h3>📢 {announcement.title}</h3><p>{announcement.body}</p>"
+        formatted_html = (
+            f"<h3>📢 {html.escape(announcement.title)}</h3>"
+            f"<p>{html.escape(announcement.body).replace(chr(10), '<br>')}</p>"
+        )
         if announcement.author:
-            formatted_html += f"<p><em>— {announcement.author}</em></p>"
+            formatted_html += f"<p><em>— {html.escape(announcement.author)}</em></p>"
 
         payload = {
             "msgtype": "m.notice",
@@ -85,7 +90,7 @@ class MatrixRoomAdapter(ChannelAdapter):
         status_code, resp = self._http_request("PUT", path, payload)
         if 200 <= status_code < 300:
             event_id = resp.get("event_id")
-            return DeliveryResult(success=True, external_id=event_id)
+            return DeliveryResult(success=True, external_id=event_id, idempotent=True)
 
         error_msg = resp.get("error", f"HTTP {status_code}")
         is_retryable = status_code >= 500 or status_code == 429
@@ -93,14 +98,21 @@ class MatrixRoomAdapter(ChannelAdapter):
             success=False,
             error=f"Matrix send failed: {error_msg}",
             retryable=is_retryable,
+            idempotent=True,
         )
 
     def update(self, announcement: Announcement) -> DeliveryResult:
         """Post an updated notice or edit to the room."""
-        txn_id = f"upd_{announcement.id}_{int(announcement.status == 'updated')}"
+        revision = hashlib.sha256(
+            f"{announcement.title}\0{announcement.body}\0{announcement.author or ''}".encode()
+        ).hexdigest()[:16]
+        txn_id = f"upd_{announcement.id}_{revision}"
         path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
 
-        formatted_html = f"<h3>📢 [UPDATED] {announcement.title}</h3><p>{announcement.body}</p>"
+        formatted_html = (
+            f"<h3>📢 [UPDATED] {html.escape(announcement.title)}</h3>"
+            f"<p>{html.escape(announcement.body).replace(chr(10), '<br>')}</p>"
+        )
         payload = {
             "msgtype": "m.notice",
             "body": f"📢 [UPDATED] {announcement.title}\n\n{announcement.body}",
@@ -111,12 +123,13 @@ class MatrixRoomAdapter(ChannelAdapter):
 
         status_code, resp = self._http_request("PUT", path, payload)
         if 200 <= status_code < 300:
-            return DeliveryResult(success=True, external_id=resp.get("event_id"))
+            return DeliveryResult(success=True, external_id=resp.get("event_id"), idempotent=True)
 
         return DeliveryResult(
             success=False,
             error=f"Matrix update failed: {resp.get('error', status_code)}",
-            retryable=status_code >= 500,
+            retryable=status_code >= 500 or status_code == 429,
+            idempotent=True,
         )
 
     def withdraw(self, announcement_id: str) -> DeliveryResult:
@@ -132,12 +145,13 @@ class MatrixRoomAdapter(ChannelAdapter):
 
         status_code, resp = self._http_request("PUT", path, payload)
         if 200 <= status_code < 300:
-            return DeliveryResult(success=True)
+            return DeliveryResult(success=True, idempotent=True)
 
         return DeliveryResult(
             success=False,
             error=f"Matrix withdrawal notice failed: {resp.get('error', status_code)}",
-            retryable=status_code >= 500,
+            retryable=status_code >= 500 or status_code == 429,
+            idempotent=True,
         )
 
     def health_check(self) -> HealthResult:

@@ -16,6 +16,7 @@ class DeliveryResult:
     external_id: str | None = None
     error: str | None = None
     retryable: bool = False
+    idempotent: bool = False
 
 
 @dataclass

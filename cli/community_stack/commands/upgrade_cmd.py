@@ -47,17 +47,27 @@ def run_upgrade(
 
     env_p = Path(env_path).resolve()
 
-    # Step 2: Pull latest pinned image
-    print(f"[2/3] Pulling updated container image for {service}...")
-    pull_res = docker.run_compose(project_dir=svc_dir, args=["pull"], env_file=env_p)
-    if pull_res.returncode != 0:
-        print(f"[WARN] 'docker compose pull' exited with {pull_res.returncode}.")
+    # Step 2: Pull registry images or build the local publishing application.
+    is_local_app = dir_name == "announcements"
+    if is_local_app:
+        print("[2/3] Building the local announcements application...")
+    else:
+        print(f"[2/3] Pulling updated container image for {service}...")
+        pull_res = docker.run_compose(project_dir=svc_dir, args=["pull"], env_file=env_p)
+        if pull_res.returncode != 0:
+            print(f"[WARN] 'docker compose pull' exited with {pull_res.returncode}.")
 
     # Step 3: Recreate container with new image
     print(f"[3/3] Recreating and restarting {service}...")
     up_res = docker.run_compose(
         project_dir=svc_dir,
-        args=["up", "-d", "--no-deps", "--remove-orphans"],
+        args=[
+            "up",
+            "-d",
+            *(["--build"] if is_local_app else []),
+            "--no-deps",
+            "--remove-orphans",
+        ],
         env_file=env_p,
     )
     if up_res.returncode != 0:

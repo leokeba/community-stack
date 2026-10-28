@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import urllib.error
@@ -108,13 +109,15 @@ class ActivityPubAdapter(ChannelAdapter):
             return DeliveryResult(
                 success=True,
                 external_id=activity["id"],
+                idempotent=True,
             )
 
         err_msg = resp.get("error", f"HTTP {status_code}")
         return DeliveryResult(
             success=False,
             error=f"ActivityPub federation failed: {err_msg}",
-            retryable=status_code >= 500,
+            retryable=status_code >= 500 or status_code == 429,
+            idempotent=True,
         )
 
     def update(self, announcement: Announcement) -> DeliveryResult:
@@ -124,21 +127,26 @@ class ActivityPubAdapter(ChannelAdapter):
 
         activity = self.build_create_activity(announcement)
         activity["type"] = "Update"
+        revision = hashlib.sha256(
+            f"{announcement.title}\0{announcement.body}\0{announcement.author or ''}".encode()
+        ).hexdigest()[:16]
+        activity["id"] = f"{self.actor_id}/activities/upd_{announcement.id}_{revision}"
         status_code, resp = self._http_post(self.outbox_url, activity)
 
         if 200 <= status_code < 300:
-            return DeliveryResult(success=True, external_id=activity["id"])
+            return DeliveryResult(success=True, external_id=activity["id"], idempotent=True)
 
         return DeliveryResult(
             success=False,
             error=f"ActivityPub update failed: {resp.get('error', status_code)}",
-            retryable=status_code >= 500,
+            retryable=status_code >= 500 or status_code == 429,
+            idempotent=True,
         )
 
     def withdraw(self, announcement_id: str) -> DeliveryResult:
         """Send Delete(Note) activity across the fediverse."""
         if not self.enabled:
-            return DeliveryResult(success=True)
+            return DeliveryResult(success=True, idempotent=True)
 
         delete_activity = {
             "@context": "https://www.w3.org/ns/activitystreams",
@@ -156,7 +164,8 @@ class ActivityPubAdapter(ChannelAdapter):
         return DeliveryResult(
             success=False,
             error=f"ActivityPub withdrawal failed: {resp.get('error', status_code)}",
-            retryable=status_code >= 500,
+            retryable=status_code >= 500 or status_code == 429,
+            idempotent=True,
         )
 
     def health_check(self) -> HealthResult:

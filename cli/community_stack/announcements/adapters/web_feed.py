@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -13,6 +15,7 @@ from community_stack.announcements.adapters.base import (
     HealthResult,
 )
 from community_stack.announcements.models import Announcement, AnnouncementStatus
+from community_stack.announcements.storage import AnnouncementStorage
 
 
 class WebFeedAdapter(ChannelAdapter):
@@ -23,35 +26,57 @@ class WebFeedAdapter(ChannelAdapter):
         output_dir: Path | str = "data/landing/feed",
         base_url: str = "https://community.example.org",
         community_name: str = "Community Communications",
+        storage: AnnouncementStorage | None = None,
+        channel_links: dict[str, str] | None = None,
     ) -> None:
         self.output_dir = Path(output_dir).resolve()
         self.base_url = base_url.rstrip("/")
         self.community_name = community_name
+        self.channel_links = channel_links or {}
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._data_store_file = self.output_dir / "announcements_store.json"
+        self.storage = storage or AnnouncementStorage(
+            db_path=self.output_dir.parent / "announcements.db"
+        )
 
     @property
     def name(self) -> str:
         return "web_feed"
 
-    def _load_announcements(self) -> dict[str, dict]:
-        if not self._data_store_file.is_file():
-            return {}
-        try:
-            return json.loads(self._data_store_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
+    def canonical_url_for(self, announcement: Announcement) -> str:
+        return f"{self.base_url}/feed/announcements/{announcement.id}/"
 
-    def _save_announcements(self, data: dict[str, dict]) -> None:
-        self._data_store_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    @staticmethod
+    def _parse_datetime(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def rebuild(self) -> None:
+        """Rebuild all public HTML and feed outputs from canonical SQLite records."""
+        self._regenerate_all(self.storage.list_announcements(limit=None))
 
     def _regenerate_all(self, announcements: list[Announcement]) -> None:
         """Regenerate HTML, Atom, RSS, and JSON feed files."""
-        # Only include non-withdrawn announcements in public feeds
-        active = [a for a in announcements if a.status != AnnouncementStatus.WITHDRAWN]
+        for announcement in announcements:
+            if not announcement.canonical_url:
+                announcement.canonical_url = self.canonical_url_for(announcement)
+                self.storage.save_announcement(announcement)
+        active = [
+            a
+            for a in announcements
+            if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
+            and a.audience == "public"
+        ]
         active.sort(key=lambda a: a.published_at, reverse=True)
 
         self._generate_html(active)
+        active_ids = {announcement.id for announcement in active}
+        for announcement in announcements:
+            if announcement.id not in active_ids:
+                withdrawn_page = self.output_dir / "announcements" / announcement.id / "index.html"
+                if withdrawn_page.is_file():
+                    withdrawn_page.unlink()
         self._generate_rss(active)
         self._generate_atom(active)
         self._generate_json_feed(active)
@@ -60,17 +85,18 @@ class WebFeedAdapter(ChannelAdapter):
         items_html = ""
         for a in announcements:
             author_badge = f"<span class='badge'>{html.escape(a.author)}</span>" if a.author else ""
+            detail_url = a.canonical_url or f"announcements/{a.id}/"
             items_html += f"""
             <article class="announcement-item card">
               <header>
-                <h2>{html.escape(a.title)}</h2>
+                <h2><a href="{detail_url}">{html.escape(a.title)}</a></h2>
                 <div class="meta">
                   <time datetime="{html.escape(a.published_at)}">{html.escape(a.published_at[:10])}</time>
                   {author_badge}
                 </div>
               </header>
               <div class="body">
-                <p>{html.escape(a.body)}</p>
+                <p>{html.escape(a.body).replace(chr(10), "<br>")}</p>
               </div>
             </article>
             """
@@ -84,12 +110,13 @@ class WebFeedAdapter(ChannelAdapter):
   <link rel="stylesheet" href="../style.css">
   <link rel="alternate" type="application/rss+xml" title="RSS Feed" href="rss.xml">
   <link rel="alternate" type="application/atom+xml" title="Atom Feed" href="atom.xml">
+  <link rel="alternate" type="application/feed+json" title="JSON Feed" href="feed.json">
 </head>
 <body>
   <div class="container">
     <header>
       <h1>Public Announcements</h1>
-      <p><a href="/">&larr; Back to Portal</a> &bull; <a href="rss.xml">RSS Feed</a> &bull; <a href="atom.xml">Atom Feed</a></p>
+      <p><a href="/">&larr; Back to Portal</a> &bull; <a href="rss.xml">RSS Feed</a> &bull; <a href="atom.xml">Atom Feed</a> &bull; <a href="feed.json">JSON Feed</a></p>
     </header>
     <main>
       {items_html if items_html else "<p>No active public announcements at this time.</p>"}
@@ -99,6 +126,47 @@ class WebFeedAdapter(ChannelAdapter):
 </html>
 """
         (self.output_dir / "announcements.html").write_text(full_html, encoding="utf-8")
+        for announcement in announcements:
+            author = (
+                f"<p class='author'>By {html.escape(announcement.author)}</p>"
+                if announcement.author
+                else ""
+            )
+            body = html.escape(announcement.body).replace("\n", "<br>\n")
+            channel_links = " ".join(
+                f'<a href="{html.escape(url, quote=True)}">{html.escape(label)}</a>'
+                for label, url in self.channel_links.items()
+            )
+            page = f"""<!DOCTYPE html>
+<html lang="{html.escape(announcement.language)}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(announcement.title)} - {html.escape(self.community_name)}</title>
+  <link rel="canonical" href="{html.escape(self.canonical_url_for(announcement))}">
+</head>
+<body>
+  <main>
+    <p><a href="/feed/announcements.html">&larr; All announcements</a></p>
+    <article>
+      <h1>{html.escape(announcement.title)}</h1>
+      <time datetime="{html.escape(announcement.published_at)}">{html.escape(announcement.published_at[:10])}</time>
+      {author}
+      <div>{body}</div>
+    </article>
+    <nav aria-label="Announcement feeds">
+      <a href="/feed/rss.xml">RSS</a> ·
+      <a href="/feed/atom.xml">Atom</a> ·
+      <a href="/feed/feed.json">JSON Feed</a>
+    </nav>
+    {"<nav aria-label='Other community channels'>" + channel_links + "</nav>" if channel_links else ""}
+  </main>
+</body>
+</html>
+"""
+            detail_path = self.output_dir / "announcements" / announcement.id / "index.html"
+            detail_path.parent.mkdir(parents=True, exist_ok=True)
+            detail_path.write_text(page, encoding="utf-8")
 
     def _generate_rss(self, announcements: list[Announcement]) -> None:
         rss = ET.Element("rss", version="2.0")
@@ -128,7 +196,8 @@ class WebFeedAdapter(ChannelAdapter):
             item_desc.text = a.body
 
             item_pub = ET.SubElement(item, "pubDate")
-            item_pub.text = a.published_at
+            published = self._parse_datetime(a.published_at)
+            item_pub.text = format_datetime(published)
 
         tree = ET.ElementTree(rss)
         tree.write(self.output_dir / "rss.xml", encoding="utf-8", xml_declaration=True)
@@ -141,6 +210,19 @@ class WebFeedAdapter(ChannelAdapter):
 
         feed_id = ET.SubElement(feed, "id")
         feed_id.text = f"{self.base_url}/feed/atom.xml"
+        ET.SubElement(feed, "link", href=f"{self.base_url}/feed/atom.xml", rel="self")
+        ET.SubElement(
+            feed,
+            "link",
+            href=f"{self.base_url}/feed/announcements.html",
+            rel="alternate",
+        )
+        updated = max(
+            (self._parse_datetime(item.published_at) for item in announcements),
+            default=datetime.now(timezone.utc),
+        )
+        feed_updated = ET.SubElement(feed, "updated")
+        feed_updated.text = updated.isoformat()
 
         for a in announcements:
             entry = ET.SubElement(feed, "entry")
@@ -148,7 +230,13 @@ class WebFeedAdapter(ChannelAdapter):
             e_title.text = a.title
 
             e_id = ET.SubElement(entry, "id")
-            e_id.text = f"urn:uuid:{a.id}"
+            e_id.text = a.canonical_url or self.canonical_url_for(a)
+            ET.SubElement(
+                entry,
+                "link",
+                href=a.canonical_url or self.canonical_url_for(a),
+                rel="alternate",
+            )
 
             e_updated = ET.SubElement(entry, "updated")
             e_updated.text = a.published_at
@@ -183,16 +271,16 @@ class WebFeedAdapter(ChannelAdapter):
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
         try:
-            store = self._load_announcements()
-            store[announcement.id] = announcement.to_dict()
-            self._save_announcements(store)
-
-            all_anns = [Announcement.from_dict(v) for v in store.values()]
+            if not announcement.canonical_url:
+                announcement.canonical_url = self.canonical_url_for(announcement)
+            self.storage.save_announcement(announcement)
+            all_anns = self.storage.list_announcements(limit=None)
             self._regenerate_all(all_anns)
 
             return DeliveryResult(
                 success=True,
-                external_id=f"{self.base_url}/feed/announcements.html#{announcement.id}",
+                external_id=announcement.canonical_url,
+                idempotent=True,
             )
         except Exception as exc:
             return DeliveryResult(success=False, error=str(exc), retryable=False)
@@ -202,13 +290,16 @@ class WebFeedAdapter(ChannelAdapter):
 
     def withdraw(self, announcement_id: str) -> DeliveryResult:
         try:
-            store = self._load_announcements()
-            if announcement_id in store:
-                store[announcement_id]["status"] = AnnouncementStatus.WITHDRAWN.value
-                self._save_announcements(store)
-                all_anns = [Announcement.from_dict(v) for v in store.values()]
-                self._regenerate_all(all_anns)
-            return DeliveryResult(success=True)
+            announcement = self.storage.get_announcement(announcement_id)
+            if announcement is None:
+                return DeliveryResult(
+                    success=False,
+                    error=f"Announcement '{announcement_id}' not found in canonical storage.",
+                )
+            announcement.status = AnnouncementStatus.WITHDRAWN
+            self.storage.save_announcement(announcement)
+            self._regenerate_all(self.storage.list_announcements(limit=None))
+            return DeliveryResult(success=True, idempotent=True)
         except Exception as exc:
             return DeliveryResult(success=False, error=str(exc), retryable=False)
 

@@ -2,8 +2,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Python: 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](pyproject.toml)
-[![Tests: 93 passing](https://img.shields.io/badge/tests-93%20passed-success.svg)](tests/)
-[![Coverage: 84%](https://img.shields.io/badge/coverage-84%25-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-pytest-success.svg)](tests/)
 [![Architecture: Modular & Self-Hosted](https://img.shields.io/badge/architecture-self--hosted%20%7C%20open--source-orange.svg)](docs/architecture.md)
 [![Toolchain: uv](https://img.shields.io/badge/managed%20with-uv-purple.svg)](https://docs.astral.sh/uv/)
 
@@ -17,9 +16,9 @@ The **Community Communications Stack** is not another chat application—it is a
 
 ## 💡 Why Community Communications Stack?
 
-- **📢 Single Source of Truth, Multi-Channel Reach:** Write a public announcement once; broadcast it automatically across a clean web portal, RSS/Atom feeds, JSON Feed, Matrix rooms, the Fediverse (ActivityPub), and opt-in email newsletters.
+- **📢 Public Announcements:** Save announcements in SQLite and publish public HTML, RSS, Atom, and JSON Feed output. Matrix, ActivityPub, and email adapters are prototypes; they are not enabled by default or verified against live services.
 - **🛡️ Privacy by Separation:** Public bulletins, open community discussion, and sensitive internal coordination live in distinct, strictly isolated zones. Internal rooms are never exposed or bridged.
-- **📱 Meet People Where They Are:** Bridge public announcements and allowlisted community rooms to WhatsApp using upstream `mautrix-whatsapp`, without ever making WhatsApp a dependable dependency.
+- **📱 Optional WhatsApp Bridge:** A separately configured `mautrix-whatsapp` integration is available; it is not part of the announcement publishing UI and has not been live-service verified here.
 - **📦 Off-Grid & Offline Continuity:** Generate self-contained offline HTML/JSON archives with one command. Distribute them on USB drives or local Wi-Fi captive portals (Raspberry Pi/OpenWrt) during internet blackouts.
 - **🔒 True Disaster Recovery:** Automated, client-side encrypted backups (Restic) and verified non-destructive restore drills ensure that complete server loss does not destroy community identity or history.
 - **⚙️ Friendly Unified CLI:** Manage the entire infrastructure with a single Python command: `community-stack`. All outputs, logs, and diagnostic reports feature automated secret redaction.
@@ -59,7 +58,7 @@ The stack is organized into four modular layers with isolated Docker networks:
 | Layer | Components | Role |
 |---|---|---|
 | **Layer A: Core Services** | Matrix Synapse, Element Web, Public Portal | Open, federated community chat & web client |
-| **Layer B: Distribution Adapters** | Web/RSS/Atom, Matrix Room, ActivityPub, Email, WhatsApp | Reaching users across diverse platforms |
+| **Layer B: Distribution Adapters** | Local HTML/RSS/Atom/JSON Feed (default); Matrix, ActivityPub and email adapter prototypes | Public web delivery is default; external adapters are not live-service verified |
 | **Layer C: Operations & Ingress** | Caddy, Docker Compose, Ansible, `community-stack` CLI | Automated TLS, networking, host configuration |
 | **Layer D: Resilience & Continuity** | Restic, Standby Host Playbook, Offline HTML Exporter | Surviving outages, provider eviction, server loss |
 
@@ -118,14 +117,31 @@ Backup & Recovery:
   restore       Safely restore a snapshot to an isolated directory (--confirm required)
 
 Broadcast & Channels:
-  announce      Create, list, update, and retract multi-channel announcements
+  announce      Draft, preview, publish, list, update, and retract announcements
   subscribers   Manage opt-in email and SMS broadcast lists with instant opt-out
   bridge        Inspect WhatsApp bridge health or trigger the emergency killswitch
   archive       Export and verify zero-dependency offline HTML archives
 ```
 
-### Example: Publish a Multi-Channel Public Bulletin
+### Example: Publish a Public Bulletin
 ```bash
+# Create an unpublished draft
+uv run community-stack announce draft \
+  --title "Mutual Aid Distribution Station Open" \
+  --body "Supplies and hot meals available at City Hall until 8pm." \
+  --author "Logistics Working Group"
+
+# Preview it, then explicitly publish it
+uv run community-stack announce preview ann_...
+uv run community-stack announce publish ann_...
+```
+
+`community-stack announce create` remains available as a compatibility shortcut that creates and immediately publishes. The default enabled destination is the local public web archive and its RSS, Atom, and JSON feeds; no live external channel delivery is implied.
+
+The authenticated organizer interface is deployed at `https://community.example.org/admin`. Configure `COMMUNITY_STACK_ADMIN_SETUP_TOKEN` in the protected `.env` file before the first deployment, visit `/admin/setup` once, and remove the setup token after creating the administrator. The interface does not provide infrastructure administration or shell access.
+
+```bash
+# Compatibility shortcut for immediate publication
 uv run community-stack announce create \
   --title "Mutual Aid Distribution Station Open" \
   --body "Supplies and hot meals available at City Hall until 8pm." \
@@ -166,7 +182,7 @@ uv run community-stack bridge disable --confirm
 | 🚀 [**Deployment Guide**](docs/deployment.md) | Step-by-step installation on clean Debian 12 / Ubuntu VPS |
 | 💾 [**Backup & Recovery Runbook**](docs/backup-restore.md) | Disaster recovery, off-host S3 backups, and restore drills |
 | 💬 [**WhatsApp Integration Guide**](docs/whatsapp-integration.md) | mautrix-whatsapp setup, allowlisted bridging, and privacy risks |
-| 📡 [**Accessible Channels**](docs/accessible-channels.md) | Fediverse (ActivityPub), Email newsletter, SMS, and IVR lines |
+| 📡 [**Accessible Channels**](docs/accessible-channels.md) | Channel prototypes and evaluation for ActivityPub, email, SMS, and IVR |
 | 🌐 [**Multi-Host Resilience & Offline Continuity**](docs/multi-host-resilience.md) | Warm standby host provisioning, captive portals, and Meshtastic |
 | 📘 [**Operator Handbook**](docs/operations.md) | Daily maintenance, incident response runbooks, and decommissioning |
 | 🤝 [**Governance & Handover**](docs/governance.md) | Two-person rule, credential escrow, and license attribution |
@@ -187,9 +203,8 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-- **93 Automated Tests** (100% passing)
-- **84% Code Coverage** across all Python modules
-- **Automated CI Workflow** testing Python 3.10, 3.11, 3.12, and 3.13
+- Automated tests cover the announcement lifecycle, admin authentication/CSRF, configuration, deployment files, and recovery.
+- CI tests Python 3.10, 3.11, 3.12, and 3.13.
 
 ---
 

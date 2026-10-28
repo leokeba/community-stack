@@ -21,6 +21,7 @@ class AnnouncementStorage:
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _init_db(self) -> None:
@@ -47,14 +48,36 @@ class AnnouncementStorage:
                     announcement_id TEXT NOT NULL,
                     adapter_name TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    operation TEXT NOT NULL DEFAULT 'publish',
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_attempt_at TEXT NOT NULL,
                     last_error TEXT,
                     external_id TEXT,
+                    retryable INTEGER NOT NULL DEFAULT 0,
+                    idempotent INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (announcement_id, adapter_name),
                     FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
                 );
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_settings (
+                    adapter_name TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL
+                );
+            """)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(delivery_states)")}
+            if "operation" not in columns:
+                conn.execute(
+                    "ALTER TABLE delivery_states ADD COLUMN operation TEXT NOT NULL DEFAULT 'publish'"
+                )
+            if "retryable" not in columns:
+                conn.execute(
+                    "ALTER TABLE delivery_states ADD COLUMN retryable INTEGER NOT NULL DEFAULT 0"
+                )
+            if "idempotent" not in columns:
+                conn.execute(
+                    "ALTER TABLE delivery_states ADD COLUMN idempotent INTEGER NOT NULL DEFAULT 0"
+                )
             conn.commit()
 
     def save_announcement(self, ann: Announcement) -> None:
@@ -123,7 +146,7 @@ class AnnouncementStorage:
     def list_announcements(
         self,
         status: AnnouncementStatus | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
     ) -> list[Announcement]:
         """List announcements ordered by publication time descending."""
         query = "SELECT * FROM announcements"
@@ -133,8 +156,11 @@ class AnnouncementStorage:
             query += " WHERE status = ?"
             params.append(status.value)
 
-        query += " ORDER BY published_at DESC LIMIT ?;"
-        params.append(limit)
+        query += " ORDER BY published_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        query += ";"
 
         results: list[Announcement] = []
         with self._get_connection() as conn:
@@ -164,6 +190,9 @@ class AnnouncementStorage:
         status: str,
         error: str | None = None,
         external_id: str | None = None,
+        operation: str = "publish",
+        retryable: bool = False,
+        idempotent: bool = False,
     ) -> None:
         """Record the outcome of a delivery attempt for an adapter."""
         now = datetime.now(timezone.utc).isoformat()
@@ -171,18 +200,31 @@ class AnnouncementStorage:
             conn.execute(
                 """
                 INSERT INTO delivery_states (
-                    announcement_id, adapter_name, status, attempts,
-                    last_attempt_at, last_error, external_id
-                ) VALUES (?, ?, ?, 1, ?, ?, ?)
+                    announcement_id, adapter_name, status, operation, attempts,
+                    last_attempt_at, last_error, external_id, retryable, idempotent
+                ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 ON CONFLICT(announcement_id, adapter_name) DO UPDATE SET
                     status=excluded.status,
+                    operation=excluded.operation,
                     attempts=delivery_states.attempts + 1,
                     last_attempt_at=excluded.last_attempt_at,
                     last_error=excluded.last_error,
-                    external_id=COALESCE(excluded.external_id, delivery_states.external_id)
+                    external_id=COALESCE(excluded.external_id, delivery_states.external_id),
+                    retryable=excluded.retryable,
+                    idempotent=excluded.idempotent
                 ;
                 """,
-                (announcement_id, adapter_name, status, now, error, external_id),
+                (
+                    announcement_id,
+                    adapter_name,
+                    status,
+                    operation,
+                    now,
+                    error,
+                    external_id,
+                    int(retryable),
+                    int(idempotent),
+                ),
             )
             conn.commit()
 
@@ -200,3 +242,20 @@ class AnnouncementStorage:
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT * FROM delivery_states WHERE status = 'failed';")
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_channel_settings(self) -> dict[str, bool]:
+        """Return persisted channel enablement overrides."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT adapter_name, enabled FROM channel_settings")
+            return {row["adapter_name"]: bool(row["enabled"]) for row in rows}
+
+    def set_channel_enabled(self, adapter_name: str, enabled: bool) -> None:
+        """Persist the enabled state of an available adapter."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_settings (adapter_name, enabled) VALUES (?, ?)
+                ON CONFLICT(adapter_name) DO UPDATE SET enabled=excluded.enabled;
+                """,
+                (adapter_name, int(enabled)),
+            )

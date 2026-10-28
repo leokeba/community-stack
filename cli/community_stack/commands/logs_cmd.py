@@ -11,6 +11,8 @@ SERVICE_DIR_MAP = {
     "synapse": "matrix",
     "postgres": "matrix",
     "element": "element",
+    "announcements": "announcements",
+    "publishing": "announcements",
     "web": "landing",
     "landing": "landing",
     "caddy": "proxy",

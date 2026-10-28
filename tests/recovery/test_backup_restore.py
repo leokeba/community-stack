@@ -11,6 +11,10 @@ Validates that:
 import os
 from pathlib import Path
 
+from community_stack.admin.app import AdminStore
+from community_stack.announcements.adapters.web_feed import WebFeedAdapter
+from community_stack.announcements.models import Announcement, AnnouncementStatus
+from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.backup import BackupEngine
 from community_stack.config import load_config, validate_config
 
@@ -48,6 +52,21 @@ def test_disaster_recovery_end_to_end(tmp_path):
     (landing_dir / "custom_announcement.html").write_text(
         "<h1>Emergency Bulletin</h1>", encoding="utf-8"
     )
+    announcement_storage = AnnouncementStorage(
+        db_path=prod_dir / "data" / "announcements" / "announcements.db"
+    )
+    public_announcement = Announcement(
+        title="Recovery notice",
+        body="This announcement must survive restore.",
+        status=AnnouncementStatus.PUBLISHED,
+    )
+    announcement_storage.save_announcement(public_announcement)
+    AdminStore(announcement_storage.db_path).create_admin("organizer", "a-long-safe-test-password")
+    WebFeedAdapter(
+        output_dir=landing_dir / "feed",
+        storage=announcement_storage,
+        base_url="https://community.test",
+    ).publish(public_announcement)
 
     # Step 2: Create backup snapshot
     engine = BackupEngine(config_path=config_file, env_path=env_file)
@@ -76,6 +95,19 @@ def test_disaster_recovery_end_to_end(tmp_path):
     assert (isolated_recovery_target / "data" / "landing" / "custom_announcement.html").read_text(
         encoding="utf-8"
     ) == "<h1>Emergency Bulletin</h1>"
+    restored_db = isolated_recovery_target / "data" / "announcements" / "announcements.db"
+    restored_storage = AnnouncementStorage(db_path=restored_db)
+    assert restored_storage.get_announcement(public_announcement.id).title == "Recovery notice"
+    assert AdminStore(restored_db).has_admin()
+    assert (
+        isolated_recovery_target
+        / "data"
+        / "landing"
+        / "feed"
+        / "announcements"
+        / public_announcement.id
+        / "index.html"
+    ).is_file()
     assert (isolated_recovery_target / "backups" / "postgres_synapse.dump").is_file()
 
     # Step 6: Validate restored configuration against JSON Schema

@@ -35,7 +35,7 @@ class Announcement:
     id: str = field(default_factory=generate_announcement_id)
     published_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     language: str = "en"
-    status: AnnouncementStatus = AnnouncementStatus.PUBLISHED
+    status: AnnouncementStatus = AnnouncementStatus.DRAFT
     canonical_url: str = ""
     expires_at: str | None = None
     audience: str = "public"
@@ -71,10 +71,19 @@ class Announcement:
                 f"Language code '{self.language}' must follow BCP 47 format (e.g. 'en', 'es', 'pt-BR')."
             )
 
+        try:
+            datetime.fromisoformat(self.published_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ModelValidationError(
+                "Announcement publication time must be an ISO 8601 timestamp."
+            ) from exc
+
         if self.canonical_url and not self.canonical_url.startswith(("http://", "https://")):
             raise ModelValidationError(
                 f"Canonical URL must start with http:// or https://: '{self.canonical_url}'"
             )
+        if self.audience != "public":
+            raise ModelValidationError("Announcements in this publishing workflow must be public.")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert announcement to standard dictionary representation."""

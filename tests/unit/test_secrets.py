@@ -31,6 +31,22 @@ def test_get_required_secrets():
     assert "WHATSAPP_AS_TOKEN" not in reqs
 
 
+def test_get_required_secrets_includes_configured_matrix_announcement_token():
+    config = {
+        "services": {
+            "announcements": {
+                "channels": {
+                    "matrix_room": {
+                        "enabled": True,
+                        "access_token_env": "MATRIX_ANNOUNCEMENTS_TOKEN",
+                    }
+                }
+            }
+        }
+    }
+    assert "MATRIX_ANNOUNCEMENTS_TOKEN" in get_required_secrets(config)
+
+
 def test_create_env_file(tmp_path):
     env_file = tmp_path / ".env"
     create_env_file(env_file)

@@ -21,6 +21,11 @@ services:
     enabled: true
   announcements:
     enabled: true
+    channels:
+      web_feed:
+        enabled: true
+      matrix_room:
+        enabled: false
   whatsapp_bridge:
     enabled: false
     mode: "none" # none | announcements_only | selective_bridge
