@@ -98,6 +98,12 @@ project_dir=$1
 deploy_id=$2
 cd "$project_dir"
 
+# The host CLI and the control agent run from this editable install; keep its
+# dependencies in step with the code that was just copied.
+uv_bin="$(command -v uv || echo "$HOME/.local/bin/uv")"
+"$uv_bin" sync --frozen --no-dev --quiet
+.venv/bin/community-stack --help >/dev/null
+
 compose_app=(docker compose --env-file .env -f services/announcements/docker-compose.yml)
 compose_proxy=(docker compose --env-file .env -f services/proxy/docker-compose.yml)
 rollback_tag="community-stack-announcements:rollback-$deploy_id"
