@@ -15,6 +15,9 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -29,13 +32,13 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[dev]"
+        run: uv sync --all-extras --dev
 
       - name: Run Ruff Lint
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Run Ruff Format Check
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       - name: Run Unit Tests with Coverage
-        run: pytest --cov=community_stack --cov-report=term-missing
+        run: uv run pytest --cov=community_stack --cov-report=term-missing
