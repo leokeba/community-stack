@@ -43,6 +43,29 @@
 {% else %}
 <p class="muted">No channel deliveries have been attempted.</p>
 {% endif %}
+<h2>Delivery attempt history</h2>
+{% if delivery_attempts %}
+{% if delivery_attempts|selectattr("legacy_snapshot")|list %}
+<p class="muted">Legacy snapshot rows preserve the last known state and aggregate attempt count from before detailed history was added; earlier individual results cannot be recovered.</p>
+{% endif %}
+<table>
+  <thead><tr><th>Attempt</th><th>Channel</th><th>Operation</th><th>Status</th><th>Time</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for attempt in delivery_attempts %}
+  <tr>
+    <td>{{ attempt.attempt_number }}{% if attempt.legacy_snapshot %} (legacy snapshot){% endif %}</td>
+    <td>{{ attempt.adapter_name }}</td>
+    <td>{{ attempt.operation }}</td>
+    <td>{{ attempt.status }}</td>
+    <td><time datetime="{{ attempt.attempted_at }}">{{ attempt.attempted_at }}</time></td>
+    <td>{{ attempt.error or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No delivery attempts have been recorded.</p>
+{% endif %}
 {% if deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
 <form method="post" action="/admin/announcements/{{ announcement.id }}/retry">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

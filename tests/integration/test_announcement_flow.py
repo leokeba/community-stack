@@ -34,6 +34,10 @@ def test_draft_preview_and_publish_use_canonical_storage(tmp_path):
     published, results = publisher.publish_draft(draft.id)
     assert published.status == AnnouncementStatus.PUBLISHED
     assert all(result.success for result in results.values())
+    stored = storage.get_announcement(draft.id)
+    assert stored is not None
+    assert stored.published_at == published.published_at
+    assert stored.updated_at == published.updated_at
     assert calls == [draft.id]
     assert (tmp_path / "announcements.db").is_file()
     assert not (tmp_path / "feed" / "announcements_store.json").exists()
@@ -229,3 +233,57 @@ def test_adapter_failure_isolation(tmp_path):
     states = {item["adapter_name"]: item for item in storage.get_delivery_states(ann.id)}
     assert states["web_feed"]["attempts"] == 1
     assert states["matrix_room"]["attempts"] == 2
+    history = storage.get_delivery_attempts(ann.id, "matrix_room")
+    assert [attempt["status"] for attempt in history] == ["failed", "delivered"]
+    assert [attempt["attempt_number"] for attempt in history] == [1, 2]
+
+
+def test_disabled_adapter_is_skipped_without_affecting_enabled_delivery(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    web_feed = WebFeedAdapter(output_dir=tmp_path / "feed", storage=storage)
+    calls = []
+
+    matrix = MatrixRoomAdapter(
+        transport=lambda method, path, headers, payload: (
+            calls.append(path) or (200, {"event_id": "$event"})
+        )
+    )
+    storage.set_channel_enabled("matrix_room", False)
+    publisher = AnnouncementPublisher(storage=storage, adapters=[web_feed, matrix])
+
+    announcement, results = publisher.publish("Enabled route", "The public web feed works.")
+
+    assert set(results) == {"web_feed"}
+    assert calls == []
+    assert {state["adapter_name"] for state in storage.get_delivery_states(announcement.id)} == {
+        "web_feed"
+    }
+
+
+def test_publication_history_retains_partial_failure_after_safe_retry(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    web_feed = WebFeedAdapter(output_dir=tmp_path / "feed", storage=storage)
+    responses = iter(
+        [
+            (503, {"error": "temporarily unavailable"}),
+            (200, {"event_id": "$recovered"}),
+        ]
+    )
+    matrix = MatrixRoomAdapter(transport=lambda method, path, headers, payload: next(responses))
+    publisher = AnnouncementPublisher(storage=storage, adapters=[web_feed, matrix])
+
+    announcement, initial = publisher.publish("Partial result", "Web succeeds independently.")
+    assert initial["web_feed"].success
+    assert not initial["matrix_room"].success
+    assert storage.get_delivery_states(announcement.id)[0]["attempts"] == 1
+
+    retried = publisher.retry_failed(announcement.id)
+
+    assert retried[f"{announcement.id}:matrix_room"].success
+    states = {
+        state["adapter_name"]: state for state in storage.get_delivery_states(announcement.id)
+    }
+    assert states["web_feed"]["attempts"] == 1
+    assert states["matrix_room"]["attempts"] == 2
+    matrix_history = storage.get_delivery_attempts(announcement.id, "matrix_room")
+    assert [attempt["status"] for attempt in matrix_history] == ["failed", "delivered"]

@@ -2,6 +2,15 @@
 
 This document records channel design and evaluation. It is not a deployment guide or a claim that external delivery is production-ready. At present, the default announcement publisher generates local public HTML, RSS, Atom, and JSON Feed output. Matrix, ActivityPub, and email adapter code is not enabled by default and has not been verified against live services.
 
+## Implementation Status
+
+| Status | Destinations |
+|---|---|
+| **Working and covered by automated tests** | Public HTML archive, stable announcement pages, RSS, Atom, and JSON Feed |
+| **Implemented; staging verification required** | Matrix public-room adapter. It is opt-in and disabled by default; CI uses test doubles, not a live homeserver |
+| **Experimental prototypes; not wired into the default publisher** | ActivityPub and email adapters |
+| **Planned/evaluation only** | SMS broadcast and voice/IVR delivery |
+
 ---
 
 ## 1. Overview and Accessibility Principles

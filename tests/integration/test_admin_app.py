@@ -241,4 +241,6 @@ def test_delivery_error_and_safe_retry_are_visible_to_admin(tmp_path):
     assert retried.status_code == 303
     assert len(attempts) == 2
     healthy_detail = client.get(detail_url)
-    assert "temporary Matrix outage" not in healthy_detail.text
+    assert "temporary Matrix outage" in healthy_detail.text
+    assert "delivered" in healthy_detail.text
+    assert "Delivery attempt history" in healthy_detail.text

@@ -1,5 +1,7 @@
 """Unit tests for announcement models and storage."""
 
+import sqlite3
+
 import pytest
 from community_stack.announcements.models import (
     Announcement,
@@ -79,6 +81,76 @@ def test_announcement_storage_crud(tmp_path):
     assert updated_fetch is not None
     assert updated_fetch.title == "Updated Public Update"
     assert updated_fetch.status == AnnouncementStatus.UPDATED
+    assert updated_fetch.updated_at == ann.updated_at
+
+
+def test_storage_migrates_legacy_timestamp_and_delivery_state(tmp_path):
+    db_file = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE announcements (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            published_at TEXT NOT NULL,
+            language TEXT NOT NULL,
+            status TEXT NOT NULL,
+            canonical_url TEXT NOT NULL,
+            expires_at TEXT,
+            audience TEXT NOT NULL,
+            author TEXT,
+            tags_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE delivery_states (
+            announcement_id TEXT NOT NULL,
+            adapter_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at TEXT NOT NULL,
+            last_error TEXT,
+            external_id TEXT,
+            PRIMARY KEY (announcement_id, adapter_name)
+        );
+        INSERT INTO announcements VALUES (
+            'ann_legacy_1', 'Legacy notice', 'Body', '2024-01-02T00:00:00+00:00',
+            'en', 'published', '', NULL, 'public', NULL, '[]',
+            '2024-01-01T00:00:00+00:00'
+        );
+        INSERT INTO delivery_states VALUES (
+            'ann_legacy_1', 'matrix_room', 'failed', 4,
+            '2024-01-03T00:00:00+00:00', 'Old failure', NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    storage = AnnouncementStorage(db_path=db_file)
+    announcement = storage.get_announcement("ann_legacy_1")
+    assert announcement is not None
+    assert announcement.updated_at == "2024-01-01T00:00:00+00:00"
+
+    legacy_attempt = storage.get_delivery_attempts("ann_legacy_1")
+    assert len(legacy_attempt) == 1
+    assert legacy_attempt[0]["attempt_number"] == 4
+    assert legacy_attempt[0]["legacy_snapshot"] == 1
+    assert legacy_attempt[0]["error"] == "Old failure"
+
+    storage.record_delivery(
+        "ann_legacy_1",
+        "matrix_room",
+        status="delivered",
+        operation="update",
+        idempotent=True,
+    )
+    history = storage.get_delivery_attempts("ann_legacy_1")
+    assert [attempt["attempt_number"] for attempt in history] == [4, 5]
+    assert [attempt["status"] for attempt in history] == ["failed", "delivered"]
+    assert history[0]["error"] == "Old failure"
+    assert history[1]["legacy_snapshot"] == 0
+    current = storage.get_delivery_states("ann_legacy_1")[0]
+    assert current["attempts"] == 5
+    assert current["status"] == "delivered"
 
 
 def test_storage_delivery_state_tracking(tmp_path):
@@ -110,6 +182,9 @@ def test_storage_delivery_state_tracking(tmp_path):
     assert state_map["web_feed"]["status"] == "delivered"
     assert state_map["matrix_room"]["status"] == "failed"
     assert state_map["matrix_room"]["attempts"] == 1
+    attempt_history = storage.get_delivery_attempts(ann.id, "matrix_room")
+    assert len(attempt_history) == 1
+    assert attempt_history[0]["error"] == "Connection refused"
 
     # Check failed query
     failed = storage.get_failed_deliveries()

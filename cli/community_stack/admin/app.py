@@ -481,6 +481,7 @@ def create_app(
                 "csrf_token": session["csrf_token"],
                 "announcement": announcement,
                 "deliveries": storage.get_delivery_states(announcement_id),
+                "delivery_attempts": storage.get_delivery_attempts(announcement_id),
             },
         )
 

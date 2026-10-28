@@ -58,16 +58,15 @@ class WebFeedAdapter(ChannelAdapter):
 
     def _regenerate_all(self, announcements: list[Announcement]) -> None:
         """Regenerate HTML, Atom, RSS, and JSON feed files."""
-        for announcement in announcements:
-            if not announcement.canonical_url:
-                announcement.canonical_url = self.canonical_url_for(announcement)
-                self.storage.save_announcement(announcement)
         active = [
             a
             for a in announcements
             if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
             and a.audience == "public"
         ]
+        for announcement in active:
+            if not announcement.canonical_url:
+                announcement.canonical_url = self.canonical_url_for(announcement)
         active.sort(key=lambda a: a.published_at, reverse=True)
 
         self._generate_html(active)
@@ -92,6 +91,7 @@ class WebFeedAdapter(ChannelAdapter):
                 <h2><a href="{detail_url}">{html.escape(a.title)}</a></h2>
                 <div class="meta">
                   <time datetime="{html.escape(a.published_at)}">{html.escape(a.published_at[:10])}</time>
+                  {f"<span>Updated {html.escape(a.updated_at[:10])}</span>" if a.updated_at != a.published_at else ""}
                   {author_badge}
                 </div>
               </header>
@@ -151,6 +151,7 @@ class WebFeedAdapter(ChannelAdapter):
     <article>
       <h1>{html.escape(announcement.title)}</h1>
       <time datetime="{html.escape(announcement.published_at)}">{html.escape(announcement.published_at[:10])}</time>
+      {"<p>Updated <time datetime='" + html.escape(announcement.updated_at) + "'>" + html.escape(announcement.updated_at[:10]) + "</time></p>" if announcement.updated_at != announcement.published_at else ""}
       {author}
       <div>{body}</div>
     </article>
@@ -180,6 +181,13 @@ class WebFeedAdapter(ChannelAdapter):
 
         desc = ET.SubElement(channel, "description")
         desc.text = "Authoritative public updates and community advisories."
+
+        last_build = ET.SubElement(channel, "lastBuildDate")
+        latest_update = max(
+            (self._parse_datetime(item.updated_at) for item in announcements),
+            default=datetime.now(timezone.utc),
+        )
+        last_build.text = format_datetime(latest_update)
 
         for a in announcements:
             item = ET.SubElement(channel, "item")
@@ -218,7 +226,7 @@ class WebFeedAdapter(ChannelAdapter):
             rel="alternate",
         )
         updated = max(
-            (self._parse_datetime(item.published_at) for item in announcements),
+            (self._parse_datetime(item.updated_at) for item in announcements),
             default=datetime.now(timezone.utc),
         )
         feed_updated = ET.SubElement(feed, "updated")
@@ -239,7 +247,10 @@ class WebFeedAdapter(ChannelAdapter):
             )
 
             e_updated = ET.SubElement(entry, "updated")
-            e_updated.text = a.published_at
+            e_updated.text = a.updated_at
+
+            e_published = ET.SubElement(entry, "published")
+            e_published.text = a.published_at
 
             content = ET.SubElement(entry, "content", type="text")
             content.text = a.body
@@ -260,6 +271,7 @@ class WebFeedAdapter(ChannelAdapter):
                     "content_text": a.body,
                     "url": a.canonical_url or f"{self.base_url}/feed/announcements.html#{a.id}",
                     "date_published": a.published_at,
+                    "date_modified": a.updated_at,
                     "author": {"name": a.author} if a.author else None,
                 }
                 for a in announcements
@@ -273,7 +285,6 @@ class WebFeedAdapter(ChannelAdapter):
         try:
             if not announcement.canonical_url:
                 announcement.canonical_url = self.canonical_url_for(announcement)
-            self.storage.save_announcement(announcement)
             all_anns = self.storage.list_announcements(limit=None)
             self._regenerate_all(all_anns)
 
@@ -283,7 +294,7 @@ class WebFeedAdapter(ChannelAdapter):
                 idempotent=True,
             )
         except Exception as exc:
-            return DeliveryResult(success=False, error=str(exc), retryable=False)
+            return DeliveryResult(success=False, error=str(exc), retryable=True, idempotent=True)
 
     def update(self, announcement: Announcement) -> DeliveryResult:
         return self.publish(announcement)
@@ -296,12 +307,10 @@ class WebFeedAdapter(ChannelAdapter):
                     success=False,
                     error=f"Announcement '{announcement_id}' not found in canonical storage.",
                 )
-            announcement.status = AnnouncementStatus.WITHDRAWN
-            self.storage.save_announcement(announcement)
             self._regenerate_all(self.storage.list_announcements(limit=None))
             return DeliveryResult(success=True, idempotent=True)
         except Exception as exc:
-            return DeliveryResult(success=False, error=str(exc), retryable=False)
+            return DeliveryResult(success=False, error=str(exc), retryable=True, idempotent=True)
 
     def health_check(self) -> HealthResult:
         try:

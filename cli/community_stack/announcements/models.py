@@ -34,6 +34,7 @@ class Announcement:
     body: str
     id: str = field(default_factory=generate_announcement_id)
     published_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     language: str = "en"
     status: AnnouncementStatus = AnnouncementStatus.DRAFT
     canonical_url: str = ""
@@ -76,6 +77,13 @@ class Announcement:
         except ValueError as exc:
             raise ModelValidationError(
                 "Announcement publication time must be an ISO 8601 timestamp."
+            ) from exc
+
+        try:
+            datetime.fromisoformat(self.updated_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ModelValidationError(
+                "Announcement update time must be an ISO 8601 timestamp."
             ) from exc
 
         if self.canonical_url and not self.canonical_url.startswith(("http://", "https://")):

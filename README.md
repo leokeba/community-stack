@@ -58,7 +58,7 @@ The stack is organized into four modular layers with isolated Docker networks:
 | Layer | Components | Role |
 |---|---|---|
 | **Layer A: Core Services** | Matrix Synapse, Element Web, Public Portal | Open, federated community chat & web client |
-| **Layer B: Distribution Adapters** | Local HTML/RSS/Atom/JSON Feed (default); Matrix, ActivityPub and email adapter prototypes | Public web delivery is default; external adapters are not live-service verified |
+| **Layer B: Distribution Adapters** | Local HTML/RSS/Atom/JSON Feed (working); Matrix (opt-in); ActivityPub/email (experimental) | Matrix uses automated test doubles and still needs staging verification; SMS/voice remain planned |
 | **Layer C: Operations & Ingress** | Caddy, Docker Compose, Ansible, `community-stack` CLI | Automated TLS, networking, host configuration |
 | **Layer D: Resilience & Continuity** | Restic, Standby Host Playbook, Offline HTML Exporter | Surviving outages, provider eviction, server loss |
 
@@ -192,7 +192,7 @@ uv run community-stack bridge disable --confirm
 
 ## 🧪 Testing & Quality Assurance
 
-The codebase includes an exhaustive test suite covering schema validation, secret redaction, CLI commands, container service configurations, and disaster recovery:
+The automated test suite covers schema validation, secret redaction, CLI commands, container service configurations, and disaster recovery:
 
 ```bash
 # Run full test suite with coverage
@@ -203,7 +203,7 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-- Automated tests cover the announcement lifecycle, admin authentication/CSRF, configuration, deployment files, and recovery.
+- Automated tests cover the announcement lifecycle, channel failure isolation and safe retries, admin authentication/CSRF, configuration, deployment files, and recovery. Matrix live delivery requires a separate staging check.
 - CI tests Python 3.10, 3.11, 3.12, and 3.13.
 
 ---
