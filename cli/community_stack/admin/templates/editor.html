@@ -11,7 +11,7 @@
   <textarea id="body" name="body" maxlength="50000" required>{{ announcement.body if announcement else '' }}</textarea>
   <label for="author">Author or group (optional)</label>
   <input id="author" name="author" type="text" value="{{ announcement.author if announcement else '' }}">
-  {% if not announcement or announcement.status.value == "draft" %}
+  {% if not announcement or announcement.status.value in ["draft", "scheduled"] %}
   <label for="tags">Tags, separated by commas (optional)</label>
   <input id="tags" name="tags" type="text" value="{{ announcement.tags|join(', ') if announcement else '' }}">
   {% endif %}

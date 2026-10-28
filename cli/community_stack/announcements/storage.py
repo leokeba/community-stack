@@ -76,6 +76,9 @@ class AnnouncementStorage:
                     "UPDATE announcements SET updated_at = COALESCE(NULLIF(created_at, ''), published_at)"
                 )
 
+            if "scheduled_at" not in announcement_columns:
+                conn.execute("ALTER TABLE announcements ADD COLUMN scheduled_at TEXT")
+
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(delivery_states)")}
             if "operation" not in columns:
                 conn.execute(
@@ -158,8 +161,8 @@ class AnnouncementStorage:
                 INSERT INTO announcements (
                     id, title, body, published_at, language, status,
                     canonical_url, expires_at, audience, author, tags_json,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, scheduled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     body=excluded.body,
@@ -171,7 +174,8 @@ class AnnouncementStorage:
                     audience=excluded.audience,
                     author=excluded.author,
                     tags_json=excluded.tags_json,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    scheduled_at=excluded.scheduled_at
                 ;
                 """,
                 (
@@ -188,6 +192,7 @@ class AnnouncementStorage:
                     json.dumps(ann.tags),
                     now,
                     now,
+                    ann.scheduled_at,
                 ),
             )
             conn.commit()
@@ -215,6 +220,7 @@ class AnnouncementStorage:
                 author=row["author"],
                 tags=json.loads(row["tags_json"]),
                 updated_at=row["updated_at"],
+                scheduled_at=row["scheduled_at"],
             )
 
     def list_announcements(
@@ -254,6 +260,7 @@ class AnnouncementStorage:
                         author=row["author"],
                         tags=json.loads(row["tags_json"]),
                         updated_at=row["updated_at"],
+                        scheduled_at=row["scheduled_at"],
                     )
                 )
         return results
@@ -516,3 +523,28 @@ class AnnouncementStorage:
         query += " ORDER BY run_after, job_id;"
         with self._get_connection() as conn:
             return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    def transition_status(self, ann_id: str, from_statuses: tuple[str, ...], to: str) -> bool:
+        """Atomically move an announcement between statuses; False if another process won."""
+        placeholders = ", ".join("?" for _ in from_statuses)
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE announcements SET status = ? WHERE id = ? AND status IN ({placeholders})",
+                (to, ann_id, *from_statuses),
+            )
+            return cursor.rowcount == 1
+
+    def list_due_scheduled(self, now: datetime) -> list[str]:
+        """IDs of scheduled announcements whose publication time has come."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, scheduled_at FROM announcements WHERE status = 'scheduled'"
+            ).fetchall()
+        due = []
+        for row in rows:
+            when = datetime.fromisoformat(row["scheduled_at"].replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when <= now:
+                due.append(row["id"])
+        return due

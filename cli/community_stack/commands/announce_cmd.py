@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from datetime import datetime
 from pathlib import Path
 
 from community_stack.announcements.models import ModelValidationError
@@ -120,6 +121,30 @@ def run_announce(
         except ModelValidationError as exc:
             print(f"[ERROR] Validation failed: {exc}")
             return 1
+
+    elif action == "schedule":
+        try:
+            local = datetime.strptime(getattr(args, "at", ""), "%Y-%m-%d %H:%M")
+        except ValueError:
+            print("[ERROR] Use --at 'YYYY-MM-DD HH:MM' in the community time zone.")
+            return 1
+        try:
+            ann = publisher.schedule(args.id, local.replace(tzinfo=publisher.timezone))
+        except (KeyError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        print(f"Scheduled '{ann.id}' for {local:%Y-%m-%d %H:%M} ({publisher.timezone}).")
+        print("It is published by the admin app's background worker or 'announce worker'.")
+        return 0
+
+    elif action == "unschedule":
+        try:
+            ann = publisher.unschedule(args.id)
+        except (KeyError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        print(f"'{ann.id}' is a draft again.")
+        return 0
 
     elif action == "show":
         ann_id = getattr(args, "id", None)

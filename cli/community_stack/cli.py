@@ -146,6 +146,15 @@ def create_parser() -> argparse.ArgumentParser:
     p_ann_publish = announce_subs.add_parser("publish", help="Publish a saved draft")
     p_ann_publish.add_argument("id", help="Draft announcement ID")
 
+    p_ann_schedule = announce_subs.add_parser("schedule", help="Schedule a draft")
+    p_ann_schedule.add_argument("id", help="Draft announcement ID")
+    p_ann_schedule.add_argument(
+        "--at", required=True, help="Local time in the community time zone, YYYY-MM-DD HH:MM"
+    )
+
+    p_ann_unschedule = announce_subs.add_parser("unschedule", help="Turn back into a draft")
+    p_ann_unschedule.add_argument("id", help="Scheduled announcement ID")
+
     p_ann_show = announce_subs.add_parser("show", help="Show announcement details")
     p_ann_show.add_argument("id", help="Announcement ID")
 

@@ -19,6 +19,7 @@ This handbook is written for volunteer infrastructure operators managing a live 
 | Safe upgrade | `uv run community-stack upgrade matrix` | Takes backup, pulls image, restarts |
 | Draft announcement | `uv run community-stack announce draft -t "Title" -b "Body"` | Saves privately without dispatch |
 | Preview/publish | `uv run community-stack announce preview <id>` then `announce publish <id>` | Default output is local public HTML and feeds |
+| Schedule a draft | `uv run community-stack announce schedule <id> --at "2026-11-02 09:30"` | Time is in `project.timezone`; `announce unschedule <id>` cancels |
 | Run due retries | `uv run community-stack announce worker --once` | Runs queued deliveries now; the admin app also does this every 15 s |
 | Export offline bundle | `uv run community-stack archive export` | Creates zero-dependency offline archive |
 | Emergency killswitch | `uv run community-stack bridge disable --confirm` | Disconnects WhatsApp bridge immediately |
@@ -47,6 +48,12 @@ and settings changes are recorded with time, account and client address on
 the Activity log page, and kept for about 13 months.
 
 ### Delivery retries
+
+Drafts can be scheduled from the announcement page or with `announce
+schedule`. Times are entered in the community's time zone, set as an IANA name
+in `project.timezone` (for example `Europe/Paris`; default UTC). The background
+worker publishes a scheduled announcement within about 15 seconds of its time.
+Editing keeps the schedule, and withdrawing or cancelling it stops publication.
 
 Each channel delivery is stored as a job before it runs. A temporary failure
 (a network error, HTTP 5xx or 429) on a channel that can safely repeat the

@@ -14,6 +14,7 @@ DEFAULT_CONFIG_TEMPLATE = """# Community Communications Stack Configuration
 project:
   name: "community"
   profile: "starter" # starter | community | accessible | resilient
+  timezone: "UTC" # IANA name used for scheduling, e.g. Europe/Paris
 
 domain:
   base: "example.org"

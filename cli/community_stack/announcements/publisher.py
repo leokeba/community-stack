@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
@@ -31,6 +32,18 @@ def retry_delay(attempts: int) -> timedelta:
     return min(RETRY_BASE_DELAY * 4 ** max(attempts - 1, 0), RETRY_MAX_DELAY)
 
 
+def community_timezone(config_path: Path | str) -> ZoneInfo:
+    """The IANA time zone schedules are written in; UTC when unset or unknown."""
+    path = Path(config_path)
+    name = "UTC"
+    if path.is_file():
+        name = load_config(path).get("project", {}).get("timezone") or "UTC"
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
 class AnnouncementPublisher:
     """Orchestrates publishing across canonical storage and channel adapters."""
 
@@ -44,6 +57,7 @@ class AnnouncementPublisher:
     ) -> None:
         self.config_path = Path(config_path)
         self.max_attempts = max_attempts
+        self.timezone = community_timezone(self.config_path)
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
 
@@ -141,12 +155,51 @@ class AnnouncementPublisher:
             if channel_settings.get(adapter.name, True)
         ]
 
-    def publish_draft(self, announcement_id: str) -> tuple[Announcement, dict[str, DeliveryResult]]:
-        """Publish a saved draft and dispatch it independently to each adapter."""
+    def schedule(self, announcement_id: str, when: datetime) -> Announcement:
+        """Schedule a draft for automatic publication at ``when`` (timezone-aware)."""
         ann = self.preview(announcement_id)
-        if ann.status != AnnouncementStatus.DRAFT:
+        if ann.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+            raise ValueError("Only drafts can be scheduled.")
+        if when.tzinfo is None:
+            raise ValueError("Schedule times must include a time zone.")
+        if when <= datetime.now(timezone.utc):
+            raise ValueError("Choose a publication time in the future.")
+        ann.status = AnnouncementStatus.SCHEDULED
+        ann.scheduled_at = when.astimezone(timezone.utc).isoformat()
+        self.storage.save_announcement(ann)
+        return ann
+
+    def unschedule(self, announcement_id: str) -> Announcement:
+        """Turn a scheduled announcement back into a draft."""
+        ann = self.preview(announcement_id)
+        if not self.storage.transition_status(announcement_id, ("scheduled",), "draft"):
+            raise ValueError("This announcement is not scheduled.")
+        ann.status = AnnouncementStatus.DRAFT
+        ann.scheduled_at = None
+        self.storage.save_announcement(ann)
+        return ann
+
+    def publish_due_scheduled(self) -> list[str]:
+        """Publish every scheduled announcement whose time has come."""
+        published = []
+        for announcement_id in self.storage.list_due_scheduled(datetime.now(timezone.utc)):
+            try:
+                self.publish_draft(announcement_id)
+            except (KeyError, ValueError):
+                continue
+            published.append(announcement_id)
+        return published
+
+    def publish_draft(self, announcement_id: str) -> tuple[Announcement, dict[str, DeliveryResult]]:
+        """Publish a saved or scheduled draft and dispatch it to each channel."""
+        ann = self.preview(announcement_id)
+        if ann.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
             raise ValueError(f"Announcement '{announcement_id}' is not a draft.")
+        # Claim the publication atomically so two workers cannot both publish it.
+        if not self.storage.transition_status(announcement_id, (ann.status.value,), "published"):
+            raise ValueError(f"Announcement '{announcement_id}' was already published.")
         ann.status = AnnouncementStatus.PUBLISHED
+        ann.scheduled_at = None
         ann.published_at = datetime.now(timezone.utc).isoformat()
         if not ann.canonical_url:
             web_adapter = next(
@@ -172,11 +225,12 @@ class AnnouncementPublisher:
         return results
 
     def process_due_jobs(self, limit: int = 20) -> int:
-        """Run queued jobs whose time has come; return how many were run."""
+        """Publish due scheduled announcements and run due jobs; return how many ran."""
+        published = self.publish_due_scheduled()
         jobs = self.storage.claim_due_jobs(limit, JOB_LEASE)
         for job in jobs:
             self._run_job(job)
-        return len(jobs)
+        return len(published) + len(jobs)
 
     def _run_job(self, job: dict[str, Any]) -> DeliveryResult:
         """Run one leased job, record the attempt, and close or requeue the job."""
@@ -266,7 +320,7 @@ class AnnouncementPublisher:
         if tags is not None:
             ann.tags = tags
 
-        if ann.status == AnnouncementStatus.DRAFT:
+        if ann.status in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
             ann.validate()
             self.storage.save_announcement(ann)
             return ann, {}
@@ -283,8 +337,9 @@ class AnnouncementPublisher:
         if ann.status == AnnouncementStatus.WITHDRAWN:
             raise ValueError(f"Announcement '{announcement_id}' has already been withdrawn.")
 
-        was_draft = ann.status == AnnouncementStatus.DRAFT
+        was_draft = ann.status in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED)
         ann.status = AnnouncementStatus.WITHDRAWN
+        ann.scheduled_at = None
         self.storage.save_announcement(ann)
         return (ann, {}) if was_draft else (ann, self._dispatch(ann, "withdraw"))
 

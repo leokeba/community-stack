@@ -95,3 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The agent checks each request's parameters, the account's role (read-only from the admin database), and for the restore drill the person's password, with five attempts per 15 minutes; it runs one change at a time and writes its own audit log.
   - Admin console System page for owners and admins, which explains when the agent is not installed.
   - `deploy-vps.sh` restarts the agent after deploying, when it is installed.
+- **Roadmap Phase 1: Scheduled publishing:**
+  - Drafts can be scheduled from the announcement page or with `community-stack announce schedule`, in the community time zone set by the new `project.timezone` setting.
+  - The background worker publishes scheduled announcements when due; claiming a publication is atomic, so concurrent workers never publish twice.
+  - Scheduled announcements can be edited, published early, cancelled back to a draft, or withdrawn.

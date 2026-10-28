@@ -27,11 +27,28 @@
   </tbody>
 </table>
 {% endif %}
-{% if perms.edit and announcement.status.value == "draft" %}
+{% if announcement.status.value == "scheduled" %}
+<p class="notice" role="status">Scheduled to publish on <strong>{{ scheduled_local }}</strong> ({{ timezone_name }}).</p>
+{% endif %}
+{% if perms.edit and announcement.status.value in ["draft", "scheduled"] %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
-  <p><button type="submit">Publish announcement</button></p>
+  <p><button type="submit">{{ "Publish now instead" if announcement.status.value == "scheduled" else "Publish announcement" }}</button></p>
+</form>
+{% endif %}
+{% if perms.edit and announcement.status.value == "draft" %}
+<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/schedule">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="scheduled-for">Publish automatically on ({{ timezone_name }})</label>
+  <input id="scheduled-for" name="scheduled_for" type="datetime-local" min="{{ now_local }}" required>
+  <p><button type="submit">Schedule</button></p>
+</form>
+{% endif %}
+{% if perms.edit and announcement.status.value == "scheduled" %}
+<form method="post" action="/admin/announcements/{{ announcement.id }}/unschedule">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <p><button type="submit">Cancel schedule (keep as draft)</button></p>
 </form>
 {% endif %}
 {% if perms.edit and announcement.status.value in ["published", "updated"] %}

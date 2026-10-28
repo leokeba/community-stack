@@ -12,6 +12,7 @@ from typing import Any
 
 class AnnouncementStatus(str, Enum):
     DRAFT = "draft"
+    SCHEDULED = "scheduled"
     PUBLISHED = "published"
     UPDATED = "updated"
     WITHDRAWN = "withdrawn"
@@ -42,6 +43,7 @@ class Announcement:
     audience: str = "public"
     author: str | None = None
     tags: list[str] = field(default_factory=list)
+    scheduled_at: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.status, str) and not isinstance(self.status, AnnouncementStatus):
@@ -85,6 +87,14 @@ class Announcement:
             raise ModelValidationError(
                 "Announcement update time must be an ISO 8601 timestamp."
             ) from exc
+
+        if self.scheduled_at:
+            try:
+                datetime.fromisoformat(self.scheduled_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ModelValidationError(
+                    "Announcement schedule time must be an ISO 8601 timestamp."
+                ) from exc
 
         if self.canonical_url and not self.canonical_url.startswith(("http://", "https://")):
             raise ModelValidationError(

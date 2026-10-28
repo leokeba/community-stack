@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -375,12 +376,22 @@ def create_app(
             announcement = publisher.preview(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
+        scheduled_local = (
+            datetime.fromisoformat(announcement.scheduled_at)
+            .astimezone(publisher.timezone)
+            .strftime("%A %d %B %Y, %H:%M")
+            if announcement.scheduled_at
+            else None
+        )
         return render(
             request,
             "detail.html",
             page(
                 session,
                 announcement=announcement,
+                scheduled_local=scheduled_local,
+                timezone_name=str(publisher.timezone),
+                now_local=datetime.now(publisher.timezone).strftime("%Y-%m-%dT%H:%M"),
                 deliveries=storage.get_delivery_states(announcement_id),
                 jobs=storage.get_active_jobs(announcement_id),
                 checks=publisher.channel_checks(announcement),
@@ -443,6 +454,49 @@ def create_app(
             announcement_id,
             title=announcement.title,
             channels=sorted(results),
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/announcements/{announcement_id}/schedule")
+    async def schedule_announcement(request: Request, announcement_id: str) -> Response:
+        session, form = await checked_form(request, "edit")
+        try:
+            local = datetime.strptime(form.get("scheduled_for", ""), "%Y-%m-%dT%H:%M")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Choose a date and time.") from None
+        try:
+            announcement = publisher.schedule(
+                announcement_id, local.replace(tzinfo=publisher.timezone)
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Announcement not found.") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.scheduled",
+            announcement_id,
+            title=announcement.title,
+            scheduled_at=announcement.scheduled_at,
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/announcements/{announcement_id}/unschedule")
+    async def unschedule_announcement(request: Request, announcement_id: str) -> Response:
+        session, _ = await checked_form(request, "edit")
+        try:
+            announcement = publisher.unschedule(announcement_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Announcement not found.") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.unscheduled",
+            announcement_id,
+            title=announcement.title,
         )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 

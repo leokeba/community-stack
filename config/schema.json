@@ -32,6 +32,11 @@
             "resilient"
           ],
           "description": "Deployment profile determining service scope"
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA time zone used for scheduling, e.g. Europe/Paris (default UTC)"
         }
       }
     },
