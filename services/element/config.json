@@ -1,8 +1,8 @@
 {
   "default_server_config": {
     "m.homeserver": {
-      "base_url": "https://matrix.example.org",
-      "server_name": "matrix.example.org"
+      "base_url": "http://localhost",
+      "server_name": "localhost"
     },
     "m.identity_server": {
       "base_url": ""
@@ -15,7 +15,7 @@
   "bug_report_endpoint_url": "",
   "default_theme": "dark",
   "room_directory": {
-    "servers": ["matrix.example.org"]
+    "servers": ["localhost"]
   },
   "setting_defaults": {
     "breadcrumbs": true

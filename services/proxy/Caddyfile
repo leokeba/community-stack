@@ -64,6 +64,44 @@
 }
 
 # ------------------------------------------------------------------------------
+# Local Development & Testing Ingress (http://localhost)
+# ------------------------------------------------------------------------------
+http://localhost, http://127.0.0.1 {
+    encode zstd gzip
+
+    # Element Web Matrix Client
+    handle_path /app* {
+        reverse_proxy community_element:80
+    }
+
+    # Public Announcements Feed
+    handle_path /feed* {
+        reverse_proxy community_landing:80
+    }
+
+    # Matrix Client-Server API
+    handle /_matrix/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    handle /_synapse/client/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    # Matrix Client Delegation (.well-known/matrix/client)
+    handle /.well-known/matrix/client {
+        header Access-Control-Allow-Origin "*"
+        header Content-Type "application/json"
+        respond `{"m.homeserver":{"base_url":"http://localhost"}}` 200
+    }
+
+    # Default: Public Landing Page and Service Directory
+    handle {
+        reverse_proxy community_landing:80
+    }
+}
+
+# ------------------------------------------------------------------------------
 # Matrix Direct Federation Port (Optional)
 # ------------------------------------------------------------------------------
 :8448 {
