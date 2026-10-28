@@ -38,6 +38,7 @@
     <nav aria-label="Administration">
       <a href="/admin">Dashboard</a>
       <a href="/admin/announcements">Announcements</a>
+      {% if perms.settings %}<a href="/admin/channels">Channels</a>{% endif %}
       {% if perms.settings %}<a href="/admin/settings">Settings</a>{% endif %}
       {% if perms.accounts %}<a href="/admin/accounts">Accounts</a>{% endif %}
       {% if perms.system %}<a href="/admin/system">System</a>{% endif %}

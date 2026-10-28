@@ -28,7 +28,9 @@ from community_stack.admin.store import (
     tokens_match,
 )
 from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
+from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
+from community_stack.announcements.connectors import CONNECTORS, merge_values
 from community_stack.announcements.models import ModelValidationError
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
@@ -540,7 +542,11 @@ def create_app(
         session = require(request, "settings")
         settings = storage.get_channel_settings()
         channels = [
-            {"name": adapter.name, "enabled": settings.get(adapter.name, True)}
+            {
+                "name": adapter.name,
+                "label": adapter.capabilities.label,
+                "enabled": settings.get(adapter.name, True),
+            }
             for adapter in publisher.adapters
         ]
         return render(request, "settings.html", page(session, channels=channels))
@@ -564,6 +570,96 @@ def create_app(
                     adapter.rebuild()
         audit(request, session["username"], "settings.updated", enabled=sorted(enabled_names))
         return RedirectResponse("/admin/settings", status_code=303)
+
+    def channels_page(
+        request: Request,
+        session: dict[str, Any],
+        message: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        saved = storage.list_connections()
+        enabled = storage.get_channel_settings()
+        connectors = [
+            {
+                "type": connector,
+                "connected": kind in saved,
+                "enabled": enabled.get(kind, True),
+                "values": {
+                    field.name: saved.get(kind, {}).get(field.name, "")
+                    for field in connector.fields
+                    if not field.secret
+                },
+            }
+            for kind, connector in CONNECTORS.items()
+        ]
+        return render(
+            request,
+            "channels.html",
+            page(session, connectors=connectors, message=message),
+            status_code=status_code,
+        )
+
+    def connector_for(kind: str):
+        connector = CONNECTORS.get(kind)
+        if connector is None:
+            raise HTTPException(status_code=404, detail="Unknown channel type.")
+        return connector
+
+    @app.get("/admin/channels")
+    async def channels(request: Request) -> Response:
+        return channels_page(request, require(request, "settings"))
+
+    @app.post("/admin/channels/{kind}/save")
+    async def save_channel(request: Request, kind: str) -> Response:
+        session, form = await checked_form(request, "settings")
+        connector = connector_for(kind)
+        saved = storage.list_connections().get(kind, {})
+        try:
+            values = await run_in_threadpool(
+                connector.validate, merge_values(connector, form, saved)
+            )
+        except (UnsafeURLError, ValueError) as exc:
+            message = {"kind": kind, "ok": False, "text": str(exc)}
+            return channels_page(request, session, message, 400)
+        storage.save_connection(kind, values, session["username"])
+        publisher.reload_connections()
+        public = {f.name: values.get(f.name) for f in connector.fields if not f.secret}
+        audit(
+            request,
+            session["username"],
+            "channel.updated" if saved else "channel.connected",
+            kind,
+            **public,
+        )
+        message = {"kind": kind, "ok": True, "text": "Saved. Use 'Test connection' to check it."}
+        return channels_page(request, session, message)
+
+    @app.post("/admin/channels/{kind}/test")
+    async def test_channel(request: Request, kind: str) -> Response:
+        session, _ = await checked_form(request, "settings")
+        connector = connector_for(kind)
+        values = storage.list_connections().get(kind)
+        if values is None:
+            raise HTTPException(status_code=409, detail="This channel is not connected.")
+        result = await run_in_threadpool(connector.build(values).health_check)
+        audit(request, session["username"], "channel.tested", kind, ok=result.ok)
+        return channels_page(
+            request, session, {"kind": kind, "ok": result.ok, "text": result.details}
+        )
+
+    @app.post("/admin/channels/{kind}/disconnect")
+    async def disconnect_channel(request: Request, kind: str) -> Response:
+        session, _ = await checked_form(request, "settings")
+        connector_for(kind)
+        storage.delete_connection(kind)
+        publisher.reload_connections()
+        audit(request, session["username"], "channel.disconnected", kind)
+        message = {
+            "kind": kind,
+            "ok": True,
+            "text": "Disconnected. Saved credentials were deleted.",
+        }
+        return channels_page(request, session, message)
 
     def accounts_page(
         request: Request, session: dict[str, Any], error: str | None = None, status_code=200

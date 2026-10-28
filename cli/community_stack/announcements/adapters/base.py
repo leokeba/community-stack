@@ -63,6 +63,7 @@ class ChannelCapabilities:
     label: str
     max_text_length: int | None = None
     supports_media: bool = False
+    shortens_long_text: bool = False
     update_mode: UpdateMode = UpdateMode.NONE
     withdraw_mode: WithdrawMode = WithdrawMode.NONE
 
@@ -112,6 +113,14 @@ class ChannelAdapter(ABC):
     @abstractmethod
     def health_check(self) -> HealthResult:
         """Verify channel connectivity and credentials."""
+
+    def update_post(self, announcement: Announcement, external_id: str | None) -> DeliveryResult:
+        """Update using the channel's ID for the earlier post, when the channel needs it."""
+        return self.update(announcement)
+
+    def withdraw_post(self, announcement_id: str, external_id: str | None) -> DeliveryResult:
+        """Withdraw using the channel's ID for the earlier post, when the channel needs it."""
+        return self.withdraw(announcement_id)
 
     @property
     def capabilities(self) -> ChannelCapabilities:

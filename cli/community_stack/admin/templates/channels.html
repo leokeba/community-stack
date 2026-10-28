@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Channels{% endblock %}
+{% block content %}
+<h1>Channels</h1>
+<p>Connect the accounts announcements should be posted to. Credentials are stored on this server and never shown again after saving. Turn channels on or off on the <a href="/admin/settings">Settings</a> page.</p>
+{% for item in connectors %}
+{% set connector = item.type %}
+<section class="panel" aria-labelledby="channel-{{ connector.kind }}">
+  <h2 id="channel-{{ connector.kind }}">{{ connector.label }}</h2>
+  <p class="status">{% if item.connected %}Connected{% if not item.enabled %}, turned off{% endif %}{% else %}Not connected{% endif %}</p>
+  {% if message and message.kind == connector.kind %}
+  <p class="{{ 'notice' if message.ok else 'error' }}" role="{{ 'status' if message.ok else 'alert' }}">{{ message.text }}</p>
+  {% endif %}
+  {% if connector.caveat %}<p class="muted">{{ connector.caveat }}</p>{% endif %}
+  <details {% if not item.connected %}open{% endif %}>
+    <summary>{{ "Change settings" if item.connected else "How to connect" }}</summary>
+    <ol>{% for step in connector.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+    <form method="post" action="/admin/channels/{{ connector.kind }}/save">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% for field in connector.fields %}
+      <label for="{{ connector.kind }}-{{ field.name }}">{{ field.label }}</label>
+      {% if field.secret %}
+      <input id="{{ connector.kind }}-{{ field.name }}" name="{{ field.name }}" type="password" autocomplete="off" {% if item.connected %}placeholder="Saved; leave blank to keep"{% elif field.required %}required{% endif %}>
+      {% else %}
+      <input id="{{ connector.kind }}-{{ field.name }}" name="{{ field.name }}" type="text" value="{{ item["values"][field.name] }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>
+      {% endif %}
+      {% endfor %}
+      <p><button type="submit">{{ "Save changes" if item.connected else "Connect" }}</button></p>
+    </form>
+  </details>
+  {% if item.connected %}
+  <div class="actions">
+    <form method="post" action="/admin/channels/{{ connector.kind }}/test">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Test connection</button>
+    </form>
+    <form method="post" action="/admin/channels/{{ connector.kind }}/disconnect">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Disconnect</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

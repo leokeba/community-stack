@@ -99,3 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Drafts can be scheduled from the announcement page or with `community-stack announce schedule`, in the community time zone set by the new `project.timezone` setting.
   - The background worker publishes scheduled announcements when due; claiming a publication is atomic, so concurrent workers never publish twice.
   - Scheduled announcements can be edited, published early, cancelled back to a draft, or withdrawn.
+- **Roadmap Phase 1: Wave-1 connectors:**
+  - Mastodon, Bluesky, Telegram channel, Discord and Slack connectors, connected from a new console Channels page with step-by-step instructions, a connection test, and write-only credentials.
+  - Long announcements are shortened to each channel's limit with a link to the full announcement; edits and withdrawals use the post ID each channel returned, and channels that cannot edit or delete are skipped instead of reporting a false success.
+  - Bluesky posts use a stable record key, and Mastodon posts an idempotency key, so retries cannot post twice; Discord posts never ping, and Slack text is escaped.
+  - Connector URLs must be HTTPS and resolve to public addresses, at connection time and before every request.

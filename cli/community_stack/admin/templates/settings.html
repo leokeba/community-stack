@@ -2,14 +2,14 @@
 {% block title %}Publishing settings{% endblock %}
 {% block content %}
 <h1>Publishing destinations</h1>
-<p>Only configured adapters are shown here. Secrets and server configuration cannot be edited in this page.</p>
+<p>Turn connected channels on or off. To connect a new channel, use the <a href="/admin/channels">Channels</a> page.</p>
 <form class="card" method="post" action="/admin/settings">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% for channel in channels %}
   <p>
     <label>
       <input type="checkbox" name="enabled_channel" value="{{ channel.name }}" {% if channel.enabled %}checked{% endif %}>
-      Enable {{ channel.name }}
+      Send announcements to {{ channel.label }}
     </label>
   </p>
   {% else %}

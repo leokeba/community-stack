@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,13 +14,18 @@ from community_stack.announcements.adapters.base import (
     ChannelAdapter,
     ChannelCheck,
     DeliveryResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
+from community_stack.announcements.connectors import CONNECTORS
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.secrets import parse_env_file
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ATTEMPTS = 5
 JOB_LEASE = timedelta(minutes=5)
@@ -119,7 +125,25 @@ class AnnouncementPublisher:
                     access_token=access_token,
                 )
             )
+        return adapters + self._connected_adapters()
+
+    def _connected_adapters(self) -> list[ChannelAdapter]:
+        """Adapters for channels organizers connected in the console."""
+        adapters = []
+        for kind, values in self.storage.list_connections().items():
+            connector = CONNECTORS.get(kind)
+            if connector is None:
+                continue
+            try:
+                adapters.append(connector.build(values))
+            except (KeyError, ValueError):
+                logger.warning("Skipping the %s connection: its saved settings are invalid.", kind)
         return adapters
+
+    def reload_connections(self) -> None:
+        """Pick up channels connected or disconnected since the publisher started."""
+        self.adapters = [a for a in self.adapters if a.name not in CONNECTORS]
+        self.adapters.extend(self._connected_adapters())
 
     def create_draft(
         self,
@@ -218,6 +242,11 @@ class AnnouncementPublisher:
         for adapter in self.adapters:
             if not channel_settings.get(adapter.name, True) and operation != "withdraw":
                 continue
+            capabilities = adapter.capabilities
+            if (operation == "update" and capabilities.update_mode == UpdateMode.NONE) or (
+                operation == "withdraw" and capabilities.withdraw_mode == WithdrawMode.NONE
+            ):
+                continue
             job = self.storage.enqueue_delivery_job(
                 ann.id, adapter.name, operation, self.max_attempts, claim_for=JOB_LEASE
             )
@@ -253,12 +282,13 @@ class AnnouncementPublisher:
                 return DeliveryResult(success=False, error=reason)
 
         try:
+            external_id = self.storage.get_external_id(ann.id, adapter.name)
             if operation == "publish":
                 res = adapter.publish(ann)
             elif operation == "update":
-                res = adapter.update(ann)
+                res = adapter.update_post(ann, external_id)
             else:
-                res = adapter.withdraw(ann.id)
+                res = adapter.withdraw_post(ann.id, external_id)
         except Exception as exc:
             res = DeliveryResult(success=False, error=str(exc), retryable=False)
 

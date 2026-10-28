@@ -119,6 +119,14 @@ class AnnouncementStorage:
                 ON delivery_attempts (announcement_id, attempted_at, attempt_id);
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_connections (
+                    kind TEXT PRIMARY KEY,
+                    values_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    updated_by TEXT
+                );
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS delivery_jobs (
                     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     announcement_id TEXT NOT NULL,
@@ -548,3 +556,37 @@ class AnnouncementStorage:
             if when <= now:
                 due.append(row["id"])
         return due
+
+    def get_external_id(self, announcement_id: str, adapter_name: str) -> str | None:
+        """The channel's own ID for an announcement's post, if one was recorded."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT external_id FROM delivery_states WHERE announcement_id = ? "
+                "AND adapter_name = ?",
+                (announcement_id, adapter_name),
+            ).fetchone()
+        return row["external_id"] if row else None
+
+    def list_connections(self) -> dict[str, dict[str, str]]:
+        """Connected channels and their settings, including credentials."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT kind, values_json FROM channel_connections ORDER BY kind"
+            ).fetchall()
+        return {row["kind"]: json.loads(row["values_json"]) for row in rows}
+
+    def save_connection(self, kind: str, values: dict[str, str], actor: str | None) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_connections (kind, values_json, updated_at, updated_by)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(kind) DO UPDATE SET values_json=excluded.values_json,
+                    updated_at=excluded.updated_at, updated_by=excluded.updated_by;
+                """,
+                (kind, json.dumps(values), datetime.now(timezone.utc).isoformat(), actor),
+            )
+
+    def delete_connection(self, kind: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM channel_connections WHERE kind = ?", (kind,))

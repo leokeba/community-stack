@@ -47,6 +47,31 @@ always remain. Sign-ins, failed sign-ins, account changes, publishing actions
 and settings changes are recorded with time, account and client address on
 the Activity log page, and kept for about 13 months.
 
+### Connecting channels
+
+Owners and admins connect Mastodon, Bluesky, a Telegram channel, Discord and
+Slack on the console's **Channels** page, which lists the steps for each one.
+Credentials are stored in the announcements database on the server, are never
+shown again after saving, and are deleted on disconnect; leave a secret field
+blank to keep the saved value. "Test connection" checks the credentials without
+posting, except for Slack, which offers no such check. Connected channels are
+on by default and can be turned off on the Settings page.
+
+| Channel | Long text | After an edit | After withdrawal |
+| --- | --- | --- | --- |
+| Mastodon | Shortened to 500 characters with a link | Post edited | Post deleted |
+| Bluesky | Shortened to 300 characters with a link | Not sent (Bluesky has no edits) | Post deleted |
+| Telegram channel | Shortened to 4,096 characters with a link | Message edited | Message deleted |
+| Discord channel | Shortened to 2,000 characters with a link | Message edited | Message deleted |
+| Slack channel | Shortened to 4,000 characters with a link | Not sent | Not sent |
+
+Server addresses must use HTTPS and resolve to public addresses, so a
+connection cannot be pointed at services inside the server. Telegram, Discord
+and Slack posts are only retried automatically after a rate-limit refusal; other
+failed posts are not retried, because the platform may already have received
+them. These connectors are tested against recorded API behaviour, not yet
+against live accounts.
+
 ### Delivery retries
 
 Drafts can be scheduled from the announcement page or with `announce
