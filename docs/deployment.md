@@ -176,15 +176,19 @@ Verify web ingress:
 ### Publishing service upgrades
 
 The announcements app is built from the checked-out source, not pulled from a
-registry. Before updating, take a backup, update the source, then rebuild the
-app and reload Caddy's mounted configuration:
+registry. From a clean local checkout, deploy the committed source with:
 
 ```bash
-uv run community-stack backup
-git pull --ff-only
-uv run community-stack upgrade announcements
-uv run community-stack upgrade proxy
+VPS_HOST=<host-or-ip> VPS_USER=debian ./scripts/deploy-vps.sh
 ```
+
+The script runs tests and configuration checks, requires a clean worktree,
+creates and verifies a restrictive pre-deployment backup, and transfers only
+tracked source files. It preserves the VPS `.env`, `community-stack.yaml`,
+`data/`, `backups/`, and production-specific Caddy hostnames. It builds the
+announcements image, waits for health, and then validates and recreates Caddy.
+SSH authentication uses the local SSH agent; the web application receives no
+SSH key, Docker socket, or deployment shell access.
 
 The announcement database schema is migrated additively at application startup.
 Public files are rebuildable from SQLite and are regenerated after publication,
