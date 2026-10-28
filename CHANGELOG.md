@@ -76,3 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Roadmap Phase 0: Connector capability model:**
   - Channel adapters declare a readable label, a text limit, media support, and whether edits and withdrawals change the original post or send a follow-up message.
   - Each announcement page lists the channels it goes to, flags text that is too long for a channel, and says what an edit or withdrawal will do on each one.
+- **Roadmap Phase 0: Accounts, roles and activity log:**
+  - Several admin accounts with Owner, Admin, Publisher and Reviewer roles; every admin page and action checks the role on the server.
+  - The existing single administrator becomes an Owner automatically; at least one active owner always remains.
+  - Accounts page to add accounts, change roles, disable or re-enable access, and reset passwords; My account page to change your own password.
+  - Role changes, disabling and password resets apply to existing sessions immediately.
+  - Activity log of sign-ins, failed sign-ins, account changes, publishing actions and settings changes, kept for about 13 months.

@@ -20,10 +20,14 @@
     a { color: #075985; }
     .error { padding: .75rem; background: #fff1f0; border-left: .3rem solid #b42318; }
     .muted { color: #4a5963; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     .status { font-weight: 700; }
     table { border-collapse: collapse; width: 100%; background: white; }
     th, td { padding: .55rem; border-bottom: 1px solid #d5dde2; text-align: left; vertical-align: top; }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+    .inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 0; }
+    select { font: inherit; padding: .45rem; }
+    .notice { padding: .75rem; background: #eef8f0; border-left: .3rem solid #1f7a3a; }
     @media (max-width: 36rem) { table { font-size: .9rem; } th, td { padding: .35rem; } }
   </style>
 </head>
@@ -34,7 +38,11 @@
     <nav aria-label="Administration">
       <a href="/admin">Dashboard</a>
       <a href="/admin/announcements">Announcements</a>
-      <a href="/admin/settings">Settings</a>
+      {% if perms.settings %}<a href="/admin/settings">Settings</a>{% endif %}
+      {% if perms.accounts %}<a href="/admin/accounts">Accounts</a>{% endif %}
+      {% if perms.audit %}<a href="/admin/audit">Activity log</a>{% endif %}
+      <a href="/admin/account">My account</a>
+      <span class="muted">{{ username }} ({{ role }})</span>
       <form method="post" action="/admin/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit">Log out</button>

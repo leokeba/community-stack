@@ -8,7 +8,7 @@
   {% if announcement.author %}<p><strong>By {{ announcement.author }}</strong></p>{% endif %}
   <div style="white-space: pre-wrap">{{ announcement.body }}</div>
 </article>
-{% if announcement.status.value != "withdrawn" %}
+{% if perms.edit and announcement.status.value != "withdrawn" %}
 <p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
 {% endif %}
 {% if checks and announcement.status.value != "withdrawn" %}
@@ -27,14 +27,14 @@
   </tbody>
 </table>
 {% endif %}
-{% if announcement.status.value == "draft" %}
+{% if perms.edit and announcement.status.value == "draft" %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
   <p><button type="submit">Publish announcement</button></p>
 </form>
 {% endif %}
-{% if announcement.status.value in ["published", "updated"] %}
+{% if perms.edit and announcement.status.value in ["published", "updated"] %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/withdraw">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label><input type="checkbox" name="confirm" value="withdraw" required> I confirm withdrawal from public channels.</label>
@@ -100,7 +100,7 @@
 {% else %}
 <p class="muted">No delivery attempts have been recorded.</p>
 {% endif %}
-{% if deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
+{% if perms.edit and deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
 <form method="post" action="/admin/announcements/{{ announcement.id }}/retry">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <button type="submit">Retry safe, idempotent failed deliveries</button>

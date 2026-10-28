@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Activity log{% endblock %}
+{% block content %}
+<h1>Activity log</h1>
+<p class="muted">The 200 most recent sign-ins, account changes, publishing actions and settings changes. Entries are kept for about 13 months.</p>
+{% if events %}
+<table>
+  <thead><tr><th>Time (UTC)</th><th>Who</th><th>Action</th><th>Target</th><th>Details</th><th>From</th></tr></thead>
+  <tbody>
+  {% for event in events %}
+  <tr>
+    <td><time datetime="{{ event.occurred_at }}">{{ event.occurred_at[:19]|replace("T", " ") }}</time></td>
+    <td>{{ event.actor or "—" }}</td>
+    <td>{{ event.action }}</td>
+    <td>{{ event.target or "—" }}</td>
+    <td>{% for key, value in event.details.items() %}{{ key }}: {{ value|join(", ") if value is sequence and value is not string else value }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</td>
+    <td>{{ event.client or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No activity recorded yet.</p>
+{% endif %}
+{% endblock %}

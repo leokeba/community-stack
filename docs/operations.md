@@ -29,6 +29,23 @@ web-feed adapter is enabled by default. Matrix delivery requires explicit
 configuration; ActivityPub/email adapter classes are prototypes and have not
 been verified against live services.
 
+Organizers each get their own account. The first account, created at
+`/admin/setup`, is an **owner**. Owners and admins add accounts on the
+Accounts page with one of four roles:
+
+| Role | Can do |
+| --- | --- |
+| Owner | Everything, including managing other owners |
+| Admin | Manage accounts (except owners) and publishing destinations, and publish |
+| Publisher | Write, publish, edit and withdraw announcements |
+| Reviewer | Read announcements and delivery history |
+
+Role changes and disabled accounts take effect on the next page load, and a
+password reset signs the account out everywhere. At least one active owner must
+always remain. Sign-ins, failed sign-ins, account changes, publishing actions
+and settings changes are recorded with time, account and client address on
+the Activity log page, and kept for about 13 months.
+
 Each channel delivery is stored as a job before it runs. A temporary failure
 (a network error, HTTP 5xx or 429) on a channel that can safely repeat the
 operation is retried automatically after 30 s, 2 min, 8 min, 32 min and 1 h,

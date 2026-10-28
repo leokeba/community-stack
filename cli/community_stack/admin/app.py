@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
-import hmac
 import logging
 import os
 import re
 import secrets
-import sqlite3
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,197 +17,34 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
+from community_stack.admin.store import (
+    PERMISSIONS,
+    ROLE_DESCRIPTIONS,
+    ROLES,
+    SESSION_TTL,
+    AdminStore,
+    can,
+    tokens_match,
+)
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.models import ModelValidationError
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 
+__all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
+
 SESSION_COOKIE = "community_admin_session"
 PREAUTH_CSRF_COOKIE = "community_admin_csrf"
-SESSION_TTL = timedelta(hours=12)
-LOGIN_WINDOW = timedelta(minutes=15)
-LOGIN_LIMIT = 5
 LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"
-PASSWORD_ITERATIONS = 310_000
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 WORKER_INTERVAL_SECONDS = 15.0
 
 logger = logging.getLogger(__name__)
 
 
-class AdminStore:
-    """Authentication, session, rate-limit and channel setting persistence."""
-
-    def __init__(self, db_path: Path | str) -> None:
-        self.db_path = Path(db_path).resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS admin_users (
-                    username TEXT PRIMARY KEY,
-                    password_salt TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS admin_sessions (
-                    token_hash TEXT PRIMARY KEY,
-                    username TEXT,
-                    csrf_token TEXT NOT NULL,
-                    expires_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS admin_login_attempts (
-                    attempt_key TEXT NOT NULL,
-                    attempted_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS admin_login_attempts_idx
-                    ON admin_login_attempts (attempt_key, attempted_at);
-            """)
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    @staticmethod
-    def _token_hash(token: str) -> str:
-        return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _password_hash(password: str, salt: bytes) -> str:
-        return hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
-        ).hex()
-
-    def has_admin(self) -> bool:
-        with self._connect() as conn:
-            return conn.execute("SELECT 1 FROM admin_users LIMIT 1").fetchone() is not None
-
-    def create_admin(self, username: str, password: str) -> None:
-        normalized = username.strip()
-        if not normalized or len(normalized) > 80:
-            raise ValueError("Choose a username between 1 and 80 characters.")
-        if len(password) < 12:
-            raise ValueError("Use a password with at least 12 characters.")
-        if len(password) > 1024:
-            raise ValueError("Password must not exceed 1024 characters.")
-
-        salt = secrets.token_bytes(16)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            if conn.execute("SELECT 1 FROM admin_users LIMIT 1").fetchone():
-                raise ValueError("An administrator has already been created.")
-            conn.execute(
-                """
-                INSERT INTO admin_users (username, password_salt, password_hash, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    normalized,
-                    salt.hex(),
-                    self._password_hash(password, salt),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
-
-    def verify_password(self, username: str, password: str) -> bool:
-        if len(password) > 1024:
-            return False
-        with self._connect() as conn:
-            user = conn.execute(
-                "SELECT password_salt, password_hash FROM admin_users WHERE username = ?",
-                (username.strip(),),
-            ).fetchone()
-        salt = bytes.fromhex(user["password_salt"]) if user else bytes(16)
-        actual = self._password_hash(password, salt)
-        expected = user["password_hash"] if user else "0" * 64
-        return hmac.compare_digest(actual, expected) and user is not None
-
-    def new_session(self, username: str | None) -> tuple[str, str]:
-        token = secrets.token_urlsafe(32)
-        csrf_token = secrets.token_urlsafe(32)
-        expiry = datetime.now(timezone.utc) + SESSION_TTL
-        with self._connect() as conn:
-            conn.execute(
-                "DELETE FROM admin_sessions WHERE expires_at <= ?",
-                (datetime.now(timezone.utc).isoformat(),),
-            )
-            conn.execute(
-                """
-                INSERT INTO admin_sessions (token_hash, username, csrf_token, expires_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (self._token_hash(token), username, csrf_token, expiry.isoformat()),
-            )
-        return token, csrf_token
-
-    def get_session(self, token: str | None) -> dict[str, Any] | None:
-        if not token:
-            return None
-        token_hash = self._token_hash(token)
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT username, csrf_token, expires_at FROM admin_sessions WHERE token_hash = ?",
-                (token_hash,),
-            ).fetchone()
-            if row is None:
-                return None
-            if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
-                conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (token_hash,))
-                return None
-            return dict(row)
-
-    def delete_session(self, token: str | None) -> None:
-        if token:
-            with self._connect() as conn:
-                conn.execute(
-                    "DELETE FROM admin_sessions WHERE token_hash = ?",
-                    (self._token_hash(token),),
-                )
-
-    @staticmethod
-    def _attempt_key(client_host: str, username: str) -> str:
-        return hashlib.sha256(f"{client_host}\0{username}".encode()).hexdigest()
-
-    def is_rate_limited(self, client_host: str, username: str, limit: int = LOGIN_LIMIT) -> bool:
-        since = (datetime.now(timezone.utc) - LOGIN_WINDOW).isoformat()
-        key = self._attempt_key(client_host, username)
-        with self._connect() as conn:
-            conn.execute(
-                "DELETE FROM admin_login_attempts WHERE attempted_at < ?",
-                ((datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),),
-            )
-            attempts = conn.execute(
-                """
-                SELECT COUNT(*) AS count FROM admin_login_attempts
-                WHERE attempt_key = ? AND attempted_at >= ?
-                """,
-                (key, since),
-            ).fetchone()["count"]
-        return attempts >= limit
-
-    def record_failed_attempt(self, client_host: str, username: str) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO admin_login_attempts (attempt_key, attempted_at) VALUES (?, ?)",
-                (
-                    self._attempt_key(client_host, username),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
-
-    def clear_failed_attempts(self, client_host: str, username: str) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                "DELETE FROM admin_login_attempts WHERE attempt_key = ?",
-                (self._attempt_key(client_host, username),),
-            )
-
-
-def tokens_match(expected: str | None, actual: str | None) -> bool:
-    return bool(expected and actual) and hmac.compare_digest(
-        expected.encode("utf-8"), actual.encode("utf-8")
-    )
+class LoginRequired(Exception):
+    """Raised when a page needs a signed-in account."""
 
 
 def create_app(
@@ -277,11 +110,9 @@ def create_app(
     app.state.auth_store = auth_store
     app.state.publisher = publisher
 
-    def session_for(request: Request) -> dict[str, Any] | None:
-        return auth_store.get_session(request.cookies.get(SESSION_COOKIE))
-
-    def csrf_valid(session: dict[str, Any] | None, value: str | None) -> bool:
-        return bool(session) and tokens_match(session["csrf_token"], value)
+    @app.exception_handler(LoginRequired)
+    async def login_required(_request: Request, _exc: LoginRequired) -> Response:
+        return login_redirect()
 
     def set_cookie(response: Response, token: str, name: str = SESSION_COOKIE) -> None:
         response.set_cookie(
@@ -307,12 +138,29 @@ def create_app(
             status_code=status_code,
         )
 
+    def page(session: dict[str, Any], **context: Any) -> dict[str, Any]:
+        """Template context for a signed-in page, including what the role may do."""
+        return {
+            "username": session["username"],
+            "role": session["role"],
+            "csrf_token": session["csrf_token"],
+            "perms": {name: can(session["role"], name) for name in PERMISSIONS},
+            **context,
+        }
+
     def login_redirect() -> RedirectResponse:
         return RedirectResponse("/admin/login", status_code=303)
 
     def authenticated(request: Request) -> dict[str, Any] | None:
-        session = session_for(request)
-        return session if session and session["username"] else None
+        return auth_store.get_session(request.cookies.get(SESSION_COOKIE))
+
+    def require(request: Request, permission: str) -> dict[str, Any]:
+        session = authenticated(request)
+        if not session:
+            raise LoginRequired
+        if not can(session["role"], permission):
+            raise HTTPException(status_code=403, detail="Your role does not allow this.")
+        return session
 
     async def submitted_form(request: Request) -> dict[str, str]:
         form = await request.form()
@@ -324,8 +172,23 @@ def create_app(
     def csrf_or_forbidden(
         request: Request, session: dict[str, Any] | None, form: dict[str, str]
     ) -> None:
-        if not csrf_valid(session, form.get("csrf_token")):
+        if not (session and tokens_match(session["csrf_token"], form.get("csrf_token"))):
             raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+
+    async def checked_form(request: Request, permission: str) -> tuple[dict[str, Any], dict]:
+        session = require(request, permission)
+        form = await submitted_form(request)
+        csrf_or_forbidden(request, session, form)
+        return session, form
+
+    def audit(
+        request: Request,
+        actor: str | None,
+        action: str,
+        target: str | None = None,
+        **details: Any,
+    ) -> None:
+        auth_store.record_event(actor, action, target, details, client_host(request))
 
     # Login and setup use a double-submit cookie so unauthenticated visitors
     # never create database rows.
@@ -339,27 +202,25 @@ def create_app(
             raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
         return token
 
+    def parse_tags(form: dict[str, str]) -> list[str]:
+        return [item.strip() for item in form.get("tags", "").split(",") if item.strip()]
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/admin")
     async def dashboard(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        announcements = storage.list_announcements(limit=10)
-        failures = storage.get_failed_deliveries()
+        session = require(request, "view")
         return render(
             request,
             "dashboard.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "announcements": announcements,
-                "failed_count": len(failures),
-                "queued_count": len(storage.get_active_jobs()),
-            },
+            page(
+                session,
+                announcements=storage.list_announcements(limit=10),
+                failed_count=len(storage.get_failed_deliveries()),
+                queued_count=len(storage.get_active_jobs()),
+            ),
         )
 
     @app.get("/admin/setup")
@@ -391,15 +252,15 @@ def create_app(
         if not tokens_match(setup_token, form.get("setup_token")):
             auth_store.record_failed_attempt(host, "setup")
             raise HTTPException(status_code=403, detail="Administrator setup token is invalid.")
+        username = form.get("username", "").strip()
         try:
-            await run_in_threadpool(
-                auth_store.create_admin, form.get("username", ""), form.get("password", "")
-            )
+            await run_in_threadpool(auth_store.create_admin, username, form.get("password", ""))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         auth_store.clear_failed_attempts(host, "setup")
+        audit(request, username, "setup.completed", username, role="owner")
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
-        token, _ = auth_store.new_session(form["username"].strip())
+        token, _ = auth_store.new_session(username)
         response = RedirectResponse("/admin", status_code=303)
         set_cookie(response, token)
         return response
@@ -430,6 +291,7 @@ def create_app(
         ):
             auth_store.record_failed_attempt(host, username)
             auth_store.record_failed_attempt(host, ANY_USERNAME)
+            audit(request, None, "login.failed", username[:80])
             return render(
                 request,
                 "login.html",
@@ -437,6 +299,7 @@ def create_app(
                 status_code=401,
             )
         auth_store.clear_failed_attempts(host, username)
+        audit(request, username, "login.succeeded")
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
         token, _ = auth_store.new_session(username)
         response = RedirectResponse("/admin", status_code=303)
@@ -451,6 +314,7 @@ def create_app(
         form = await submitted_form(request)
         csrf_or_forbidden(request, session, form)
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
+        audit(request, session["username"], "logout")
         response = RedirectResponse("/admin/login", status_code=303)
         response.delete_cookie(
             SESSION_COOKIE, path="/admin", secure=True, httponly=True, samesite="strict"
@@ -459,68 +323,47 @@ def create_app(
 
     @app.get("/admin/announcements")
     async def announcement_list(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
+        session = require(request, "view")
         return render(
             request,
             "announcements.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "announcements": storage.list_announcements(limit=None),
-            },
+            page(session, announcements=storage.list_announcements(limit=None)),
         )
 
     @app.get("/admin/announcements/new")
     async def new_announcement_page(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        return render(
-            request,
-            "editor.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "announcement": None,
-                "error": None,
-            },
-        )
+        session = require(request, "edit")
+        return render(request, "editor.html", page(session, announcement=None, error=None))
 
     @app.post("/admin/announcements/new")
     async def create_announcement(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
+        session, form = await checked_form(request, "edit")
         try:
             announcement = publisher.create_draft(
                 title=form.get("title", ""),
                 body=form.get("body", ""),
                 author=form.get("author") or None,
-                tags=[item.strip() for item in form.get("tags", "").split(",") if item.strip()],
+                tags=parse_tags(form),
             )
         except ModelValidationError as exc:
             return render(
                 request,
                 "editor.html",
-                {
-                    "username": session["username"],
-                    "csrf_token": session["csrf_token"],
-                    "announcement": form,
-                    "error": str(exc),
-                },
+                page(session, announcement=form, error=str(exc)),
                 status_code=400,
             )
+        audit(
+            request,
+            session["username"],
+            "announcement.created",
+            announcement.id,
+            title=announcement.title,
+        )
         return RedirectResponse(f"/admin/announcements/{announcement.id}", status_code=303)
 
     @app.get("/admin/announcements/{announcement_id}")
     async def announcement_detail(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
+        session = require(request, "view")
         try:
             announcement = publisher.preview(announcement_id)
         except KeyError:
@@ -528,137 +371,122 @@ def create_app(
         return render(
             request,
             "detail.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "announcement": announcement,
-                "deliveries": storage.get_delivery_states(announcement_id),
-                "jobs": storage.get_active_jobs(announcement_id),
-                "checks": publisher.channel_checks(announcement),
-                "delivery_attempts": storage.get_delivery_attempts(announcement_id),
-            },
+            page(
+                session,
+                announcement=announcement,
+                deliveries=storage.get_delivery_states(announcement_id),
+                jobs=storage.get_active_jobs(announcement_id),
+                checks=publisher.channel_checks(announcement),
+                delivery_attempts=storage.get_delivery_attempts(announcement_id),
+            ),
         )
 
     @app.get("/admin/announcements/{announcement_id}/edit")
     async def edit_announcement_page(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
+        session = require(request, "edit")
         try:
             announcement = publisher.preview(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         if announcement.status.value == "withdrawn":
             raise HTTPException(status_code=409, detail="Withdrawn announcements cannot be edited.")
-        return render(
-            request,
-            "editor.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "announcement": announcement,
-                "error": None,
-            },
-        )
+        return render(request, "editor.html", page(session, announcement=announcement, error=None))
 
     @app.post("/admin/announcements/{announcement_id}/update")
     async def update_announcement(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
+        session, form = await checked_form(request, "edit")
         try:
-            publisher.update(
+            announcement, _ = publisher.update(
                 announcement_id,
                 title=form.get("title"),
                 body=form.get("body"),
                 author=form.get("author") or None,
-                tags=[item.strip() for item in form.get("tags", "").split(",") if item.strip()]
-                if "tags" in form
-                else None,
+                tags=parse_tags(form) if "tags" in form else None,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except (ValueError, ModelValidationError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.updated",
+            announcement_id,
+            title=announcement.title,
+        )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 
     @app.post("/admin/announcements/{announcement_id}/publish")
     async def publish_announcement(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
+        session, form = await checked_form(request, "edit")
         if form.get("confirm") != "publish":
             raise HTTPException(
                 status_code=400, detail="Explicit publish confirmation is required."
             )
         try:
-            publisher.publish_draft(announcement_id)
+            announcement, results = publisher.publish_draft(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.published",
+            announcement_id,
+            title=announcement.title,
+            channels=sorted(results),
+        )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 
     @app.post("/admin/announcements/{announcement_id}/withdraw")
     async def withdraw_announcement(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
+        session, form = await checked_form(request, "edit")
         if form.get("confirm") != "withdraw":
             raise HTTPException(
                 status_code=400, detail="Explicit withdrawal confirmation is required."
             )
         try:
-            publisher.withdraw(announcement_id)
+            announcement, _ = publisher.withdraw(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.withdrawn",
+            announcement_id,
+            title=announcement.title,
+        )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 
     @app.post("/admin/announcements/{announcement_id}/retry")
     async def retry_announcement(request: Request, announcement_id: str) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
-        publisher.retry_failed(announcement_id)
+        session, _ = await checked_form(request, "edit")
+        results = publisher.retry_failed(announcement_id)
+        audit(
+            request,
+            session["username"],
+            "announcement.retried",
+            announcement_id,
+            channels=sorted(key.split(":", 1)[1] for key in results),
+        )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 
     @app.get("/admin/settings")
     async def settings_page(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
+        session = require(request, "settings")
         settings = storage.get_channel_settings()
         channels = [
             {"name": adapter.name, "enabled": settings.get(adapter.name, True)}
             for adapter in publisher.adapters
         ]
-        return render(
-            request,
-            "settings.html",
-            {
-                "username": session["username"],
-                "csrf_token": session["csrf_token"],
-                "channels": channels,
-            },
-        )
+        return render(request, "settings.html", page(session, channels=channels))
 
     @app.post("/admin/settings")
     async def update_settings(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
+        session, _ = await checked_form(request, "settings")
         raw_form = await request.form()
         enabled_names = set(raw_form.getlist("enabled_channel"))
         valid_names = {adapter.name for adapter in publisher.adapters}
@@ -673,6 +501,157 @@ def create_app(
                     adapter.channel_links.pop("Matrix announcements", None)
                 if settings.get("web_feed", True):
                     adapter.rebuild()
+        audit(request, session["username"], "settings.updated", enabled=sorted(enabled_names))
         return RedirectResponse("/admin/settings", status_code=303)
+
+    def accounts_page(
+        request: Request, session: dict[str, Any], error: str | None = None, status_code=200
+    ) -> HTMLResponse:
+        assignable = [r for r in ROLES if r != "owner" or session["role"] == "owner"]
+        return render(
+            request,
+            "accounts.html",
+            page(
+                session,
+                accounts=auth_store.list_accounts(),
+                assignable_roles=assignable,
+                role_descriptions=ROLE_DESCRIPTIONS,
+                error=error,
+            ),
+            status_code=status_code,
+        )
+
+    def managed_account(session: dict[str, Any], form: dict[str, str]) -> dict[str, Any]:
+        """The account a form targets, if the signed-in role may manage it."""
+        account = auth_store.get_account(form.get("username", ""))
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        if account["username"] == session["username"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Change your own password on the My account page; "
+                "ask another owner or admin to change your role or access.",
+            )
+        if account["role"] == "owner" and session["role"] != "owner":
+            raise HTTPException(status_code=403, detail="Only owners can manage owners.")
+        return account
+
+    @app.get("/admin/accounts")
+    async def accounts(request: Request) -> Response:
+        return accounts_page(request, require(request, "accounts"))
+
+    @app.post("/admin/accounts/create")
+    async def create_account(request: Request) -> Response:
+        session, form = await checked_form(request, "accounts")
+        role = form.get("role", "")
+        if role == "owner" and session["role"] != "owner":
+            raise HTTPException(status_code=403, detail="Only owners can create owners.")
+        username = form.get("username", "").strip()
+        try:
+            await run_in_threadpool(
+                auth_store.create_account, username, form.get("password", ""), role
+            )
+        except ValueError as exc:
+            return accounts_page(request, session, str(exc), 400)
+        audit(request, session["username"], "account.created", username, role=role)
+        return RedirectResponse("/admin/accounts", status_code=303)
+
+    @app.post("/admin/accounts/role")
+    async def change_role(request: Request) -> Response:
+        session, form = await checked_form(request, "accounts")
+        account = managed_account(session, form)
+        role = form.get("role", "")
+        if role == "owner" and session["role"] != "owner":
+            raise HTTPException(status_code=403, detail="Only owners can grant the owner role.")
+        try:
+            auth_store.set_role(account["username"], role)
+        except ValueError as exc:
+            return accounts_page(request, session, str(exc), 400)
+        audit(
+            request,
+            session["username"],
+            "account.role_changed",
+            account["username"],
+            previous=account["role"],
+            role=role,
+        )
+        return RedirectResponse("/admin/accounts", status_code=303)
+
+    @app.post("/admin/accounts/access")
+    async def change_access(request: Request) -> Response:
+        session, form = await checked_form(request, "accounts")
+        account = managed_account(session, form)
+        disable = form.get("action") == "disable"
+        try:
+            auth_store.set_disabled(account["username"], disable)
+        except ValueError as exc:
+            return accounts_page(request, session, str(exc), 400)
+        action = "account.disabled" if disable else "account.enabled"
+        audit(request, session["username"], action, account["username"])
+        return RedirectResponse("/admin/accounts", status_code=303)
+
+    @app.post("/admin/accounts/password")
+    async def reset_password(request: Request) -> Response:
+        session, form = await checked_form(request, "accounts")
+        account = managed_account(session, form)
+        try:
+            await run_in_threadpool(
+                auth_store.set_password, account["username"], form.get("password", "")
+            )
+        except ValueError as exc:
+            return accounts_page(request, session, str(exc), 400)
+        audit(request, session["username"], "account.password_reset", account["username"])
+        return RedirectResponse("/admin/accounts", status_code=303)
+
+    @app.get("/admin/account")
+    async def my_account(request: Request) -> Response:
+        session = require(request, "view")
+        return render(
+            request,
+            "account.html",
+            page(
+                session,
+                role_description=ROLE_DESCRIPTIONS[session["role"]],
+                error=None,
+                saved=request.query_params.get("saved") == "1",
+            ),
+        )
+
+    @app.post("/admin/account")
+    async def change_my_password(request: Request) -> Response:
+        session, form = await checked_form(request, "view")
+        if not await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("current_password", "")
+        ):
+            error = "Your current password is not correct."
+        else:
+            try:
+                await run_in_threadpool(
+                    auth_store.set_password,
+                    session["username"],
+                    form.get("new_password", ""),
+                    request.cookies.get(SESSION_COOKIE),
+                )
+            except ValueError as exc:
+                error = str(exc)
+            else:
+                audit(request, session["username"], "password.changed", session["username"])
+                return RedirectResponse("/admin/account?saved=1", status_code=303)
+        return render(
+            request,
+            "account.html",
+            page(
+                session,
+                role_description=ROLE_DESCRIPTIONS[session["role"]],
+                error=error,
+                saved=False,
+            ),
+            status_code=400,
+        )
+
+    @app.get("/admin/audit")
+    async def audit_log(request: Request) -> Response:
+        session = require(request, "audit")
+        return render(request, "audit.html", page(session, events=auth_store.list_events()))
 
     return app

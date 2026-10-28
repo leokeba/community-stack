@@ -2,7 +2,7 @@
 {% block title %}Announcements{% endblock %}
 {% block content %}
 <h1>Announcements</h1>
-<p><a href="/admin/announcements/new">Create a draft</a></p>
+{% if perms.edit %}<p><a href="/admin/announcements/new">Create a draft</a></p>{% endif %}
 {% if announcements %}
 <table>
   <thead><tr><th>Title</th><th>Status</th><th>Date</th></tr></thead>

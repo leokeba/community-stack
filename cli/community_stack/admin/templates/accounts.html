@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+<h1>Accounts</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<table>
+  <thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Password</th></tr></thead>
+  <tbody>
+  {% for account in accounts %}
+  {% set manageable = account.username != username and (account.role != "owner" or role == "owner") %}
+  <tr>
+    <td>{{ account.username }}{% if account.username == username %} (you){% endif %}</td>
+    <td>
+      {% if manageable %}
+      <form class="inline" method="post" action="/admin/accounts/role">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="username" value="{{ account.username }}">
+        <label class="visually-hidden" for="role-{{ loop.index }}">Role for {{ account.username }}</label>
+        <select id="role-{{ loop.index }}" name="role">
+          {% for option in assignable_roles %}<option value="{{ option }}" {% if option == account.role %}selected{% endif %}>{{ option }}</option>{% endfor %}
+        </select>
+        <button type="submit">Change role</button>
+      </form>
+      {% else %}{{ account.role }}{% endif %}
+    </td>
+    <td>
+      {% if account.disabled_at %}Disabled{% else %}Active{% endif %}
+      {% if manageable %}
+      <form class="inline" method="post" action="/admin/accounts/access">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="username" value="{{ account.username }}">
+        <input type="hidden" name="action" value="{{ 'enable' if account.disabled_at else 'disable' }}">
+        <button type="submit">{{ "Enable" if account.disabled_at else "Disable" }}</button>
+      </form>
+      {% endif %}
+    </td>
+    <td>
+      {% if manageable %}
+      <form class="inline" method="post" action="/admin/accounts/password">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="username" value="{{ account.username }}">
+        <label class="visually-hidden" for="password-{{ loop.index }}">New password for {{ account.username }}</label>
+        <input id="password-{{ loop.index }}" name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password" required>
+        <button type="submit">Reset</button>
+      </form>
+      {% elif account.username == username %}<a href="/admin/account">Change yours</a>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<form class="card" method="post" action="/admin/accounts/create">
+  <h2>Add an account</h2>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="new-username">Username</label>
+  <input id="new-username" name="username" type="text" maxlength="80" autocomplete="off" required>
+  <label for="new-password">Temporary password (at least 12 characters)</label>
+  <input id="new-password" name="password" type="password" minlength="12" autocomplete="new-password" required>
+  <label for="new-role">Role</label>
+  <select id="new-role" name="role">
+    {% for option in assignable_roles %}<option value="{{ option }}" {% if option == "publisher" %}selected{% endif %}>{{ option }}</option>{% endfor %}
+  </select>
+  <p><button type="submit">Add account</button></p>
+  <p class="muted">Share the temporary password privately and ask the person to change it on their My account page.</p>
+</form>
+
+<h2>What each role can do</h2>
+<table>
+  <tbody>
+  {% for option, description in role_descriptions.items() %}
+  <tr><th scope="row">{{ option }}</th><td>{{ description }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
