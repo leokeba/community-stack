@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from community_stack import __version__
 from community_stack.commands.announce_cmd import run_announce
 from community_stack.commands.backup_cmd import run_backup, run_backup_verify
+from community_stack.commands.bridge_cmd import run_bridge
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.init_cmd import run_init
 from community_stack.commands.install_cmd import run_install
@@ -146,6 +147,17 @@ def create_parser() -> argparse.ArgumentParser:
     p_ann_retry = announce_subs.add_parser("retry", help="Retry failed deliveries")
     p_ann_retry.add_argument("--id", help="Optional specific announcement ID to retry")
 
+    # bridge
+    p_bridge = subparsers.add_parser("bridge", help="Manage optional WhatsApp bridge integration")
+    bridge_subs = p_bridge.add_subparsers(dest="bridge_action", help="Bridge actions")
+
+    bridge_subs.add_parser("status", help="Check bridge health and connection state")
+    p_b_disable = bridge_subs.add_parser(
+        "disable", help="Emergency killswitch to disconnect bridge"
+    )
+    p_b_disable.add_argument("--confirm", action="store_true", help="Explicit confirmation")
+    bridge_subs.add_parser("list-rooms", help="List allowlisted Matrix rooms mapped to WhatsApp")
+
     return parser
 
 
@@ -190,6 +202,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_doctor(config_path=args.config, env_path=args.env)
     elif args.command == "announce":
         return run_announce(args=args)
+    elif args.command == "bridge":
+        return run_bridge(args=args)
     else:
         parser.print_help()
         return 2

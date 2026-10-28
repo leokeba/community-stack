@@ -41,3 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Announcement publishing orchestrator (`AnnouncementPublisher`) with failure isolation, bounded retries, and update/withdrawal propagation.
   - CLI commands: `community-stack announce create`, `list`, `show`, `update`, `withdraw`, and `retry`.
   - Comprehensive unit and integration test suite verifying multi-channel delivery and adapter failure isolation.
+- **Milestone 5: Optional WhatsApp Compatibility:**
+  - Integrated `mautrix-whatsapp` bridge service container (`dock.mau.dev/mautrix/whatsapp:v0.11.2`) with configuration templates.
+  - Implemented `WhatsAppAnnouncementAdapter` (Mode A) for unidirectional forwarder of canonical announcements.
+  - Strict room allowlisting logic in `WhatsAppBridgeManager` preventing accidental exposure of non-allowlisted private rooms.
+  - Emergency disconnect killswitch command (`community-stack bridge disable --confirm`) immediately stopping bridge traffic while preserving core Matrix.
+  - Comprehensive operational and privacy guide in `docs/whatsapp-integration.md`.
+  - Unit and integration tests validating that WhatsApp disconnection or failure does not disrupt the core stack.

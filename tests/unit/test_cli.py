@@ -227,3 +227,12 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     assert main(["announce", "update", ann_id, "--title", "Updated Test Title"]) == 0
     assert main(["announce", "withdraw", ann_id]) == 0
     assert main(["announce", "retry"]) == 0
+
+    # bridge status & list-rooms
+    assert main(["bridge", "status"]) == 0
+    assert main(["bridge", "list-rooms"]) == 0
+
+    # bridge disable without confirm fails
+    assert main(["bridge", "disable"]) == 1
+    # bridge disable with confirm succeeds
+    assert main(["bridge", "disable", "--confirm"]) == 0

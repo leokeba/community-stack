@@ -1,0 +1,34 @@
+# mautrix-whatsapp bridge configuration template
+# Documentation: https://docs.mau.fi/bridges/go/whatsapp/
+
+homeserver:
+  address: http://community_synapse:8008
+  domain: ${MATRIX_DOMAIN}
+
+appservice:
+  address: http://community_whatsapp_bridge:29318
+  hostname: 0.0.0.0
+  port: 29318
+  database:
+    type: sqlite3-fk-wal
+    uri: file:/data/mautrix-whatsapp.db?_txlock=immediate
+  id: whatsapp
+  bot_username: whatsappbot
+  bot_displayname: WhatsApp Bridge Bot
+  as_token: ${WHATSAPP_AS_TOKEN}
+  hs_token: ${WHATSAPP_HS_TOKEN}
+
+bridge:
+  username_template: whatsapp_{{.}}
+  displayname_template: "{{or .FullName .PushName}} (WA)"
+  personal_filtering_spaces: false
+  delivery_receipts: false
+  federate_rooms: false
+  encryption:
+    allow: true
+    default: true
+    require: false
+  permissions:
+    "*": "relay"
+    "${MATRIX_DOMAIN}": "user"
+    "@admin:${MATRIX_DOMAIN}": "admin"

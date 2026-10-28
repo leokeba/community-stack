@@ -1,0 +1,20 @@
+services:
+  whatsapp_bridge:
+    image: dock.mau.dev/mautrix/whatsapp:v0.11.2
+    container_name: community_whatsapp_bridge
+    restart: unless-stopped
+    volumes:
+      - ../../data/whatsapp_bridge:/data
+    networks:
+      - bridge_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:29318/healthz || exit 0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  bridge_net:
+    name: bridge_net
+    driver: bridge
