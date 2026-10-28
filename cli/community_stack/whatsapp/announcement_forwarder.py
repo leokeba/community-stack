@@ -7,10 +7,16 @@ from collections.abc import Callable
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCapabilities,
     DeliveryResult,
     HealthResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.models import Announcement
+
+# Longest text message WhatsApp accepts, in characters.
+WHATSAPP_MAX_TEXT_LENGTH = 65_536
 
 
 class WhatsAppAnnouncementAdapter(ChannelAdapter):
@@ -34,6 +40,23 @@ class WhatsAppAnnouncementAdapter(ChannelAdapter):
     def name(self) -> str:
         return "whatsapp"
 
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="WhatsApp",
+            max_text_length=WHATSAPP_MAX_TEXT_LENGTH,
+            update_mode=UpdateMode.FOLLOW_UP,
+            withdraw_mode=WithdrawMode.NOTICE,
+        )
+
+    def render_text(self, announcement: Announcement) -> str:
+        text_body = f"📢 *{announcement.title}*\n\n{announcement.body}"
+        if announcement.canonical_url:
+            text_body += f"\n\nAuthoritative Link: {announcement.canonical_url}"
+        if announcement.author:
+            text_body += f"\n— {announcement.author}"
+        return text_body
+
     def _mask_jid(self, jid: str) -> str:
         """Redact sensitive phone numbers or group identifiers in logs."""
         return re.sub(r"^\d{4,}", "****", jid)
@@ -46,12 +69,7 @@ class WhatsAppAnnouncementAdapter(ChannelAdapter):
                 retryable=False,
             )
 
-        # Format message cleanly for plain-text WhatsApp presentation
-        text_body = f"📢 *{announcement.title}*\n\n{announcement.body}"
-        if announcement.canonical_url:
-            text_body += f"\n\nAuthoritative Link: {announcement.canonical_url}"
-        if announcement.author:
-            text_body += f"\n— {announcement.author}"
+        text_body = self.render_text(announcement)
 
         payload = {
             "recipient": self.target_jid,

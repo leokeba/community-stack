@@ -11,8 +11,11 @@ from collections.abc import Callable
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCapabilities,
     DeliveryResult,
     HealthResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.models import Announcement
 
@@ -37,6 +40,14 @@ class ActivityPubAdapter(ChannelAdapter):
     @property
     def name(self) -> str:
         return "activitypub"
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="Fediverse (ActivityPub)",
+            update_mode=UpdateMode.IN_PLACE,
+            withdraw_mode=WithdrawMode.DELETE,
+        )
 
     def _http_post(self, url: str, activity_data: dict) -> tuple[int, dict]:
         if self._custom_transport:

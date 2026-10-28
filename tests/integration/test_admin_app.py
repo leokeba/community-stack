@@ -68,6 +68,8 @@ def test_admin_setup_auth_csrf_and_publish_flow(tmp_path):
     draft_id = detail_url.rsplit("/", 1)[-1]
     detail = client.get(detail_url)
     assert "draft" in detail.text
+    assert "Public web feed" in detail.text
+    assert "Edits change the published post." in detail.text
     assert "Bring supplies." in detail.text
     assert not (feed_dir / "announcements.html").exists()
 

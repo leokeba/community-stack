@@ -8,8 +8,11 @@ from email.message import EmailMessage
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCapabilities,
     DeliveryResult,
     HealthResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.models import Announcement
 from community_stack.subscriptions.manager import SubscriberManager
@@ -39,6 +42,14 @@ class EmailNewsletterAdapter(ChannelAdapter):
     @property
     def name(self) -> str:
         return "email"
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="Email newsletter",
+            update_mode=UpdateMode.FOLLOW_UP,
+            withdraw_mode=WithdrawMode.NOTICE,
+        )
 
     def build_email_message(self, announcement: Announcement) -> EmailMessage:
         msg = EmailMessage()

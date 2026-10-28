@@ -11,8 +11,11 @@ from xml.etree import ElementTree as ET
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCapabilities,
     DeliveryResult,
     HealthResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
@@ -41,6 +44,14 @@ class WebFeedAdapter(ChannelAdapter):
     @property
     def name(self) -> str:
         return "web_feed"
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="Public web feed",
+            update_mode=UpdateMode.IN_PLACE,
+            withdraw_mode=WithdrawMode.DELETE,
+        )
 
     def canonical_url_for(self, announcement: Announcement) -> str:
         return f"{self.base_url}/feed/announcements/{announcement.id}/"

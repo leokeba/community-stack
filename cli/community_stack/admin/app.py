@@ -534,6 +534,7 @@ def create_app(
                 "announcement": announcement,
                 "deliveries": storage.get_delivery_states(announcement_id),
                 "jobs": storage.get_active_jobs(announcement_id),
+                "checks": publisher.channel_checks(announcement),
                 "delivery_attempts": storage.get_delivery_attempts(announcement_id),
             },
         )

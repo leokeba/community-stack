@@ -11,6 +11,22 @@
 {% if announcement.status.value != "withdrawn" %}
 <p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
 {% endif %}
+{% if checks and announcement.status.value != "withdrawn" %}
+<h2>Channels</h2>
+<table>
+  <thead><tr><th>Channel</th><th>Length</th><th>After an edit</th><th>After withdrawal</th></tr></thead>
+  <tbody>
+  {% for check in checks %}
+  <tr>
+    <td>{{ check.capabilities.label }}</td>
+    <td>{% if check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
+    <td>{{ check.capabilities.update_description }}</td>
+    <td>{{ check.capabilities.withdraw_description }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% if announcement.status.value == "draft" %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

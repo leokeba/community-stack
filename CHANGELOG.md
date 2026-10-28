@@ -73,3 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Background delivery loop inside the admin app, plus `community-stack announce worker` for running it standalone.
   - Withdrawals and disabled channels cancel pending retries; a newer update supersedes a pending publish.
   - Admin dashboard and announcement pages show deliveries waiting for an automatic retry.
+- **Roadmap Phase 0: Connector capability model:**
+  - Channel adapters declare a readable label, a text limit, media support, and whether edits and withdrawals change the original post or send a follow-up message.
+  - Each announcement page lists the channels it goes to, flags text that is too long for a channel, and says what an edit or withdrawal will do on each one.

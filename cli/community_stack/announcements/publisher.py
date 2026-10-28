@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCheck,
     DeliveryResult,
 )
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
@@ -130,6 +131,15 @@ class AnnouncementPublisher:
         if ann is None:
             raise KeyError(f"Announcement '{announcement_id}' not found.")
         return ann
+
+    def channel_checks(self, announcement: Announcement) -> list[ChannelCheck]:
+        """Check an announcement against every channel it would be sent to."""
+        channel_settings = self.storage.get_channel_settings()
+        return [
+            adapter.check(announcement)
+            for adapter in self.adapters
+            if channel_settings.get(adapter.name, True)
+        ]
 
     def publish_draft(self, announcement_id: str) -> tuple[Announcement, dict[str, DeliveryResult]]:
         """Publish a saved draft and dispatch it independently to each adapter."""

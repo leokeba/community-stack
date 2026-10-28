@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 
 from community_stack.announcements.models import Announcement
 
@@ -25,6 +26,67 @@ class HealthResult:
 
     ok: bool
     details: str
+
+
+class UpdateMode(str, Enum):
+    """How a channel reflects an edit to a published announcement."""
+
+    IN_PLACE = "in_place"
+    FOLLOW_UP = "follow_up"
+    NONE = "none"
+
+
+class WithdrawMode(str, Enum):
+    """How a channel reflects a withdrawn announcement."""
+
+    DELETE = "delete"
+    NOTICE = "notice"
+    NONE = "none"
+
+
+UPDATE_DESCRIPTIONS = {
+    UpdateMode.IN_PLACE: "Edits change the published post.",
+    UpdateMode.FOLLOW_UP: "Edits are sent as a new message; the original stays.",
+    UpdateMode.NONE: "Edits are not sent to this channel.",
+}
+WITHDRAW_DESCRIPTIONS = {
+    WithdrawMode.DELETE: "Withdrawal removes the post.",
+    WithdrawMode.NOTICE: "Withdrawal sends a retraction notice; the original stays.",
+    WithdrawMode.NONE: "Withdrawal cannot be sent to this channel.",
+}
+
+
+@dataclass(frozen=True)
+class ChannelCapabilities:
+    """What a channel can do, so editors can be warned before publishing."""
+
+    label: str
+    max_text_length: int | None = None
+    supports_media: bool = False
+    update_mode: UpdateMode = UpdateMode.NONE
+    withdraw_mode: WithdrawMode = WithdrawMode.NONE
+
+    @property
+    def update_description(self) -> str:
+        return UPDATE_DESCRIPTIONS[self.update_mode]
+
+    @property
+    def withdraw_description(self) -> str:
+        return WITHDRAW_DESCRIPTIONS[self.withdraw_mode]
+
+
+@dataclass(frozen=True)
+class ChannelCheck:
+    """Pre-publication check of one announcement against one channel."""
+
+    name: str
+    capabilities: ChannelCapabilities
+    text_length: int
+
+    @property
+    def over_limit(self) -> bool:
+        limit = self.capabilities.max_text_length
+        return limit is not None and self.text_length > limit
 
 
 class ChannelAdapter(ABC):
@@ -50,3 +112,20 @@ class ChannelAdapter(ABC):
     @abstractmethod
     def health_check(self) -> HealthResult:
         """Verify channel connectivity and credentials."""
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        """Declared channel behaviour; override with what the channel really does."""
+        return ChannelCapabilities(label=self.name)
+
+    def render_text(self, announcement: Announcement) -> str:
+        """Plain text this channel will show, used for length checks and previews."""
+        return f"{announcement.title}\n\n{announcement.body}"
+
+    def check(self, announcement: Announcement) -> ChannelCheck:
+        """Check an announcement against this channel's limits."""
+        return ChannelCheck(
+            name=self.name,
+            capabilities=self.capabilities,
+            text_length=len(self.render_text(announcement)),
+        )

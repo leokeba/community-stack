@@ -11,8 +11,11 @@ from collections.abc import Callable
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
+    ChannelCapabilities,
     DeliveryResult,
     HealthResult,
+    UpdateMode,
+    WithdrawMode,
 )
 from community_stack.announcements.models import Announcement
 
@@ -35,6 +38,17 @@ class MatrixRoomAdapter(ChannelAdapter):
     @property
     def name(self) -> str:
         return "matrix_room"
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="Matrix room",
+            update_mode=UpdateMode.FOLLOW_UP,
+            withdraw_mode=WithdrawMode.NOTICE,
+        )
+
+    def render_text(self, announcement: Announcement) -> str:
+        return f"📢 {announcement.title}\n\n{announcement.body}"
 
     def _http_request(
         self, method: str, path: str, payload: dict | None = None
@@ -81,7 +95,7 @@ class MatrixRoomAdapter(ChannelAdapter):
 
         payload = {
             "msgtype": "m.notice",
-            "body": f"📢 {announcement.title}\n\n{announcement.body}",
+            "body": self.render_text(announcement),
             "format": "org.matrix.custom.html",
             "formatted_body": formatted_html,
             "org.community_stack.announcement_id": announcement.id,
