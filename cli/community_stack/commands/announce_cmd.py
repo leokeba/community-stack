@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from community_stack.announcements.models import ModelValidationError
@@ -221,6 +222,18 @@ def run_announce(
         for key, res in results.items():
             print(f"  - {key}: {'Success' if res.success else res.error}")
         return 1 if failed else 0
+
+    elif action == "worker":
+        if getattr(args, "once", False):
+            print(f"Ran {publisher.process_due_jobs()} due delivery job(s).")
+            return 0
+        print("Delivery worker running. Press Ctrl+C to stop.")
+        try:
+            while True:
+                publisher.process_due_jobs()
+                time.sleep(getattr(args, "interval", 15.0))
+        except KeyboardInterrupt:
+            return 0
 
     else:
         print(f"Unknown announce action: {action}")

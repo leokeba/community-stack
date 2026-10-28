@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -19,6 +19,16 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.secrets import parse_env_file
 
+DEFAULT_MAX_ATTEMPTS = 5
+JOB_LEASE = timedelta(minutes=5)
+RETRY_BASE_DELAY = timedelta(seconds=30)
+RETRY_MAX_DELAY = timedelta(hours=1)
+
+
+def retry_delay(attempts: int) -> timedelta:
+    """Exponential backoff after the given number of attempts: 30s, 2m, 8m, 32m, 1h."""
+    return min(RETRY_BASE_DELAY * 4 ** max(attempts - 1, 0), RETRY_MAX_DELAY)
+
 
 class AnnouncementPublisher:
     """Orchestrates publishing across canonical storage and channel adapters."""
@@ -29,8 +39,10 @@ class AnnouncementPublisher:
         adapters: list[ChannelAdapter] | None = None,
         config_path: Path | str = "community-stack.yaml",
         feed_dir: Path | str = "data/landing/feed",
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> None:
         self.config_path = Path(config_path)
+        self.max_attempts = max_attempts
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
 
@@ -137,40 +149,79 @@ class AnnouncementPublisher:
         return ann, self._dispatch(ann, "publish")
 
     def _dispatch(self, ann: Announcement, operation: str) -> dict[str, DeliveryResult]:
+        """Queue one job per channel and run it now; retryable failures stay queued."""
         results: dict[str, DeliveryResult] = {}
         channel_settings = self.storage.get_channel_settings()
         for adapter in self.adapters:
             if not channel_settings.get(adapter.name, True) and operation != "withdraw":
                 continue
-            try:
-                if operation == "publish":
-                    res = adapter.publish(ann)
-                elif operation == "update":
-                    res = adapter.update(ann)
-                else:
-                    res = adapter.withdraw(ann.id)
-            except Exception as exc:
-                res = DeliveryResult(success=False, error=str(exc), retryable=False)
+            job = self.storage.enqueue_delivery_job(
+                ann.id, adapter.name, operation, self.max_attempts, claim_for=JOB_LEASE
+            )
+            results[adapter.name] = self._run_job(job)
+        return results
 
-            results[adapter.name] = res
-            delivery_status = (
+    def process_due_jobs(self, limit: int = 20) -> int:
+        """Run queued jobs whose time has come; return how many were run."""
+        jobs = self.storage.claim_due_jobs(limit, JOB_LEASE)
+        for job in jobs:
+            self._run_job(job)
+        return len(jobs)
+
+    def _run_job(self, job: dict[str, Any]) -> DeliveryResult:
+        """Run one leased job, record the attempt, and close or requeue the job."""
+        job_id = job["job_id"]
+        operation = job["operation"]
+        adapter = next((a for a in self.adapters if a.name == job["adapter_name"]), None)
+        ann = self.storage.get_announcement(job["announcement_id"])
+        if adapter is None or ann is None:
+            error = "Channel is no longer configured." if ann else "Announcement no longer exists."
+            self.storage.finish_job(job_id, "failed", error)
+            return DeliveryResult(success=False, error=error)
+        if operation != "withdraw":
+            reason = None
+            if ann.status == AnnouncementStatus.WITHDRAWN:
+                reason = "Announcement was withdrawn before delivery."
+            elif not self.storage.get_channel_settings().get(adapter.name, True):
+                reason = "Channel was disabled before delivery."
+            if reason:
+                self.storage.finish_job(job_id, "cancelled", reason)
+                return DeliveryResult(success=False, error=reason)
+
+        try:
+            if operation == "publish":
+                res = adapter.publish(ann)
+            elif operation == "update":
+                res = adapter.update(ann)
+            else:
+                res = adapter.withdraw(ann.id)
+        except Exception as exc:
+            res = DeliveryResult(success=False, error=str(exc), retryable=False)
+
+        self.storage.record_delivery(
+            announcement_id=ann.id,
+            adapter_name=adapter.name,
+            status=(
                 "withdrawn"
                 if operation == "withdraw" and res.success
                 else "delivered"
                 if res.success
                 else "failed"
-            )
-            self.storage.record_delivery(
-                announcement_id=ann.id,
-                adapter_name=adapter.name,
-                status=delivery_status,
-                error=res.error,
-                external_id=res.external_id,
-                operation=operation,
-                retryable=res.retryable,
-                idempotent=res.idempotent,
-            )
-        return results
+            ),
+            error=res.error,
+            external_id=res.external_id,
+            operation=operation,
+            retryable=res.retryable,
+            idempotent=res.idempotent,
+        )
+        if res.success:
+            self.storage.finish_job(job_id, "succeeded")
+        elif res.retryable and res.idempotent and job["attempts"] < job["max_attempts"]:
+            retry_at = datetime.now(timezone.utc) + retry_delay(job["attempts"])
+            self.storage.finish_job(job_id, "queued", res.error, retry_at=retry_at)
+        else:
+            self.storage.finish_job(job_id, "failed", res.error)
+        return res
 
     def publish(
         self,
@@ -228,12 +279,12 @@ class AnnouncementPublisher:
         return (ann, {}) if was_draft else (ann, self._dispatch(ann, "withdraw"))
 
     def retry_failed(self, announcement_id: str | None = None) -> dict[str, DeliveryResult]:
-        """Retry delivery for previously failed adapter attempts."""
+        """Retry previously failed, safely repeatable deliveries now."""
         failed = self.storage.get_failed_deliveries()
         if announcement_id:
             failed = [f for f in failed if f["announcement_id"] == announcement_id]
 
-        adapter_map = {a.name: a for a in self.adapters}
+        adapter_names = {a.name for a in self.adapters}
         channel_settings = self.storage.get_channel_settings()
         retry_results: dict[str, DeliveryResult] = {}
 
@@ -241,50 +292,19 @@ class AnnouncementPublisher:
             ann_id = item["announcement_id"]
             adapter_name = item["adapter_name"]
             operation = item["operation"]
-            adapter = adapter_map.get(adapter_name)
-
             if (
-                not adapter
+                adapter_name not in adapter_names
+                or operation not in ("publish", "update", "withdraw")
                 or (not channel_settings.get(adapter_name, True) and operation != "withdraw")
                 or not item["retryable"]
                 or not item["idempotent"]
+                or self.storage.get_announcement(ann_id) is None
             ):
                 continue
 
-            ann = self.storage.get_announcement(ann_id)
-            if ann is None:
-                continue
-
-            try:
-                if operation == "publish":
-                    res = adapter.publish(ann)
-                elif operation == "update":
-                    res = adapter.update(ann)
-                elif operation == "withdraw":
-                    res = adapter.withdraw(ann_id)
-                else:
-                    continue
-            except Exception as exc:
-                res = DeliveryResult(success=False, error=str(exc), retryable=False)
-
-            key = f"{ann_id}:{adapter_name}"
-            retry_results[key] = res
-            new_status = (
-                "withdrawn"
-                if operation == "withdraw" and res.success
-                else "delivered"
-                if res.success
-                else "failed"
+            job = self.storage.enqueue_delivery_job(
+                ann_id, adapter_name, operation, self.max_attempts, claim_for=JOB_LEASE
             )
-            self.storage.record_delivery(
-                announcement_id=ann_id,
-                adapter_name=adapter_name,
-                status=new_status,
-                error=res.error,
-                external_id=res.external_id,
-                operation=operation,
-                retryable=res.retryable,
-                idempotent=res.idempotent,
-            )
+            retry_results[f"{ann_id}:{adapter_name}"] = self._run_job(job)
 
         return retry_results

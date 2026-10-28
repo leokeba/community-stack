@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from community_stack.announcements.models import Announcement, AnnouncementStatus
@@ -114,6 +114,27 @@ class AnnouncementStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS delivery_attempts_announcement_idx
                 ON delivery_attempts (announcement_id, attempted_at, attempt_id);
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS delivery_jobs (
+                    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    announcement_id TEXT NOT NULL,
+                    adapter_name TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL,
+                    run_after TEXT NOT NULL,
+                    lease_expires_at TEXT,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
+                );
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS delivery_jobs_due_idx
+                ON delivery_jobs (status, run_after);
             """)
             conn.execute("""
                 INSERT OR IGNORE INTO delivery_attempts (
@@ -357,3 +378,141 @@ class AnnouncementStorage:
                 """,
                 (adapter_name, int(enabled)),
             )
+
+    def enqueue_delivery_job(
+        self,
+        announcement_id: str,
+        adapter_name: str,
+        operation: str,
+        max_attempts: int,
+        run_after: datetime | None = None,
+        claim_for: timedelta | None = None,
+    ) -> dict:
+        """Queue a delivery, superseding any queued job for the same channel.
+
+        With ``claim_for`` the job is returned already leased to the caller, so a
+        background worker cannot pick it up while the caller runs it inline.
+        """
+        now = datetime.now(timezone.utc)
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            superseded = conn.execute(
+                """
+                SELECT operation FROM delivery_jobs
+                WHERE announcement_id = ? AND adapter_name = ? AND status = 'queued';
+                """,
+                (announcement_id, adapter_name),
+            ).fetchall()
+            # An update that replaces a never-delivered publish must still publish.
+            if operation == "update" and any(row["operation"] == "publish" for row in superseded):
+                operation = "publish"
+            conn.execute(
+                """
+                UPDATE delivery_jobs SET status = 'cancelled', updated_at = ?
+                WHERE announcement_id = ? AND adapter_name = ? AND status = 'queued';
+                """,
+                (now.isoformat(), announcement_id, adapter_name),
+            )
+            status = "running" if claim_for else "queued"
+            cursor = conn.execute(
+                """
+                INSERT INTO delivery_jobs (
+                    announcement_id, adapter_name, operation, status, attempts, max_attempts,
+                    run_after, lease_expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    announcement_id,
+                    adapter_name,
+                    operation,
+                    status,
+                    1 if claim_for else 0,
+                    max_attempts,
+                    (run_after or now).isoformat(),
+                    (now + claim_for).isoformat() if claim_for else None,
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM delivery_jobs WHERE job_id = ?;", (cursor.lastrowid,)
+            ).fetchone()
+            conn.commit()
+            return dict(row)
+
+    def claim_due_jobs(self, limit: int, lease: timedelta) -> list[dict]:
+        """Lease due queued jobs, and running jobs whose worker lease expired."""
+        now = datetime.now(timezone.utc)
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT job_id FROM delivery_jobs
+                WHERE (status = 'queued' AND run_after <= ?)
+                   OR (status = 'running' AND lease_expires_at <= ?)
+                ORDER BY run_after, job_id LIMIT ?;
+                """,
+                (now.isoformat(), now.isoformat(), limit),
+            ).fetchall()
+            job_ids = [row["job_id"] for row in rows]
+            claimed = []
+            for job_id in job_ids:
+                conn.execute(
+                    """
+                    UPDATE delivery_jobs
+                    SET status = 'running', attempts = attempts + 1,
+                        lease_expires_at = ?, updated_at = ?
+                    WHERE job_id = ?;
+                    """,
+                    ((now + lease).isoformat(), now.isoformat(), job_id),
+                )
+                claimed.append(
+                    dict(
+                        conn.execute(
+                            "SELECT * FROM delivery_jobs WHERE job_id = ?;", (job_id,)
+                        ).fetchone()
+                    )
+                )
+            conn.commit()
+            return claimed
+
+    def finish_job(
+        self,
+        job_id: int,
+        status: str,
+        error: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> None:
+        """Close a leased job, or requeue it for ``retry_at``."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            if retry_at is not None:
+                conn.execute(
+                    """
+                    UPDATE delivery_jobs
+                    SET status = 'queued', run_after = ?, lease_expires_at = NULL,
+                        last_error = ?, updated_at = ?
+                    WHERE job_id = ?;
+                    """,
+                    (retry_at.isoformat(), error, now, job_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE delivery_jobs
+                    SET status = ?, lease_expires_at = NULL, last_error = ?, updated_at = ?
+                    WHERE job_id = ?;
+                    """,
+                    (status, error, now, job_id),
+                )
+
+    def get_active_jobs(self, announcement_id: str | None = None) -> list[dict]:
+        """Return queued or running delivery jobs, soonest first."""
+        query = "SELECT * FROM delivery_jobs WHERE status IN ('queued', 'running')"
+        params: tuple[str, ...] = ()
+        if announcement_id is not None:
+            query += " AND announcement_id = ?"
+            params = (announcement_id,)
+        query += " ORDER BY run_after, job_id;"
+        with self._get_connection() as conn:
+            return [dict(row) for row in conn.execute(query, params).fetchall()]

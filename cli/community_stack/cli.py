@@ -161,6 +161,14 @@ def create_parser() -> argparse.ArgumentParser:
     p_ann_retry = announce_subs.add_parser("retry", help="Retry failed deliveries")
     p_ann_retry.add_argument("--id", help="Optional specific announcement ID to retry")
 
+    p_ann_worker = announce_subs.add_parser(
+        "worker", help="Run scheduled deliveries and automatic retries"
+    )
+    p_ann_worker.add_argument("--once", action="store_true", help="Run due jobs once and exit")
+    p_ann_worker.add_argument(
+        "--interval", type=float, default=15.0, help="Seconds between runs (default 15)"
+    )
+
     # bridge
     p_bridge = subparsers.add_parser("bridge", help="Manage optional WhatsApp bridge integration")
     bridge_subs = p_bridge.add_subparsers(dest="bridge_action", help="Bridge actions")

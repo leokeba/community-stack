@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Publishing dashboard</h1>
 <p>Delivery failures needing attention: <strong>{{ failed_count }}</strong></p>
+<p>Deliveries waiting for an automatic retry: <strong>{{ queued_count }}</strong></p>
 <p><a href="/admin/announcements/new">Create a draft</a> · <a href="/admin/announcements">View all announcements</a></p>
 <h2>Recent announcements</h2>
 {% if announcements %}

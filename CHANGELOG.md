@@ -67,3 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Authoritative Operator Handbook in `docs/operations.md` covering daily maintenance, upgrading pinned releases, incident response runbooks, and decommissioning.
   - Maintainer handover and governance guide in `docs/governance.md` covering the two-person rule, access escrow, credential rotation, and upstream license compliance.
   - Unit and regression test suite verifying diagnostic audits and security redactions.
+- **Roadmap Phase 0: Durable delivery jobs:**
+  - Every channel delivery is recorded as a job in the announcements database before it runs, so a crash mid-dispatch no longer loses deliveries.
+  - Temporary, safely repeatable failures are retried automatically with exponential backoff (30 s to 1 h, 5 attempts).
+  - Background delivery loop inside the admin app, plus `community-stack announce worker` for running it standalone.
+  - Withdrawals and disabled channels cancel pending retries; a newer update supersedes a pending publish.
+  - Admin dashboard and announcement pages show deliveries waiting for an automatic retry.

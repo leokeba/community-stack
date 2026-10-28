@@ -237,6 +237,8 @@ def test_delivery_error_and_safe_retry_are_visible_to_admin(tmp_path):
     failed_detail = client.get(detail_url)
     assert "temporary Matrix outage" in failed_detail.text
     assert "Retry safe, idempotent failed deliveries" in failed_detail.text
+    assert "Scheduled deliveries" in failed_detail.text
+    assert "1 of 5" in failed_detail.text
 
     retried = client.post(f"{detail_url}/retry", data={"csrf_token": csrf_token})
     assert retried.status_code == 303

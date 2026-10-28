@@ -43,6 +43,24 @@
 {% else %}
 <p class="muted">No channel deliveries have been attempted.</p>
 {% endif %}
+{% if jobs %}
+<h2>Scheduled deliveries</h2>
+<p class="muted">Temporary failures are retried automatically with increasing delays.</p>
+<table>
+  <thead><tr><th>Channel</th><th>Operation</th><th>Next attempt</th><th>Attempts</th><th>Last error</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+  <tr>
+    <td>{{ job.adapter_name }}</td>
+    <td>{{ job.operation }}</td>
+    <td>{% if job.status == "running" %}In progress{% else %}<time datetime="{{ job.run_after }}">{{ job.run_after[:16]|replace("T", " ") }} UTC</time>{% endif %}</td>
+    <td>{{ job.attempts }} of {{ job.max_attempts }}</td>
+    <td>{{ job.last_error or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 <h2>Delivery attempt history</h2>
 {% if delivery_attempts %}
 {% if delivery_attempts|selectattr("legacy_snapshot")|list %}

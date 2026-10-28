@@ -19,6 +19,7 @@ This handbook is written for volunteer infrastructure operators managing a live 
 | Safe upgrade | `uv run community-stack upgrade matrix` | Takes backup, pulls image, restarts |
 | Draft announcement | `uv run community-stack announce draft -t "Title" -b "Body"` | Saves privately without dispatch |
 | Preview/publish | `uv run community-stack announce preview <id>` then `announce publish <id>` | Default output is local public HTML and feeds |
+| Run due retries | `uv run community-stack announce worker --once` | Runs queued deliveries now; the admin app also does this every 15 s |
 | Export offline bundle | `uv run community-stack archive export` | Creates zero-dependency offline archive |
 | Emergency killswitch | `uv run community-stack bridge disable --confirm` | Disconnects WhatsApp bridge immediately |
 | Diagnostic report | `uv run community-stack doctor` | Non-destructive, secret-redacted audit |
@@ -27,6 +28,16 @@ The admin UI at `/admin` supports the same publishing lifecycle. Only the local
 web-feed adapter is enabled by default. Matrix delivery requires explicit
 configuration; ActivityPub/email adapter classes are prototypes and have not
 been verified against live services.
+
+Each channel delivery is stored as a job before it runs. A temporary failure
+(a network error, HTTP 5xx or 429) on a channel that can safely repeat the
+operation is retried automatically after 30 s, 2 min, 8 min, 32 min and 1 h,
+up to 5 attempts in total. The admin app runs due jobs in the background every
+15 seconds; set `COMMUNITY_STACK_EMBEDDED_WORKER=0` to turn that off and run
+`community-stack announce worker` as a separate process instead, or
+`COMMUNITY_STACK_WORKER_INTERVAL` to change the interval. Withdrawing an
+announcement or disabling a channel cancels its pending retries. Pending jobs
+are listed on the announcement's page under "Scheduled deliveries".
 
 ---
 

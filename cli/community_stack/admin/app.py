@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import hmac
+import logging
 import os
 import re
 import secrets
 import sqlite3
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -31,6 +35,9 @@ LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"
 PASSWORD_ITERATIONS = 310_000
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+WORKER_INTERVAL_SECONDS = 15.0
+
+logger = logging.getLogger(__name__)
 
 
 class AdminStore:
@@ -213,9 +220,17 @@ def create_app(
     feed_dir: Path | str | None = None,
     config_path: Path | str | None = None,
     setup_token: str | None = None,
+    run_worker: bool | None = None,
+    worker_interval: float | None = None,
 ) -> FastAPI:
     if setup_token is None:
         setup_token = os.environ.get("COMMUNITY_STACK_ADMIN_SETUP_TOKEN")
+    if run_worker is None:
+        run_worker = os.environ.get("COMMUNITY_STACK_EMBEDDED_WORKER", "1") != "0"
+    if worker_interval is None:
+        worker_interval = float(
+            os.environ.get("COMMUNITY_STACK_WORKER_INTERVAL", WORKER_INTERVAL_SECONDS)
+        )
     db_path = db_path or os.environ.get(
         "COMMUNITY_STACK_ANNOUNCEMENTS_DB_PATH", "data/announcements/announcements.db"
     )
@@ -237,7 +252,27 @@ def create_app(
         {},
     )
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-    app = FastAPI(title="Community Announcements Admin", docs_url=None, redoc_url=None)
+
+    async def deliver_due_jobs() -> None:
+        while True:
+            try:
+                await run_in_threadpool(publisher.process_due_jobs)
+            except Exception:
+                logger.exception("Background delivery run failed.")
+            await asyncio.sleep(worker_interval)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        task = asyncio.create_task(deliver_due_jobs()) if run_worker else None
+        yield
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(
+        title="Community Announcements Admin", docs_url=None, redoc_url=None, lifespan=lifespan
+    )
     app.state.storage = storage
     app.state.auth_store = auth_store
     app.state.publisher = publisher
@@ -323,6 +358,7 @@ def create_app(
                 "csrf_token": session["csrf_token"],
                 "announcements": announcements,
                 "failed_count": len(failures),
+                "queued_count": len(storage.get_active_jobs()),
             },
         )
 
@@ -497,6 +533,7 @@ def create_app(
                 "csrf_token": session["csrf_token"],
                 "announcement": announcement,
                 "deliveries": storage.get_delivery_states(announcement_id),
+                "jobs": storage.get_active_jobs(announcement_id),
                 "delivery_attempts": storage.get_delivery_attempts(announcement_id),
             },
         )
