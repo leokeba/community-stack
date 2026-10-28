@@ -62,3 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added Ansible warm standby provisioning playbook (`ansible/playbooks/standby.yml`) pre-pulling container images and configuring independent hosts.
   - Comprehensive guide in `docs/multi-host-resilience.md` covering independent failure domains, captive portal Wi-Fi setup (OpenWrt/Raspberry Pi), and Meshtastic/LoRa off-grid mesh evaluation.
   - Unit and integration tests verifying offline archive generation and cryptographic tampering detection.
+- **Milestone 8: Production Hardening, Operator Handbook & Governance:**
+  - Enhanced `community-stack doctor` with live storage capacity checks and container network port isolation audits.
+  - Authoritative Operator Handbook in `docs/operations.md` covering daily maintenance, upgrading pinned releases, incident response runbooks, and decommissioning.
+  - Maintainer handover and governance guide in `docs/governance.md` covering the two-person rule, access escrow, credential rotation, and upstream license compliance.
+  - Unit and regression test suite verifying diagnostic audits and security redactions.
