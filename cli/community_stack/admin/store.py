@@ -11,7 +11,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from community_stack.admin import totp
+
 SESSION_TTL = timedelta(hours=12)
+PENDING_LOGIN_TTL = timedelta(minutes=5)
+PENDING_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_LIMIT = 5
 PASSWORD_ITERATIONS = 310_000
@@ -122,6 +126,18 @@ class AdminStore:
                 );
                 CREATE INDEX IF NOT EXISTS admin_audit_events_time_idx
                     ON admin_audit_events (occurred_at);
+                CREATE TABLE IF NOT EXISTS admin_recovery_codes (
+                    username TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    used_at TEXT,
+                    PRIMARY KEY (username, code_hash)
+                );
+                CREATE TABLE IF NOT EXISTS admin_pending_logins (
+                    token_hash TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0
+                );
             """)
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(admin_users)")}
             # Accounts created before roles existed were the single administrator.
@@ -131,6 +147,11 @@ class AdminStore:
                 )
             if "disabled_at" not in columns:
                 conn.execute("ALTER TABLE admin_users ADD COLUMN disabled_at TEXT")
+            for column in ("totp_secret", "totp_pending_secret", "totp_enabled_at"):
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE admin_users ADD COLUMN {column} TEXT")
+            if "totp_last_step" not in columns:
+                conn.execute("ALTER TABLE admin_users ADD COLUMN totp_last_step INTEGER")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -200,7 +221,7 @@ class AdminStore:
     def get_account(self, username: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT username, role, created_at, disabled_at FROM admin_users "
+                "SELECT username, role, created_at, disabled_at, totp_enabled_at FROM admin_users "
                 "WHERE username = ?",
                 (username,),
             ).fetchone()
@@ -209,7 +230,7 @@ class AdminStore:
     def list_accounts(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT username, role, created_at, disabled_at FROM admin_users "
+                "SELECT username, role, created_at, disabled_at, totp_enabled_at FROM admin_users "
                 "ORDER BY username COLLATE NOCASE"
             ).fetchall()
         return [dict(row) for row in rows]
@@ -267,6 +288,149 @@ class AdminStore:
         actual = self._password_hash(password, salt)
         expected = user["password_hash"] if user else "0" * 64
         return hmac.compare_digest(actual, expected) and user is not None
+
+    # Two-step login
+
+    def start_totp(self, username: str) -> str:
+        """Create a new secret to confirm; the current one, if any, stays active until then."""
+        secret = totp.new_secret()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE admin_users SET totp_pending_secret = ? WHERE username = ?",
+                (secret, username),
+            )
+        return secret
+
+    def confirm_totp(self, username: str, code: str) -> list[str] | None:
+        """Turn on two-step login if the code matches; returns new recovery codes."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT totp_pending_secret FROM admin_users WHERE username = ?", (username,)
+            ).fetchone()
+            secret = row["totp_pending_secret"] if row else None
+            step = totp.matching_step(secret, code, None) if secret else None
+            if step is None:
+                return None
+            conn.execute(
+                """
+                UPDATE admin_users SET totp_secret = ?, totp_pending_secret = NULL,
+                    totp_enabled_at = ?, totp_last_step = ?
+                WHERE username = ?
+                """,
+                (secret, _now().isoformat(), step, username),
+            )
+            return self._replace_recovery_codes(conn, username)
+
+    def _replace_recovery_codes(self, conn: sqlite3.Connection, username: str) -> list[str]:
+        codes = totp.new_recovery_codes()
+        conn.execute("DELETE FROM admin_recovery_codes WHERE username = ?", (username,))
+        conn.executemany(
+            "INSERT INTO admin_recovery_codes (username, code_hash) VALUES (?, ?)",
+            [(username, totp.hash_recovery_code(code)) for code in codes],
+        )
+        return codes
+
+    def regenerate_recovery_codes(self, username: str) -> list[str]:
+        with self._connect() as conn:
+            return self._replace_recovery_codes(conn, username)
+
+    def disable_totp(self, username: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE admin_users SET totp_secret = NULL, totp_pending_secret = NULL,
+                    totp_enabled_at = NULL, totp_last_step = NULL
+                WHERE username = ?
+                """,
+                (username,),
+            )
+            conn.execute("DELETE FROM admin_recovery_codes WHERE username = ?", (username,))
+
+    def totp_enabled(self, username: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT totp_secret FROM admin_users WHERE username = ? AND disabled_at IS NULL",
+                (username,),
+            ).fetchone()
+        return bool(row and row["totp_secret"])
+
+    def recovery_codes_left(self, username: str) -> int:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM admin_recovery_codes WHERE username = ? AND used_at IS NULL",
+                (username,),
+            ).fetchone()[0]
+
+    def verify_second_factor(self, username: str, code: str) -> str | None:
+        """'totp' or 'recovery' when the code is valid (and now used up), else None."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT totp_secret, totp_last_step FROM admin_users "
+                "WHERE username = ? AND disabled_at IS NULL",
+                (username,),
+            ).fetchone()
+            if not row or not row["totp_secret"]:
+                return None
+            step = totp.matching_step(row["totp_secret"], code, row["totp_last_step"])
+            if step is not None:
+                conn.execute(
+                    "UPDATE admin_users SET totp_last_step = ? WHERE username = ?",
+                    (step, username),
+                )
+                return "totp"
+            used = conn.execute(
+                "UPDATE admin_recovery_codes SET used_at = ? "
+                "WHERE username = ? AND code_hash = ? AND used_at IS NULL",
+                (_now().isoformat(), username, totp.hash_recovery_code(code)),
+            )
+            return "recovery" if used.rowcount == 1 else None
+
+    def begin_pending_login(self, username: str) -> str:
+        """A short-lived token proving the password step passed; the code step comes next."""
+        token = secrets.token_urlsafe(32)
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM admin_pending_logins WHERE expires_at <= ?", (_now().isoformat(),)
+            )
+            conn.execute(
+                "INSERT INTO admin_pending_logins (token_hash, username, expires_at) VALUES (?, ?, ?)",
+                (self._token_hash(token), username, (_now() + PENDING_LOGIN_TTL).isoformat()),
+            )
+        return token
+
+    def pending_login(self, token: str | None, count: bool = True) -> str | None:
+        """The username waiting for its second step; ``count`` uses up one attempt."""
+        if not token:
+            return None
+        token_hash = self._token_hash(token)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT username, expires_at, attempts FROM admin_pending_logins "
+                "WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            if datetime.fromisoformat(row["expires_at"]) <= _now() or (
+                row["attempts"] >= PENDING_LOGIN_ATTEMPTS
+            ):
+                conn.execute("DELETE FROM admin_pending_logins WHERE token_hash = ?", (token_hash,))
+                return None
+            if count:
+                conn.execute(
+                    "UPDATE admin_pending_logins SET attempts = attempts + 1 WHERE token_hash = ?",
+                    (token_hash,),
+                )
+            return row["username"]
+
+    def end_pending_login(self, token: str | None) -> None:
+        if token:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM admin_pending_logins WHERE token_hash = ?",
+                    (self._token_hash(token),),
+                )
 
     # Sessions
 

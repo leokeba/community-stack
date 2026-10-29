@@ -100,6 +100,29 @@ the announcement ID so a retry reuses the campaign instead of emailing
 everyone twice. These connectors are tested against recorded API behaviour,
 not yet against live accounts.
 
+### Two-step login and account recovery
+
+Everyone can turn on two-step login on their **My account** page: after
+confirming their password they scan a QR code with an authenticator app (Aegis,
+FreeOTP, Google Authenticator, 1Password and others) and receive ten single-use
+recovery codes. Logging in then asks for the 6-digit code after the password;
+each code works only once, and the code step allows five tries within five
+minutes. Owners and admins should all turn it on; the Get started checklist
+tracks this. If someone loses their phone and recovery codes, an owner or admin
+turns it off for them on the Accounts page.
+
+If nobody can log in, recover an account on the server, as the user that owns
+the stack directory (not root):
+
+```bash
+cd /opt/community-stack
+.venv/bin/community-stack admin list
+.venv/bin/community-stack admin reset-password <username> --disable-two-step
+```
+
+This prints a temporary password once, signs the account out everywhere,
+re-enables it if it was disabled, and records the reset in the activity log.
+
 ### Delivery retries
 
 Drafts can be scheduled from the announcement page or with `announce

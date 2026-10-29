@@ -133,3 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Console Backups page: where backups go, the last automatic run, a guided switch to any S3-compatible bucket (tested with a first verified backup before it takes effect, rolled back on failure), switching back to local disk, and the offline archive download.
   - The agent's audit log redacts secret parameters such as access keys.
   - The offline archive now contains only published announcements; it previously included drafts and scheduled announcements.
+- **Roadmap Phase 1: Two-step login and account recovery:**
+  - Optional TOTP two-step login with QR-code setup (password required to start), ten single-use hashed recovery codes, replay protection, and a code step limited to five attempts in five minutes.
+  - Owners and admins can turn off two-step login for an account that lost its phone; the Get started checklist asks every owner and admin to turn it on.
+  - `community-stack admin list | reset-password | reset-two-step` recovers accounts from the server when nobody can log in; it refuses to run as root against a user-owned database.

@@ -28,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
 
+from community_stack.admin import totp
 from community_stack.admin.store import (
     PERMISSIONS,
     ROLE_DESCRIPTIONS,
@@ -66,6 +67,7 @@ __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
 
 SESSION_COOKIE = "community_admin_session"
 PREAUTH_CSRF_COOKIE = "community_admin_csrf"
+SECOND_STEP_COOKIE = "community_admin_second_step"
 LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -370,12 +372,53 @@ def create_app(
                 status_code=401,
             )
         auth_store.clear_failed_attempts(host, username)
+        if auth_store.totp_enabled(username):
+            response = RedirectResponse("/admin/login/verify", status_code=303)
+            set_cookie(response, auth_store.begin_pending_login(username), SECOND_STEP_COOKIE)
+            return response
         audit(request, username, "login.succeeded")
+        return signed_in_response(request, username)
+
+    def signed_in_response(request: Request, username: str) -> RedirectResponse:
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
         token, _ = auth_store.new_session(username)
         response = RedirectResponse("/admin", status_code=303)
         set_cookie(response, token)
+        response.delete_cookie(
+            SECOND_STEP_COOKIE, path="/admin", secure=True, httponly=True, samesite="strict"
+        )
         return response
+
+    @app.get("/admin/login/verify")
+    async def second_step_page(request: Request) -> Response:
+        if not auth_store.pending_login(request.cookies.get(SECOND_STEP_COOKIE), count=False):
+            return login_redirect()
+        csrf_token = preauth_csrf_token(request)
+        response = render(request, "login_verify.html", {"csrf_token": csrf_token, "error": None})
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
+        return response
+
+    @app.post("/admin/login/verify")
+    async def second_step(request: Request) -> Response:
+        form = await submitted_form(request)
+        csrf_token = preauth_csrf_or_forbidden(request, form)
+        pending = request.cookies.get(SECOND_STEP_COOKIE)
+        username = auth_store.pending_login(pending)
+        if not username:
+            return login_redirect()
+        used = auth_store.verify_second_factor(username, form.get("code", ""))
+        if not used:
+            auth_store.record_failed_attempt(client_host(request), ANY_USERNAME)
+            audit(request, None, "login.second_step_failed", username)
+            return render(
+                request,
+                "login_verify.html",
+                {"csrf_token": csrf_token, "error": "That code did not work. Try the newest one."},
+                status_code=401,
+            )
+        auth_store.end_pending_login(pending)
+        audit(request, username, "login.succeeded", second_step=used)
+        return signed_in_response(request, username)
 
     @app.post("/admin/logout")
     async def logout(request: Request) -> Response:
@@ -924,19 +967,91 @@ def create_app(
         audit(request, session["username"], "account.password_reset", account["username"])
         return RedirectResponse("/admin/accounts", status_code=303)
 
+    def account_page(
+        request: Request,
+        session: dict[str, Any],
+        status_code: int = 200,
+        **context: Any,
+    ) -> HTMLResponse:
+        username = session["username"]
+        values = {
+            "role_description": ROLE_DESCRIPTIONS[session["role"]],
+            "error": None,
+            "saved": False,
+            "two_step": auth_store.totp_enabled(username),
+            "codes_left": auth_store.recovery_codes_left(username),
+            "setup": None,
+            "recovery_codes": None,
+            "two_step_error": None,
+            **context,
+        }
+        return render(request, "account.html", page(session, **values), status_code=status_code)
+
+    @app.post("/admin/accounts/two-step")
+    async def reset_two_step(request: Request) -> Response:
+        session, form = await checked_form(request, "accounts")
+        account = managed_account(session, form)
+        auth_store.disable_totp(account["username"])
+        audit(request, session["username"], "two_step.reset", account["username"])
+        return RedirectResponse("/admin/accounts", status_code=303)
+
     @app.get("/admin/account")
     async def my_account(request: Request) -> Response:
         session = require(request, "view")
-        return render(
-            request,
-            "account.html",
-            page(
+        return account_page(request, session, saved=request.query_params.get("saved") == "1")
+
+    @app.post("/admin/account/two-step/start")
+    async def start_two_step(request: Request) -> Response:
+        session, form = await checked_form(request, "view")
+        if not await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("current_password", "")
+        ):
+            return account_page(
+                request, session, 400, two_step_error="Your current password is not correct."
+            )
+        secret = auth_store.start_totp(session["username"])
+        uri = totp.provisioning_uri(secret, session["username"], "Community Stack")
+        setup = {"secret": secret, "qr": Markup(totp.qr_svg(uri))}
+        return account_page(request, session, setup=setup)
+
+    @app.post("/admin/account/two-step/confirm")
+    async def confirm_two_step(request: Request) -> Response:
+        session, form = await checked_form(request, "view")
+        codes = auth_store.confirm_totp(session["username"], form.get("code", ""))
+        if codes is None:
+            return account_page(
+                request,
                 session,
-                role_description=ROLE_DESCRIPTIONS[session["role"]],
-                error=None,
-                saved=request.query_params.get("saved") == "1",
-            ),
+                400,
+                two_step_error="That code did not match. Start again and scan the new code.",
+            )
+        audit(request, session["username"], "two_step.enabled", session["username"])
+        return account_page(request, session, recovery_codes=codes)
+
+    @app.post("/admin/account/two-step/recovery-codes")
+    async def new_recovery_codes(request: Request) -> Response:
+        session, form = await checked_form(request, "view")
+        if not auth_store.verify_second_factor(session["username"], form.get("code", "")):
+            return account_page(request, session, 400, two_step_error="That code did not work.")
+        codes = auth_store.regenerate_recovery_codes(session["username"])
+        audit(request, session["username"], "two_step.recovery_codes_replaced")
+        return account_page(request, session, recovery_codes=codes)
+
+    @app.post("/admin/account/two-step/disable")
+    async def disable_two_step(request: Request) -> Response:
+        session, form = await checked_form(request, "view")
+        password_ok = await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("current_password", "")
         )
+        if not password_ok or not auth_store.verify_second_factor(
+            session["username"], form.get("code", "")
+        ):
+            return account_page(
+                request, session, 400, two_step_error="The password or the code did not work."
+            )
+        auth_store.disable_totp(session["username"])
+        audit(request, session["username"], "two_step.disabled", session["username"])
+        return account_page(request, session)
 
     @app.post("/admin/account")
     async def change_my_password(request: Request) -> Response:
@@ -958,17 +1073,7 @@ def create_app(
             else:
                 audit(request, session["username"], "password.changed", session["username"])
                 return RedirectResponse("/admin/account?saved=1", status_code=303)
-        return render(
-            request,
-            "account.html",
-            page(
-                session,
-                role_description=ROLE_DESCRIPTIONS[session["role"]],
-                error=error,
-                saved=False,
-            ),
-            status_code=400,
-        )
+        return account_page(request, session, 400, error=error)
 
     async def system_page(
         request: Request,
@@ -1140,6 +1245,11 @@ def create_app(
                 "label": "Add a second owner or admin, so the community is never locked out",
                 "done": len(managers) >= 2,
                 "link": "/admin/accounts",
+            },
+            {
+                "label": "Turn on two-step login for every owner and admin",
+                "done": all(account["totp_enabled_at"] for account in managers),
+                "link": "/admin/account",
             },
             {
                 "label": "Install the system agent on the server",

@@ -178,6 +178,30 @@ def create_parser() -> argparse.ArgumentParser:
         "--interval", type=float, default=15.0, help="Seconds between runs (default 15)"
     )
 
+    # admin recovery
+    p_admin = subparsers.add_parser(
+        "admin", help="Recover admin console accounts from the server (when nobody can log in)"
+    )
+    p_admin.add_argument(
+        "--db", help="Admin database (default data/announcements/announcements.db)"
+    )
+    admin_subs = p_admin.add_subparsers(dest="admin_action", help="Recovery actions")
+    admin_subs.add_parser("list", help="List console accounts")
+    p_admin_reset = admin_subs.add_parser(
+        "reset-password", help="Give an account a new temporary password"
+    )
+    p_admin_reset.add_argument("username", help="Account to reset")
+    p_admin_reset.add_argument(
+        "--disable-two-step", action="store_true", help="Also turn off two-step login"
+    )
+    p_admin_reset.add_argument(
+        "--password-stdin", action="store_true", help="Read the new password from standard input"
+    )
+    p_admin_2fa = admin_subs.add_parser(
+        "reset-two-step", help="Turn off an account's two-step login"
+    )
+    p_admin_2fa.add_argument("username", help="Account to reset")
+
     # agent
     p_agent = subparsers.add_parser(
         "agent", help="Run the privileged control agent used by the admin console"
@@ -291,6 +315,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_doctor(config_path=args.config, env_path=args.env)
     elif args.command == "announce":
         return run_announce(args=args)
+    elif args.command == "admin":
+        from community_stack.commands.admin_cmd import run_admin
+
+        return run_admin(args)
     elif args.command == "agent":
         from community_stack.commands.agent_cmd import run_agent
 

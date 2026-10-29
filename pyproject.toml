@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn>=0.30.0",
     "markdown-it-py>=3.0.0",
     "pillow>=10.4.0",
+    "segno>=1.6.0",
 ]
 
 [project.optional-dependencies]

@@ -4,7 +4,7 @@
 <h1>Accounts</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <table>
-  <thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Password</th></tr></thead>
+  <thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Password</th><th>Two-step login</th></tr></thead>
   <tbody>
   {% for account in accounts %}
   {% set manageable = account.username != username and (account.role != "owner" or role == "owner") %}
@@ -44,6 +44,16 @@
         <button type="submit">Reset</button>
       </form>
       {% elif account.username == username %}<a href="/admin/account">Change yours</a>{% endif %}
+    </td>
+    <td>
+      {% if account.totp_enabled_at %}On{% else %}Off{% endif %}
+      {% if manageable and account.totp_enabled_at %}
+      <form class="inline" method="post" action="/admin/accounts/two-step">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="username" value="{{ account.username }}">
+        <button type="submit">Turn off (lost phone)</button>
+      </form>
+      {% endif %}
     </td>
   </tr>
   {% endfor %}

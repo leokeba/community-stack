@@ -282,5 +282,5 @@ def test_get_started_checklist_tracks_progress(console):
     assert "Finish setting up" in dashboard.text
     start = client.get("/admin/start")
     # Owner account, the running agent, and the example's explicit time zone.
-    assert "3 of 8 steps done." in start.text
+    assert "3 of 9 steps done." in start.text
     assert 'href="/admin/channels">Connect a publishing channel' in start.text

@@ -14,4 +14,50 @@
   <input id="new-password" name="new_password" type="password" minlength="12" autocomplete="new-password" required>
   <p><button type="submit">Change password</button></p>
 </form>
+<section class="card" aria-labelledby="two-step-heading">
+  <h2 id="two-step-heading">Two-step login</h2>
+  {% if two_step_error %}<p class="error" role="alert">{{ two_step_error }}</p>{% endif %}
+  {% if recovery_codes %}
+  <div class="notice" role="status">
+    <p><strong>Save these recovery codes now.</strong> Each one works once if you lose your phone. They will not be shown again.</p>
+    <pre>{% for code in recovery_codes %}{{ code }}
+{% endfor %}</pre>
+  </div>
+  {% endif %}
+  {% if setup %}
+  <p>Scan this code with an authenticator app (such as Aegis, FreeOTP, Google Authenticator or 1Password), then enter the 6-digit code it shows.</p>
+  <div style="max-width: 16rem">{{ setup.qr }}</div>
+  <p class="muted">Can't scan it? Enter this key in the app instead: <code>{{ setup.secret }}</code></p>
+  <form method="post" action="/admin/account/two-step/confirm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="confirm-code">6-digit code</label>
+    <input id="confirm-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+    <p><button type="submit">Turn on two-step login</button></p>
+  </form>
+  {% elif two_step %}
+  <p>Two-step login is <strong>on</strong>. {{ codes_left }} recovery codes left.</p>
+  <form method="post" action="/admin/account/two-step/recovery-codes">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="regen-code">Current 6-digit code</label>
+    <input id="regen-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+    <p><button type="submit">Make new recovery codes</button></p>
+  </form>
+  <form method="post" action="/admin/account/two-step/disable">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="disable-password">Current password</label>
+    <input id="disable-password" name="current_password" type="password" autocomplete="current-password" required>
+    <label for="disable-code">Current 6-digit code</label>
+    <input id="disable-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="20" required>
+    <p><button type="submit">Turn off two-step login</button></p>
+  </form>
+  {% else %}
+  <p>Two-step login is <strong>off</strong>. With it on, logging in also needs a code from an app on your phone, so a stolen password alone is not enough.</p>
+  <form method="post" action="/admin/account/two-step/start">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="start-password">Current password</label>
+    <input id="start-password" name="current_password" type="password" autocomplete="current-password" required>
+    <p><button type="submit">Set up two-step login</button></p>
+  </form>
+  {% endif %}
+</section>
 {% endblock %}
