@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import backups, health, updates
+from community_stack.agent import backups, health, matrix_admin, updates
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
@@ -179,6 +179,16 @@ def _update_call(context: AgentContext, params: dict[str, Any]) -> dict[str, Any
         raise OperationError(str(exc)) from exc
 
 
+def _matrix_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except matrix_admin.MatrixAdminError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
+
+
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
     return {"values": settings_catalog.current_values(config)}
@@ -285,6 +295,40 @@ CATALOG: dict[str, Operation] = {
             _update_call,
             params=(Param("service", re.compile("|".join(updates.UPDATABLE)), required=True),),
             summary="Back up, update one service to its pinned version, roll back on failure.",
+        ),
+        Operation(
+            "matrix.users.list",
+            READ,
+            "system",
+            _matrix_call(matrix_admin.list_users),
+            summary="List the Matrix accounts on this server.",
+        ),
+        Operation(
+            "matrix.users.create",
+            CHANGE,
+            "system",
+            _matrix_call(matrix_admin.create_user),
+            params=(
+                Param("username", re.compile(r"[a-z0-9._=/-]{1,64}"), required=True),
+                Param("display_name", re.compile(r"[^\n\r]{1,100}")),
+            ),
+            summary="Create a Matrix account with a temporary password.",
+        ),
+        Operation(
+            "matrix.users.reset_password",
+            DANGEROUS,
+            "system",
+            _matrix_call(matrix_admin.reset_password),
+            params=(Param("user_id", matrix_admin.USER_ID, required=True),),
+            summary="Give a Matrix account a new temporary password and sign it out.",
+        ),
+        Operation(
+            "matrix.users.deactivate",
+            DANGEROUS,
+            "system",
+            _matrix_call(matrix_admin.deactivate_user),
+            params=(Param("user_id", matrix_admin.USER_ID, required=True),),
+            summary="Deactivate a Matrix account.",
         ),
         Operation(
             "config.get",

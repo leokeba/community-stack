@@ -174,3 +174,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Synapse 1.163.2:**
   - Pinned Synapse moves from 1.119.0 to 1.163.2 (security fixes, including the Pillow fix in 1.163.2). Upgrades from 1.119 were tested on SQLite, as production uses, and on the stack's generated PostgreSQL configuration: Synapse migrated and existing users could log in. Fresh installs boot healthy on the new version.
   - After deploying, update Matrix from the console's Services page; it takes a safety backup first. If a Synapse update fails after migrating its database, the console names the backup to restore.
+- **Matrix user management:**
+  - Matrix users page: list accounts, create accounts with a one-time temporary password, reset passwords (signing the account out) and deactivate accounts; resets and deactivation need the person's password.
+  - The agent calls Synapse's admin API from inside the Synapse container with its own admin account, so the admin API stays private; tested against a real Synapse 1.163.2.

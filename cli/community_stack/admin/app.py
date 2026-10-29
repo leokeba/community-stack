@@ -1392,6 +1392,81 @@ def create_app(
         audit(request, session["username"], "mirroring.room_removed", form.get("room_id", ""))
         return RedirectResponse("/admin/mirroring", status_code=303)
 
+    async def matrix_users_page(
+        request: Request,
+        session: dict[str, Any],
+        outcome: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        listing, error = None, None
+        if agent.available():
+            try:
+                listing = await run_in_threadpool(
+                    agent.call, "matrix.users.list", session["username"]
+                )
+            except (AgentUnavailable, AgentRefused) as exc:
+                error = str(exc)
+        return render(
+            request,
+            "matrix_users.html",
+            page(
+                session,
+                agent_available=agent.available(),
+                listing=listing,
+                error=error,
+                outcome=outcome,
+            ),
+            status_code=status_code,
+        )
+
+    @app.get("/admin/matrix-users")
+    async def matrix_users(request: Request) -> Response:
+        return await matrix_users_page(request, require(request, "system"))
+
+    async def matrix_user_action(
+        request: Request, op: str, title: str, fields: tuple[str, ...]
+    ) -> HTMLResponse:
+        session, form = await checked_form(request, "system")
+        params = {name: form.get(name, "").strip() for name in fields if form.get(name, "").strip()}
+        try:
+            result = await run_in_threadpool(
+                agent.call, op, session["username"], params, form.get("password") or None
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                f"system.{op}",
+                params.get("user_id") or params.get("username"),
+                outcome="failed",
+            )
+            return await matrix_users_page(
+                request, session, {"title": title, "error": str(exc)}, 400
+            )
+        # Temporary passwords are shown once and never written to the activity log.
+        audit(
+            request, session["username"], f"system.{op}", result.get("user_id"), outcome="succeeded"
+        )
+        return await matrix_users_page(request, session, {"title": title, "result": result})
+
+    @app.post("/admin/matrix-users/create")
+    async def create_matrix_user(request: Request) -> Response:
+        return await matrix_user_action(
+            request, "matrix.users.create", "New Matrix account", ("username", "display_name")
+        )
+
+    @app.post("/admin/matrix-users/reset-password")
+    async def reset_matrix_password(request: Request) -> Response:
+        return await matrix_user_action(
+            request, "matrix.users.reset_password", "New temporary password", ("user_id",)
+        )
+
+    @app.post("/admin/matrix-users/deactivate")
+    async def deactivate_matrix_user(request: Request) -> Response:
+        return await matrix_user_action(
+            request, "matrix.users.deactivate", "Account deactivated", ("user_id",)
+        )
+
     @app.get("/admin/channels/signal/link")
     async def signal_link(request: Request) -> Response:
         session = require(request, "settings")

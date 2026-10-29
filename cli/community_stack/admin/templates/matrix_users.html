@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Matrix users{% endblock %}
+{% block content %}
+<h1>Matrix users</h1>
+<p>Accounts on this server's Matrix chat. Registration stays closed: create accounts here and give each person their temporary password privately; they can change it in Element under Settings, Account.</p>
+{% if outcome %}
+  {% if outcome.error %}<p class="error" role="alert"><strong>{{ outcome.title }}:</strong> {{ outcome.error }}</p>
+  {% else %}
+  <div class="notice" role="status">
+    <p><strong>{{ outcome.title }}:</strong> {{ outcome.result.user_id }}</p>
+    {% if outcome.result.temporary_password %}<p>Temporary password, shown only now: <code>{{ outcome.result.temporary_password }}</code></p>{% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not agent_available %}
+<div class="panel"><p>Matrix accounts are managed through the system agent, which is not running. See docs/operations.md, "Control agent".</p></div>
+{% elif listing %}
+<form class="card" method="post" action="/admin/matrix-users/create">
+  <h2>Create an account</h2>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="mx-username">Username (becomes @username:{{ listing.server_name }})</label>
+  <input id="mx-username" name="username" type="text" maxlength="64" pattern="[a-z0-9._=/-]+" required>
+  <label for="mx-display">Display name (optional)</label>
+  <input id="mx-display" name="display_name" type="text" maxlength="100">
+  <p><button type="submit">Create account</button></p>
+</form>
+<table>
+  <thead><tr><th>Account</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  {% for user in listing.users %}
+  <tr>
+    <td>{{ user.user_id }}{% if user.admin %} (server admin){% endif %}</td>
+    <td>{{ user.display_name or "—" }}</td>
+    <td>{{ "Deactivated" if user.deactivated else "Active" }}</td>
+    <td>
+      {% if not user.deactivated %}
+      <details>
+        <summary>Manage</summary>
+        <form method="post" action="/admin/matrix-users/reset-password">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="user_id" value="{{ user.user_id }}">
+          <label for="reset-{{ loop.index }}">Your password</label>
+          <input id="reset-{{ loop.index }}" name="password" type="password" autocomplete="current-password" required>
+          <p><button type="submit">Reset password and sign out everywhere</button></p>
+        </form>
+        <form method="post" action="/admin/matrix-users/deactivate">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="user_id" value="{{ user.user_id }}">
+          <label for="deactivate-{{ loop.index }}">Your password</label>
+          <input id="deactivate-{{ loop.index }}" name="password" type="password" autocomplete="current-password" required>
+          <p><button type="submit">Deactivate account</button></p>
+        </form>
+      </details>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">No accounts yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -109,6 +109,19 @@ deleted in that group. Use a dedicated Signal account and number: Signal may
 block accounts that look automated. The linked account's keys are kept in
 `data/signal` and included in backups.
 
+### Matrix users
+
+Owners and admins manage chat accounts on the **Matrix users** page. Synapse's
+admin API is never exposed: the control agent sends each request from inside
+the Synapse container, using a dedicated `@community-stack-admin` account it
+creates on first use with Synapse's registration shared secret (its token is
+kept in the root-only `data/agent/matrix-admin.json`). Registration stays
+closed: create an account with a username and optional display name, and give
+the person the temporary password shown once; they change it in Element under
+Settings, Account. Resetting a password signs the account out everywhere and
+deactivating an account both ask for your own password. Temporary passwords are
+never written to either activity log.
+
 ### Mirroring Matrix rooms
 
 The **Mirroring** page (owners and admins) turns chosen Matrix rooms into a
