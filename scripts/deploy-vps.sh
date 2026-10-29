@@ -111,22 +111,23 @@ ssh "${ssh_opts[@]}" "$target" bash -s -- "$remote_dir" "$deploy_id" <<'REMOTE'
 set -eu
 project_dir=$1
 deploy_id=$2
-cd "$project_dir"
 
 # The host CLI and the control agent run from this editable install; keep its
 # dependencies in step with the code that was just copied.
-uv_bin="$(command -v uv || echo "$HOME/.local/bin/uv")"
-if [ -x "$uv_bin" ] && sudo -n -u community test -x "$uv_bin"; then
-    sudo -n -u community "$uv_bin" sync --frozen --no-dev --quiet
+uv_bin="$(sudo -n -u community sh -c 'command -v uv || echo "$HOME/.local/bin/uv"')"
+if sudo -n -u community test -x "$uv_bin"; then
+    sudo -n -u community bash -c 'cd "$1" && "$2" sync --frozen --no-dev --quiet' \
+        _ "$project_dir" "$uv_bin"
 else
     # Servers set up with scripts/bootstrap.sh use pip.
-    sudo -n -u community .venv/bin/pip install --quiet -e .
+    sudo -n -u community "$project_dir/.venv/bin/pip" install --quiet -e "$project_dir"
 fi
-sudo -n -u community .venv/bin/community-stack --help >/dev/null
+sudo -n -u community "$project_dir/.venv/bin/community-stack" --help >/dev/null
 
 docker_cmd=(sudo -n docker)
-compose_app=("${docker_cmd[@]}" compose --env-file .env -f services/announcements/docker-compose.yml)
-compose_proxy=("${docker_cmd[@]}" compose --env-file .env -f services/proxy/docker-compose.yml)
+compose_shell='cd "$1" && shift && exec "$@"'
+compose_app=(sudo -n sh -c "$compose_shell" sh "$project_dir" docker compose --env-file .env -f services/announcements/docker-compose.yml)
+compose_proxy=(sudo -n sh -c "$compose_shell" sh "$project_dir" docker compose --env-file .env -f services/proxy/docker-compose.yml)
 rollback_tag="community-stack-announcements:rollback-$deploy_id"
 old_image="$("${docker_cmd[@]}" image inspect community-stack-announcements:0.1.0 --format '{{.Id}}' 2>/dev/null || true)"
 if [ -n "$old_image" ]; then
@@ -163,12 +164,13 @@ if [ "$healthy" != true ]; then
     exit 1
 fi
 
-sudo -n -u community python3 - "$deploy_id" <<'PY'
+sudo -n -u community python3 - "$project_dir" "$deploy_id" <<'PY'
 from pathlib import Path
 import shutil
 import sys
 
-path = Path("services/proxy/Caddyfile")
+project_dir = Path(sys.argv[1])
+path = project_dir / "services/proxy/Caddyfile"
 text = path.read_text(encoding="utf-8")
 routes = [
     "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
@@ -176,7 +178,7 @@ routes = [
     "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
     "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
 ]
-backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
+backup = project_dir / "backups" / f"Caddyfile.before-{sys.argv[2]}"
 backup.parent.mkdir(parents=True, exist_ok=True)
 if backup.exists():
     raise SystemExit(f"Refusing to overwrite rollback file {backup}.")
@@ -191,7 +193,7 @@ if missing:
     path.chmod(0o644)
 PY
 
-caddy_backup="backups/Caddyfile.before-$deploy_id"
+caddy_backup="$project_dir/backups/Caddyfile.before-$deploy_id"
 if ! "${docker_cmd[@]}" exec community_proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
     sudo -n -u community install -m 0644 "$caddy_backup" services/proxy/Caddyfile
     exit 1
