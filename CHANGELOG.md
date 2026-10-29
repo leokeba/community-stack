@@ -159,3 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Inbox accepts Follow and Undo only with a verified HTTP signature whose key belongs to the activity's actor; replies with a signed Accept.
   - Announcements are delivered as signed Create, Update and Delete activities, once per follower server (shared inboxes), with formatting, image and alt text; failures are retried safely.
   - Caddy routes for `/ap/` and `/.well-known/webfinger`, added to existing Caddyfiles by `deploy-vps.sh`; new dependency: cryptography.
+- **Roadmap Phase 2: SMS alerts and public sign-up:**
+  - SMS connector for SMS Gateway for Android (cloud or private server): batched sends with stable IDs so retries never text twice, a stop link in every alert, corrections on withdrawal, and no texts for edits.
+  - Public `/subscribe` and `/subscribe/stop` pages with explicit consent, texted 6-digit confirmation codes (15 minutes, five tries, three per number and ten per visitor per day), a honeypot field and CSRF protection.
+  - Caddy route for `/subscribe`, added to existing Caddyfiles by `deploy-vps.sh`.

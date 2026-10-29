@@ -22,9 +22,11 @@ from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
+from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.secrets import parse_env_file
+from community_stack.subscriptions.manager import SubscriberManager
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,17 @@ class AnnouncementPublisher:
         for kind, values in self.storage.list_connections().items():
             connector = CONNECTORS.get(kind)
             if connector is None:
+                continue
+            if kind == "sms":
+                adapters.append(
+                    SmsGatewayAdapter(
+                        values["base_url"],
+                        values["username"],
+                        values["password"],
+                        SubscriberManager(self.storage.db_path.parent / "subscribers.db"),
+                        stop_url=f"{self.base_url}/subscribe/stop",
+                    )
+                )
                 continue
             if kind == "fediverse":
                 adapters.append(

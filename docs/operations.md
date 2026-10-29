@@ -79,6 +79,22 @@ service (the repository Caddyfile does, and `deploy-vps.sh` adds the routes to
 an existing Caddyfile). Choose the account name carefully: changing it later
 loses the followers.
 
+### Text alerts (SMS)
+
+Text alerts are sent from a spare Android phone with a SIM card running
+[SMS Gateway for Android](https://sms-gate.app/): connect it on the Channels
+page with the username and password the app shows. People sign up on the
+website at `/subscribe`: they enter their number in international format, tick
+the consent box, and confirm with a 6-digit code texted to them; `/subscribe/stop`
+works the same way to leave. Codes expire after 15 minutes, allow five tries,
+and are limited to three per number and ten per visitor address per day, to
+protect people from unwanted texts and the community from costs. Every alert
+ends with the stop address. Edits are not texted; withdrawing an announcement
+sends a short correction. Numbers are stored next to the announcements
+database and used only for these alerts. Caddy must route `/subscribe` to the
+announcements service (the repository Caddyfile does, and `deploy-vps.sh` adds
+the route).
+
 ### Writing announcements
 
 Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,

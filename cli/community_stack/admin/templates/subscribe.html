@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Text alerts · {{ community }}</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; line-height: 1.5; color: #17212b; background: #f5f7f8; }
+    main { max-width: 32rem; margin: 2rem auto; padding: 1rem; background: #fff; border: 1px solid #d5dde2; border-radius: .4rem; }
+    label { display: block; font-weight: 650; margin: .75rem 0 .25rem; }
+    input[type=tel], input[type=text] { width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid #77858f; border-radius: .25rem; }
+    button { padding: .55rem .9rem; border: 0; border-radius: .25rem; background: #174f71; color: #fff; font: inherit; cursor: pointer; }
+    .error { padding: .75rem; background: #fff1f0; border-left: .3rem solid #b42318; }
+    .notice { padding: .75rem; background: #eef8f0; border-left: .3rem solid #1f7a3a; }
+    .hidden-field { position: absolute; left: -10000px; }
+    .muted { color: #4a5963; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>{{ community }} text alerts</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if not available %}
+  <p>Text alerts are not available yet.</p>
+  {% elif step == "join" or step == "leave" %}
+  <p>{% if step == "join" %}Get important announcements by text message. You will receive a code to confirm your number.{% else %}Stop receiving text alerts. You will receive a code to confirm it is your number.{% endif %}</p>
+  <form method="post" action="/subscribe/{{ step }}/code">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="number">Mobile number, with country code</label>
+    <input id="number" name="number" type="tel" autocomplete="tel" placeholder="+33612345678" value="{{ number }}" required>
+    <div class="hidden-field" aria-hidden="true"><label for="website">Leave this empty</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+    {% if step == "join" %}
+    <p><label><input type="checkbox" name="consent" value="yes" required> I agree to receive text alerts from {{ community }}. I can stop them at any time at this website's /subscribe/stop page.</label></p>
+    {% endif %}
+    <p><button type="submit">Send me a code</button></p>
+  </form>
+  <p class="muted">Your number is used only to send these alerts and is never shared.{% if step == "join" %} <a href="/subscribe/stop">Stop alerts</a>{% else %} <a href="/subscribe">Sign up instead</a>{% endif %}</p>
+  {% elif step == "code" %}
+  <p>We sent a 6-digit code to {{ number or "your phone" }}. It is valid for 15 minutes.</p>
+  <form method="post" action="/subscribe/{{ purpose }}/confirm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="number" value="{{ number }}">
+    <label for="code">Code</label>
+    <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>
+    <p><button type="submit">Confirm</button></p>
+  </form>
+  {% elif step == "joined" %}
+  <p class="notice" role="status">You are signed up. To stop, visit this website's <a href="/subscribe/stop">/subscribe/stop</a> page.</p>
+  {% elif step == "left" %}
+  <p class="notice" role="status">You will not receive any more text alerts.</p>
+  {% endif %}
+</main>
+</body>
+</html>

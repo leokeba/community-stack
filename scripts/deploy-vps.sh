@@ -161,6 +161,7 @@ routes = [
     "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
     "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n"
     "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
+    "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
 ]
 backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
 backup.parent.mkdir(parents=True, exist_ok=True)

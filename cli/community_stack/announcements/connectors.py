@@ -102,6 +102,18 @@ def _validate_listmonk(values: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _validate_sms(values: dict[str, str]) -> dict[str, str]:
+    url = (values.get("base_url") or "https://api.sms-gate.app").strip().rstrip("/")
+    http.assert_public_https(url)
+    username = values.get("username", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]{2,64}", username):
+        raise ValueError("Enter the username shown in the SMS Gateway app.")
+    password = values.get("password", "").strip()
+    if not re.fullmatch(r"[^\s]{6,128}", password):
+        raise ValueError("Enter the password shown in the SMS Gateway app.")
+    return {"base_url": url, "username": username, "password": password}
+
+
 def _validate_fediverse(values: dict[str, str]) -> dict[str, str]:
     username = (values.get("username") or "announcements").strip().lower()
     if not re.fullmatch(r"[a-z0-9_]{1,30}", username):
@@ -222,6 +234,30 @@ CONNECTORS: dict[str, ConnectorType] = {
             ),
             caveat="Emails go to the whole list as soon as an announcement is published. "
             "Edits and withdrawals send a follow-up email, because email cannot be unsent.",
+        ),
+        ConnectorType(
+            kind="sms",
+            label="SMS alerts (Android phone)",
+            steps=(
+                "On a spare Android phone with a SIM card, install SMS Gateway for Android.",
+                "Open the app, turn on Cloud server, and note the username and password it shows.",
+                "Keep the phone charged and online; announcements are sent from its SIM.",
+                "People sign up at /subscribe on your website and confirm with a texted code.",
+            ),
+            fields=(
+                ConnectorField("username", "Username"),
+                ConnectorField("password", "Password", secret=True),
+                ConnectorField(
+                    "base_url",
+                    "Server (only for a private SMS Gateway server)",
+                    required=False,
+                    placeholder="https://api.sms-gate.app",
+                ),
+            ),
+            validate=_validate_sms,
+            build=lambda c: None,
+            caveat="Each text costs what your phone plan charges. Edits are not texted; a "
+            "withdrawal sends a short correction.",
         ),
         ConnectorType(
             kind="slack",

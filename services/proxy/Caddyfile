@@ -30,6 +30,11 @@
         reverse_proxy community_announcements:8080
     }
 
+    # Public sign-up for text alerts
+    handle /subscribe* {
+        reverse_proxy community_announcements:8080
+    }
+
     # Public Announcements Feed (Milestone 4)
     handle /feed* {
         reverse_proxy community_landing:80

@@ -65,6 +65,7 @@ from community_stack.announcements.models import (
     ModelValidationError,
 )
 from community_stack.announcements.publisher import AnnouncementPublisher
+from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
@@ -163,7 +164,9 @@ def create_app(
     async def login_required(_request: Request, _exc: LoginRequired) -> Response:
         return login_redirect()
 
-    def set_cookie(response: Response, token: str, name: str = SESSION_COOKIE) -> None:
+    def set_cookie(
+        response: Response, token: str, name: str = SESSION_COOKIE, path: str = "/admin"
+    ) -> None:
         response.set_cookie(
             name,
             token,
@@ -171,7 +174,7 @@ def create_app(
             httponly=True,
             secure=True,
             samesite="strict",
-            path="/admin",
+            path=path,
         )
 
     def render(
@@ -321,6 +324,98 @@ def create_app(
             return load_config(config_path)["project"]["name"]
         except (ConfigError, KeyError, OSError):
             return "Community"
+
+    # Public SMS sign-up: every join and leave is confirmed with a texted code.
+
+    def sms_adapter():
+        return next((a for a in publisher.adapters if isinstance(a, SmsGatewayAdapter)), None)
+
+    def sms_signup() -> SmsSignup:
+        secret = storage.get_setting("sms_code_secret", "")
+        if not secret:
+            secret = secrets.token_hex(32)
+            storage.set_setting("sms_code_secret", secret)
+        return SmsSignup(storage.db_path.parent / "subscribers.db", secret)
+
+    def subscribe_page(request: Request, step: str, status_code: int = 200, **context) -> Response:
+        csrf_token = preauth_csrf_token(request)
+        response = render(
+            request,
+            "subscribe.html",
+            {
+                "csrf_token": csrf_token,
+                "step": step,
+                "available": sms_adapter() is not None,
+                "community": community_name(),
+                "error": None,
+                "number": "",
+                **context,
+            },
+            status_code=status_code,
+        )
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
+        return response
+
+    @app.get("/subscribe")
+    async def subscribe_form(request: Request) -> Response:
+        return subscribe_page(request, "join")
+
+    @app.get("/subscribe/stop")
+    async def unsubscribe_form(request: Request) -> Response:
+        return subscribe_page(request, "leave")
+
+    @app.post("/subscribe/{purpose}/code")
+    async def subscribe_send_code(request: Request, purpose: str) -> Response:
+        if purpose not in ("join", "leave"):
+            raise HTTPException(status_code=404)
+        form = await submitted_form(request)
+        preauth_csrf_or_forbidden(request, form)
+        adapter = sms_adapter()
+        if adapter is None:
+            raise HTTPException(status_code=404)
+        # Bots fill in every field, including this invisible one.
+        if form.get("website"):
+            return subscribe_page(request, "code", purpose=purpose, number="")
+        if purpose == "join" and form.get("consent") != "yes":
+            return subscribe_page(request, purpose, 400, error="Please tick the consent box.")
+        try:
+            number = normalize_phone(form.get("number", ""))
+            code = sms_signup().new_code(number, purpose, client_host(request))
+        except ValueError as exc:
+            return subscribe_page(request, purpose, 400, error=str(exc))
+        text = f"{code} is your code to {'join' if purpose == 'join' else 'leave'} {community_name()} alerts."
+        await run_in_threadpool(
+            adapter.send, [number], text, f"code:{number}:{secrets.token_hex(4)}"
+        )
+        return subscribe_page(request, "code", purpose=purpose, number=number)
+
+    @app.post("/subscribe/{purpose}/confirm")
+    async def subscribe_confirm(request: Request, purpose: str) -> Response:
+        if purpose not in ("join", "leave"):
+            raise HTTPException(status_code=404)
+        form = await submitted_form(request)
+        preauth_csrf_or_forbidden(request, form)
+        adapter = sms_adapter()
+        if adapter is None:
+            raise HTTPException(status_code=404)
+        try:
+            number = normalize_phone(form.get("number", ""))
+        except ValueError as exc:
+            return subscribe_page(request, purpose, 400, error=str(exc))
+        if not sms_signup().confirm(number, purpose, form.get("code", "")):
+            return subscribe_page(
+                request,
+                "code",
+                400,
+                purpose=purpose,
+                number=number,
+                error="That code did not work. Check it, or ask for a new one later.",
+            )
+        if purpose == "join":
+            adapter.subscribers.add_subscriber("sms", number)
+        else:
+            adapter.subscribers.unsubscribe("sms", number)
+        return subscribe_page(request, "joined" if purpose == "join" else "left")
 
     @app.get("/.well-known/webfinger")
     async def webfinger(request: Request) -> Response:
