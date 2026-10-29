@@ -154,3 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Roadmap Phase 2: Service updates from the console:**
   - Agent operations `services.versions` and `services.update`: compare running images with the release's pinned images, then back up, pull, restart and health-check one service, restarting the previous images if the new ones are not healthy.
   - Services page lists versions with upstream release notes and an Update button; PostgreSQL major-version changes are refused.
+- **Roadmap Phase 2: The community's own fediverse account:**
+  - A followable ActivityPub account on the website domain (WebFinger, actor, outbox, followers, notes), connected from the Channels page.
+  - Inbox accepts Follow and Undo only with a verified HTTP signature whose key belongs to the activity's actor; replies with a signed Accept.
+  - Announcements are delivered as signed Create, Update and Delete activities, once per follower server (shared inboxes), with formatting, image and alt text; failures are retried safely.
+  - Caddy routes for `/ap/` and `/.well-known/webfinger`, added to existing Caddyfiles by `deploy-vps.sh`; new dependency: cryptography.

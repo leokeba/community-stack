@@ -102,9 +102,29 @@ def _validate_listmonk(values: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _validate_fediverse(values: dict[str, str]) -> dict[str, str]:
+    username = (values.get("username") or "announcements").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_]{1,30}", username):
+        raise ValueError("Use 1 to 30 lowercase letters, digits or underscores.")
+    return {"username": username}
+
+
 CONNECTORS: dict[str, ConnectorType] = {
     connector.kind: connector
     for connector in (
+        ConnectorType(
+            kind="fediverse",
+            label="Your own fediverse account",
+            steps=(
+                "Choose the account name; people will follow @name@your-website-domain.",
+                "Save. Followers on Mastodon and other fediverse servers then get announcements.",
+            ),
+            fields=(ConnectorField("username", "Account name", placeholder="announcements"),),
+            validate=_validate_fediverse,
+            # Built by the publisher, which knows the website address and storage.
+            build=lambda c: None,
+            caveat="The account name cannot be changed later without losing followers.",
+        ),
         ConnectorType(
             kind="mastodon",
             label="Mastodon",

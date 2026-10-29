@@ -22,6 +22,14 @@
         reverse_proxy community_announcements:8080
     }
 
+    # The community's own fediverse account (ActivityPub)
+    handle /ap/* {
+        reverse_proxy community_announcements:8080
+    }
+    handle /.well-known/webfinger {
+        reverse_proxy community_announcements:8080
+    }
+
     # Public Announcements Feed (Milestone 4)
     handle /feed* {
         reverse_proxy community_landing:80

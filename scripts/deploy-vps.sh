@@ -157,25 +157,24 @@ import sys
 
 path = Path("services/proxy/Caddyfile")
 text = path.read_text(encoding="utf-8")
-route = "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n\n"
-if route not in text:
+routes = [
+    "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
+    "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n"
+    "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
+]
+backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
+backup.parent.mkdir(parents=True, exist_ok=True)
+if backup.exists():
+    raise SystemExit(f"Refusing to overwrite rollback file {backup}.")
+shutil.copy2(path, backup)
+backup.chmod(0o600)
+missing = [route for route in routes if route not in text]
+if missing:
     anchor = "    handle /feed* {\n        reverse_proxy community_landing:80\n    }\n"
     if text.count(anchor) != 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
-    backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    if backup.exists():
-        raise SystemExit(f"Refusing to overwrite rollback file {backup}.")
-    shutil.copy2(path, backup)
-    backup.chmod(0o600)
-    path.write_text(text.replace(anchor, route + anchor), encoding="utf-8")
+    path.write_text(text.replace(anchor, "".join(missing) + anchor), encoding="utf-8")
     path.chmod(0o644)
-else:
-    backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
-    if backup.exists():
-        raise SystemExit(f"Refusing to overwrite rollback file {backup}.")
-    shutil.copy2(path, backup)
-    backup.chmod(0o600)
 PY
 
 caddy_backup="backups/Caddyfile.before-$deploy_id"

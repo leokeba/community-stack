@@ -20,6 +20,7 @@ from community_stack.announcements.adapters.base import (
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS
+from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
@@ -63,6 +64,7 @@ class AnnouncementPublisher:
     ) -> None:
         self.config_path = Path(config_path)
         self.max_attempts = max_attempts
+        self.base_url = "https://community.example.org"
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
 
@@ -85,6 +87,7 @@ class AnnouncementPublisher:
             cfg = load_config(self.config_path)
             domain = cfg.get("domain", {}).get("web", "community.example.org")
             base_url = f"https://{domain}"
+            self.base_url = base_url
             community_name = cfg.get("project", {}).get("name", "Community")
             announcement_config = cfg["services"]["announcements"]
             if not announcement_config["enabled"]:
@@ -137,6 +140,11 @@ class AnnouncementPublisher:
         for kind, values in self.storage.list_connections().items():
             connector = CONNECTORS.get(kind)
             if connector is None:
+                continue
+            if kind == "fediverse":
+                adapters.append(
+                    FediverseAdapter(Fediverse(self.storage, self.base_url, values["username"]))
+                )
                 continue
             try:
                 adapters.append(connector.build(values))

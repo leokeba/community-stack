@@ -63,6 +63,22 @@ review by giving a reason and their password; the reason is recorded in the
 announcement's review history and the activity log. The server command line
 (`community-stack announce publish`) is not subject to review.
 
+### Your own fediverse account
+
+On the Channels page, **Your own fediverse account** creates an ActivityPub
+account for the community, for example `@announcements@ourtown.org` (the
+website domain). Anyone on Mastodon or another fediverse server can search for
+it and follow it; no account on another server is needed. Published
+announcements are delivered to followers' servers as signed posts, with
+formatting, the image and its description; edits update the post and
+withdrawal deletes it. The account's signing key is generated on first use and
+stored in the announcements database. Incoming follow requests are accepted
+only with a valid HTTP signature from the following account. Caddy must route
+`/ap/` and `/.well-known/webfinger` on the website domain to the announcements
+service (the repository Caddyfile does, and `deploy-vps.sh` adds the routes to
+an existing Caddyfile). Choose the account name carefully: changing it later
+loses the followers.
+
 ### Writing announcements
 
 Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,
