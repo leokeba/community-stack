@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from community_stack.admin.store import AdminStore
 from community_stack.agent import settings as service_control
 from community_stack.agent import updates
@@ -11,6 +12,9 @@ from community_stack.agent.operations import AgentContext
 from community_stack.agent.server import AgentService
 
 PASSWORD = "a-long-safe-test-password"
+SYNAPSE_PIN = yaml.safe_load(Path("services/matrix/docker-compose.yml").read_text())["services"][
+    "synapse"
+]["image"]
 
 
 @pytest.fixture
@@ -56,7 +60,7 @@ def test_versions_compare_running_images_with_release_pins(project):
     components = rows(AgentContext(root))
     assert components["synapse"]["update_available"]
     assert components["synapse"]["release_notes"] == (
-        "https://github.com/element-hq/synapse/releases/tag/v1.119.0"
+        "https://github.com/element-hq/synapse/releases/tag/" + SYNAPSE_PIN.rsplit(":", 1)[1]
     )
     assert not components["element"]["update_available"]
     assert components["whatsapp_bridge"]["running"] is None
@@ -116,7 +120,7 @@ def test_unhealthy_update_rolls_back_to_the_previous_images(project, monkeypatch
 
     with pytest.raises(updates.UpdateError, match="previous version was restored"):
         updates.update(AgentContext(root), {"service": "matrix"})
-    assert ["docker", "tag", "sha256:community_synapse", "matrixdotorg/synapse:v1.119.0"] in tagged
+    assert ["docker", "tag", "sha256:community_synapse", SYNAPSE_PIN] in tagged
     assert attempts == ["matrix", "matrix"]
 
 
