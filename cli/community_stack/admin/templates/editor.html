@@ -1,10 +1,21 @@
 {% extends "base.html" %}
 {% block title %}{{ "Edit announcement" if announcement else "New draft" }}{% endblock %}
 {% block content %}
-<h1>{{ "Edit announcement" if announcement else "Create a draft" }}</h1>
+<h1>{% if template_mode %}{{ "Edit template" if announcement and announcement.name else "New template" }}{% else %}{{ "Edit announcement" if announcement and announcement.id else "Create a draft" }}{% endif %}</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-<form class="card" method="post" data-preview-url="/admin/preview" action="{{ '/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new' }}">
+{% if templates and not template_mode %}
+<form class="inline" method="get" action="/admin/announcements/new">
+  <label for="template">Start from a template</label>
+  <select id="template" name="template">{% for item in templates %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select>
+  <button type="submit">Use template</button>
+</form>
+{% endif %}
+<form class="card" method="post" data-preview-url="/admin/preview" action="{{ form_action if template_mode else ('/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if template_mode %}
+  <label for="template-name">Template name</label>
+  <input id="template-name" name="name" type="text" maxlength="80" value="{{ announcement.name if announcement else '' }}" required>
+  {% endif %}
   <label for="title">Announcement title</label>
   <input id="title" name="title" type="text" maxlength="200" value="{{ announcement.title if announcement else '' }}" required>
   <label for="body">Message</label>
@@ -12,7 +23,7 @@
   <p id="body-help" class="muted">Formatting: <code>## Heading</code>, <code>**bold**</code>, <code>*italic*</code>, <code>- list item</code>, <code>[link text](https://…)</code>. Channels without formatting get clean plain text.</p>
   <label for="author">Author or group (optional)</label>
   <input id="author" name="author" type="text" value="{{ announcement.author if announcement else '' }}">
-  {% if not announcement or announcement.status.value in ["draft", "scheduled"] or announcement.status is not defined %}
+  {% if not announcement or announcement.status is not defined or announcement.status.value in ["draft", "in_review", "approved", "scheduled"] %}
   <label for="tags">Tags, separated by commas (optional)</label>
   <input id="tags" name="tags" type="text" value="{{ announcement.tags|join(', ') if announcement and announcement.tags is not string else (announcement.tags if announcement else '') }}">
   {% endif %}
@@ -26,7 +37,7 @@
     {% endfor %}
   </details>
   {% endif %}
-  <p><button type="submit">{{ "Save changes" if announcement and announcement.id else "Save draft" }}</button></p>
+  <p><button type="submit">{% if template_mode %}Save template{% else %}{{ "Save changes" if announcement and announcement.id else "Save draft" }}{% endif %}</button></p>
 </form>
 <section aria-labelledby="preview-heading" hidden data-preview-panel>
   <h2 id="preview-heading">Preview</h2>

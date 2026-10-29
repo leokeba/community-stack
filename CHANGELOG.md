@@ -148,3 +148,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Editing a submitted, approved or scheduled announcement returns it to draft; images can only change on drafts while review is on.
   - Reviewers can now approve; the dashboard lists announcements waiting for your review, and each announcement shows its review history.
   - Urgent publication without review for owners and admins, with a required reason and password, recorded in the review history and activity log.
+- **Roadmap Phase 2: Templates:**
+  - Templates page to create, edit and delete reusable announcements (title, message, author, tags, per-channel text), validated like announcements.
+  - Start a draft from a template, or save any announcement as a template.

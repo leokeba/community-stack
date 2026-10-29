@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Templates{% endblock %}
+{% block content %}
+<h1>Templates</h1>
+<p>Reusable starting points for announcements you send often, such as meeting notices or alerts. <a href="/admin/templates/new">Create a template</a>, or save any announcement as one from its page.</p>
+{% if templates %}
+<table>
+  <thead><tr><th>Name</th><th>Title</th><th>Last changed</th><th></th></tr></thead>
+  <tbody>
+  {% for item in templates %}
+  <tr>
+    <td>{{ item.name }}</td>
+    <td>{{ item.title }}</td>
+    <td>{{ item.updated_at[:10] }}{% if item.updated_by %} by {{ item.updated_by }}{% endif %}</td>
+    <td class="actions">
+      <a href="/admin/announcements/new?template={{ item.id }}">Use</a>
+      <a href="/admin/templates/{{ item.id }}/edit">Edit</a>
+      <form method="post" action="/admin/templates/{{ item.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No templates yet.</p>
+{% endif %}
+{% endblock %}

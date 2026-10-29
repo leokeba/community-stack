@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -135,6 +136,19 @@ class AnnouncementStorage:
                     note TEXT,
                     occurred_at TEXT NOT NULL,
                     FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS templates (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    author TEXT,
+                    tags_json TEXT NOT NULL,
+                    channel_text_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    updated_by TEXT
                 );
             """)
             conn.execute("""
@@ -738,3 +752,52 @@ class AnnouncementStorage:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    def list_templates(self) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM templates ORDER BY name COLLATE NOCASE").fetchall()
+        return [self._template(row) for row in rows]
+
+    def get_template(self, template_id: str) -> dict | None:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM templates WHERE id = ?", (template_id,)).fetchone()
+        return self._template(row) if row else None
+
+    @staticmethod
+    def _template(row: sqlite3.Row) -> dict:
+        template = dict(row)
+        template["tags"] = json.loads(template.pop("tags_json"))
+        template["channel_text"] = json.loads(template.pop("channel_text_json"))
+        return template
+
+    def save_template(self, template: dict, actor: str | None) -> str:
+        """Insert or update a template; returns its ID."""
+        template_id = template.get("id") or f"tpl_{secrets.token_urlsafe(12)}"
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO templates (id, name, title, body, author, tags_json,
+                    channel_text_json, updated_at, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name, title=excluded.title,
+                    body=excluded.body, author=excluded.author, tags_json=excluded.tags_json,
+                    channel_text_json=excluded.channel_text_json,
+                    updated_at=excluded.updated_at, updated_by=excluded.updated_by
+                """,
+                (
+                    template_id,
+                    template["name"],
+                    template["title"],
+                    template["body"],
+                    template.get("author"),
+                    json.dumps(template.get("tags") or []),
+                    json.dumps(template.get("channel_text") or {}),
+                    datetime.now(timezone.utc).isoformat(),
+                    actor,
+                ),
+            )
+        return template_id
+
+    def delete_template(self, template_id: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM templates WHERE id = ?", (template_id,))

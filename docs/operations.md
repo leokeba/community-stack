@@ -87,6 +87,11 @@ it on withdrawal. The web feed, Mastodon, Bluesky, Discord, Slack, ActivityPub
 and email send the image with its description; Matrix and Telegram do not yet,
 which the announcement page points out.
 
+Announcements sent often (meeting notices, food-bank days, alerts) can be
+kept as **templates**: create them on the Templates page or save any
+announcement as one from its page, then pick a template when creating a draft
+to start with its title, message, author, tags and per-channel text filled in.
+
 ### Connecting channels
 
 Owners and admins connect Mastodon, Bluesky, a Telegram channel, Discord,

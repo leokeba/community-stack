@@ -132,6 +132,17 @@
   </form>
 </details>
 {% endif %}
+{% if perms.edit %}
+<details class="card">
+  <summary>Save as a template</summary>
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/save-as-template">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="template-name">Template name</label>
+    <input id="template-name" name="name" type="text" maxlength="80" value="{{ announcement.title[:80] }}">
+    <p><button type="submit">Save as template</button></p>
+  </form>
+</details>
+{% endif %}
 {% if review_history %}
 <h2>Review history</h2>
 <ul>
