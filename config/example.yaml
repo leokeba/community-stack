@@ -27,6 +27,8 @@ services:
         enabled: true
       matrix_room:
         enabled: false
+  signal:
+    enabled: false # experimental; see docs/operations.md
   whatsapp_bridge:
     enabled: false
     mode: "none" # none | announcements_only | selective_bridge

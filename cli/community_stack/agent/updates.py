@@ -13,7 +13,7 @@ from community_stack import docker
 from community_stack.agent import settings as service_control
 from community_stack.backup import BackupError
 
-UPDATABLE = ("proxy", "landing", "matrix", "element", "whatsapp_bridge")
+UPDATABLE = ("proxy", "landing", "matrix", "element", "signal", "whatsapp_bridge")
 
 
 class UpdateError(Exception):
@@ -33,6 +33,8 @@ def release_notes(image: str) -> str | None:
         return f"https://nginx.org/en/CHANGES-{'.'.join(version.split('.')[:2])}"
     if repository == "postgres":
         return f"https://www.postgresql.org/docs/release/{version}/"
+    if repository.endswith("signal-cli-rest-api"):
+        return f"https://github.com/bbernhard/signal-cli-rest-api/releases/tag/{tag}"
     if repository.endswith("mautrix/whatsapp"):
         return f"https://github.com/mautrix/whatsapp/releases/tag/v{version}"
     return None

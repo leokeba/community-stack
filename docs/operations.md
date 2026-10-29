@@ -95,6 +95,20 @@ database and used only for these alerts. Caddy must route `/subscribe` to the
 announcements service (the repository Caddyfile does, and `deploy-vps.sh` adds
 the route).
 
+### Signal (experimental)
+
+Signal has no official interface for bots, so this is marked experimental and
+off by default. Turn on **Signal** on the Services page to run
+[signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) inside
+the stack; its API has no authentication, so it is only reachable on the
+internal `signal_net` network it shares with the announcements service, and the
+console only ever calls that one address. Then open the Signal linking page from
+the Channels page, scan its QR code from Signal on a phone (Settings, Linked
+devices), and choose the group to post to. Announcements are posted, edited and
+deleted in that group. Use a dedicated Signal account and number: Signal may
+block accounts that look automated. The linked account's keys are kept in
+`data/signal` and included in backups.
+
 ### Writing announcements
 
 Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,

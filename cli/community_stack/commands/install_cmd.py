@@ -79,6 +79,9 @@ def run_install(
         services_to_deploy.append("announcements")
 
     # WhatsApp bridge
+    if services_cfg.get("signal", {}).get("enabled", False):
+        services_to_deploy.append("signal")
+
     if services_cfg.get("whatsapp_bridge", {}).get("enabled", False):
         services_to_deploy.append("whatsapp_bridge")
 

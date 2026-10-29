@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Link Signal{% endblock %}
+{% block content %}
+<p><a href="/admin/channels">&larr; Channels</a></p>
+<h1>Link a Signal account</h1>
+<p class="muted">Experimental. Use a dedicated Signal account for announcements: Signal has no official bot interface and may block accounts that look automated.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>
+{% elif not accounts %}
+<ol>
+  <li>On the phone with the Signal account, open Signal, then Settings, then Linked devices.</li>
+  <li>Tap the button to link a new device and scan this code.</li>
+  <li>When the phone says it is linked, reload this page.</li>
+</ol>
+<p><img src="/admin/channels/signal/qr" alt="QR code to link Signal" width="256" height="256"></p>
+{% else %}
+<h2>Choose a group</h2>
+{% if groups %}
+<table>
+  <thead><tr><th>Group</th><th></th></tr></thead>
+  <tbody>
+  {% for group in groups %}
+  <tr>
+    <td>{{ group.name or group.id }}</td>
+    <td>
+      <form method="post" action="/admin/channels/signal/use">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="number" value="{{ group.number }}">
+        <input type="hidden" name="group_id" value="{{ group.id }}">
+        <input type="hidden" name="group_name" value="{{ group.name }}">
+        <button type="submit">Post announcements here</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>The linked account is not in any group yet. Add it to the announcements group from a phone, then reload this page.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -120,6 +120,15 @@ SETTINGS: dict[str, Setting] = {
             service="element",
         ),
         Setting(
+            "services.signal.enabled",
+            "Signal (experimental)",
+            "Runs signal-cli so announcements can go to a Signal group. Link an account on "
+            "the Channels page afterwards. Signal may block accounts that look automated.",
+            "bool",
+            False,
+            service="signal",
+        ),
+        Setting(
             "services.matrix.enabled",
             "Matrix chat server",
             "Turning it off stops all community chat, and Matrix announcements, until it is "

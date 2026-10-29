@@ -1,0 +1,29 @@
+# Optional, experimental: send announcements to a Signal group through a linked
+# Signal account (signal-cli-rest-api). The API has no authentication, so it is
+# reachable only on signal_net, which it shares with the announcements service.
+services:
+  signal:
+    image: bbernhard/signal-cli-rest-api:0.101
+    container_name: community_signal
+    restart: unless-stopped
+    environment:
+      MODE: json-rpc
+    volumes:
+      - ../../data/signal:/home/.local/share/signal-cli
+    networks:
+      - signal_net
+      - egress
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/v1/about >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  # Created by the announcements service; internal, so nothing else can reach the API.
+  signal_net:
+    name: signal_net
+    external: true
+  # Lets signal-cli reach Signal's servers.
+  egress: {}

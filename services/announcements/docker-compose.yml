@@ -27,6 +27,7 @@ services:
     networks:
       - proxy_net
       - announcements_internal
+      - signal_net
     read_only: true
     tmpfs:
       - /tmp
@@ -51,4 +52,8 @@ networks:
   proxy_net:
     external: true
   announcements_internal:
+    internal: true
+  # Shared only with the optional Signal service, whose API has no authentication.
+  signal_net:
+    name: signal_net
     internal: true

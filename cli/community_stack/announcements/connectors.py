@@ -14,6 +14,7 @@ from community_stack.announcements.adapters.messaging import (
     SlackWebhookAdapter,
     TelegramAdapter,
 )
+from community_stack.announcements.adapters.signal import SignalAdapter
 from community_stack.announcements.adapters.social import BlueskyAdapter, MastodonAdapter
 
 TOKEN = re.compile(r"^[^\s]{8,512}$")
@@ -37,6 +38,8 @@ class ConnectorType:
     validate: Callable[[dict[str, str]], dict[str, str]]
     build: Callable[[dict[str, str]], ChannelAdapter]
     caveat: str = ""
+    # An extra page that sets the fields up for the person, e.g. by scanning a QR code.
+    setup_page: tuple[str, str] | None = None
 
 
 def _token(values: dict[str, str], name: str, label: str) -> str:
@@ -112,6 +115,20 @@ def _validate_sms(values: dict[str, str]) -> dict[str, str]:
     if not re.fullmatch(r"[^\s]{6,128}", password):
         raise ValueError("Enter the password shown in the SMS Gateway app.")
     return {"base_url": url, "username": username, "password": password}
+
+
+def _validate_signal(values: dict[str, str]) -> dict[str, str]:
+    number = values.get("number", "").strip()
+    group_id = values.get("group_id", "").strip()
+    if not re.fullmatch(r"\+[1-9][0-9]{7,14}|[0-9a-f-]{36}", number):
+        raise ValueError("Link a Signal account first, on the Signal linking page.")
+    if not re.fullmatch(r"group\.[A-Za-z0-9+/=_-]{8,200}", group_id):
+        raise ValueError("Choose a group on the Signal linking page.")
+    return {
+        "number": number,
+        "group_id": group_id,
+        "group_name": values.get("group_name", "")[:100],
+    }
 
 
 def _validate_fediverse(values: dict[str, str]) -> dict[str, str]:
@@ -258,6 +275,24 @@ CONNECTORS: dict[str, ConnectorType] = {
             build=lambda c: None,
             caveat="Each text costs what your phone plan charges. Edits are not texted; a "
             "withdrawal sends a short correction.",
+        ),
+        ConnectorType(
+            kind="signal",
+            label="Signal group (experimental)",
+            steps=(
+                "Turn on Signal on the Services page (owners and admins).",
+                "Scan the QR code on the Signal linking page from Signal: Settings, Linked devices.",
+                "Choose the group announcements should go to.",
+            ),
+            fields=(
+                ConnectorField("number", "Linked account"),
+                ConnectorField("group_id", "Group ID"),
+            ),
+            validate=_validate_signal,
+            build=lambda c: SignalAdapter(c["number"], c["group_id"]),
+            caveat="Signal has no official bot interface. Use a dedicated number: Signal may "
+            "block accounts that look automated.",
+            setup_page=("Open the Signal linking page", "/admin/channels/signal/link"),
         ),
         ConnectorType(
             kind="slack",

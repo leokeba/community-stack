@@ -15,6 +15,7 @@
   <details {% if not item.connected %}open{% endif %}>
     <summary>{{ "Change settings" if item.connected else "How to connect" }}</summary>
     <ol>{% for step in connector.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+    {% if connector.setup_page %}<p><a href="{{ connector.setup_page[1] }}">{{ connector.setup_page[0] }}</a></p>{% endif %}
     <form method="post" action="/admin/channels/{{ connector.kind }}/save">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% for field in connector.fields %}

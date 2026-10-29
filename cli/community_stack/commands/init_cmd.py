@@ -35,6 +35,8 @@ services:
     enabled: true
   announcements:
     enabled: true
+  signal:
+    enabled: false # experimental; see docs/operations.md
   whatsapp_bridge:
     enabled: false
     mode: "none" # none | announcements_only | selective_bridge

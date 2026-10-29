@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
@@ -43,6 +44,7 @@ from community_stack.agent.health import LOG_LINES, LOG_SERVICES
 from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.http import UnsafeURLError
+from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS, merge_values
 from community_stack.announcements.fediverse import (
@@ -1310,6 +1312,57 @@ def create_app(
         )
         message = {"kind": kind, "ok": True, "text": "Saved. Use 'Test connection' to check it."}
         return channels_page(request, session, message)
+
+    @app.get("/admin/channels/signal/link")
+    async def signal_link(request: Request) -> Response:
+        session = require(request, "settings")
+        status, accounts = await run_in_threadpool(
+            signal_send, "GET", f"{SIGNAL_API}/v1/accounts", {}, None
+        )
+        groups, error = [], None
+        if status != 200 or not isinstance(accounts, list):
+            error = "The Signal service is not running. Turn on Signal on the Services page first."
+            accounts = []
+        for account in accounts:
+            number = account.get("number") or account.get("aci")
+            g_status, found = await run_in_threadpool(
+                signal_send, "GET", f"{SIGNAL_API}/v1/groups/{quote(number, safe='')}", {}, None
+            )
+            for group in found if g_status == 200 and isinstance(found, list) else []:
+                groups.append({"number": number, "id": group.get("id"), "name": group.get("name")})
+        return render(
+            request,
+            "signal_link.html",
+            page(session, accounts=accounts, groups=groups, error=error),
+        )
+
+    @app.get("/admin/channels/signal/qr")
+    async def signal_qr(request: Request) -> Response:
+        require(request, "settings")
+        status, image = await run_in_threadpool(
+            signal_send,
+            "GET",
+            f"{SIGNAL_API}/v1/qrcodelink?device_name=Community%20Stack",
+            {},
+            None,
+        )
+        if status != 200 or not isinstance(image, bytes):
+            raise HTTPException(status_code=503, detail="The Signal service is not running.")
+        return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.post("/admin/channels/signal/use")
+    async def signal_use_group(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        try:
+            values = CONNECTORS["signal"].validate(form)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        storage.save_connection("signal", values, session["username"])
+        publisher.reload_connections()
+        audit(
+            request, session["username"], "channel.connected", "signal", group=values["group_name"]
+        )
+        return RedirectResponse("/admin/channels", status_code=303)
 
     @app.post("/admin/channels/{kind}/test")
     async def test_channel(request: Request, kind: str) -> Response:

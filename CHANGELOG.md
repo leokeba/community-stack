@@ -163,3 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SMS connector for SMS Gateway for Android (cloud or private server): batched sends with stable IDs so retries never text twice, a stop link in every alert, corrections on withdrawal, and no texts for edits.
   - Public `/subscribe` and `/subscribe/stop` pages with explicit consent, texted 6-digit confirmation codes (15 minutes, five tries, three per number and ten per visitor per day), a honeypot field and CSRF protection.
   - Caddy route for `/subscribe`, added to existing Caddyfiles by `deploy-vps.sh`.
+- **Roadmap Phase 2: Signal (experimental):**
+  - Optional `signal` service (signal-cli-rest-api 0.101), switchable on the Services page, reachable only on an internal network shared with the announcements service.
+  - Linking page that shows the QR code to scan from Signal's Linked devices and lists the account's groups to choose from.
+  - Signal connector that posts to the chosen group, edits with `edit_timestamp` and withdraws with remote delete; only rate-limited posts are retried automatically.

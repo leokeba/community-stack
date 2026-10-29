@@ -19,7 +19,15 @@ from community_stack.redact import redact_text
 from community_stack.secrets import parse_env_file
 
 OK, WARNING, PROBLEM = "ok", "warning", "problem"
-LOG_SERVICES = ("proxy", "landing", "matrix", "element", "announcements", "whatsapp_bridge")
+LOG_SERVICES = (
+    "proxy",
+    "landing",
+    "matrix",
+    "element",
+    "announcements",
+    "signal",
+    "whatsapp_bridge",
+)
 LOG_LINES = ("50", "200", "500")
 MAX_LOG_BYTES = 200_000
 BACKUP_WARNING_HOURS = 36
