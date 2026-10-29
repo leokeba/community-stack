@@ -144,8 +144,12 @@ def test_bluesky_uses_a_stable_record_key_and_link_facets():
 
 
 def test_bluesky_record_key_is_stable_and_distinct_per_announcement():
-    first, second = announcement(), announcement()
+    first = announcement()
+    second = Announcement(
+        title="Other", body="Other", id="ann_other", published_at="2026-11-01T10:00:00.000001+00:00"
+    )
     assert deterministic_tid(first) == deterministic_tid(first)
+    # Keys come from the publication time (microseconds) plus 10 bits of the ID.
     assert deterministic_tid(first) != deterministic_tid(second)
 
 
