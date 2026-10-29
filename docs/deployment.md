@@ -2,20 +2,32 @@
 
 This guide details how to deploy the Community Communications Stack onto a clean Linux server (Debian 12 / Ubuntu 22.04 LTS).
 
-## Quick install on a fresh server
+## Quick install
 
-On a new Debian 12/13 or Ubuntu 22.04/24.04 server whose DNS records already
-point to it (section 1), one script does everything up to the browser setup
-page: system packages, Docker, a `community` service account, the code in
-`/opt/community-stack`, configuration and generated secrets, the firewall
-(SSH, HTTP and HTTPS only; every port sshd listens on stays open), the
-services, and the control agent.
+From a workstation with SSH access to a fresh Debian 12/13 or Ubuntu
+22.04/24.04 server, run the script without `sudo`. It connects as `debian` by
+default and uses non-interactive `sudo` on the server:
 
 ```bash
-curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/leokeba/community-stack/main/scripts/bootstrap.sh
-less bootstrap.sh            # optional: read what it will do
-sudo bash bootstrap.sh example.org
+bash scripts/bootstrap.sh example.org
 ```
+
+For an IP-only setup, pass the server's public IPv4 address. The IP is also
+used as the SSH target:
+
+```bash
+bash scripts/bootstrap.sh 149.56.210.214
+```
+
+If the base domain does not resolve directly to the server, set `VPS_HOST` to
+its IP or SSH hostname. `VPS_USER` defaults to `debian` and `VPS_SSH_PORT`
+defaults to `22`. Alternatively, SSH into the target first and run
+`sudo bash scripts/bootstrap.sh example.org` there.
+
+The script handles system packages, Docker, a `community` service account,
+the code in `/opt/community-stack`, configuration and generated secrets, the
+firewall (SSH, HTTP and HTTPS only; every port sshd listens on stays open),
+the services, and the control agent.
 
 The base domain supplies sensible defaults: the web/admin site is
 `community.example.org`, Matrix is `matrix.example.org`, the ACME contact is

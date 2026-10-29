@@ -25,9 +25,14 @@ def supported_os() -> bool:
     )
 
 
-def bootstrap(*args: str) -> subprocess.CompletedProcess:
+def bootstrap(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, check=False, timeout=60
+        ["bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        env=env,
     )
 
 
@@ -60,6 +65,26 @@ def test_dry_run_maps_ipv4_to_nip_io_hosts():
     assert "--web-domain community.149.56.210.214.nip.io" in result.stdout
     assert "--matrix-domain matrix.149.56.210.214.nip.io" in result.stdout
     assert "--acme-email admin@149.56.210.214.nip.io" in result.stdout
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="workstation mode must not run as root")
+def test_workstation_mode_ssh_forwards_install_to_target(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    uname = fake_bin / "uname"
+    uname.write_text("#!/bin/sh\nprintf 'Darwin\\n'\n", encoding="utf-8")
+    uname.chmod(0o755)
+    ssh = fake_bin / "ssh"
+    ssh.write_text("#!/bin/sh\nprintf '<%s>\\n' \"$@\"\n", encoding="utf-8")
+    ssh.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+    result = bootstrap("149.56.210.214", env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "<debian@149.56.210.214>" in result.stdout
+    assert "<sudo -n bash -s -- '149.56.210.214' '--repo' " in result.stdout
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")

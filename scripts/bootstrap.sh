@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Set up the Community Stack on a fresh Debian or Ubuntu server, ending at the
-# browser setup page. Run as root:
+# Set up the Community Stack on a fresh Debian or Ubuntu server. From a
+# workstation, run this without sudo and it will SSH to the target:
 #
-#   sudo bash bootstrap.sh example.org
-#   sudo bash bootstrap.sh 149.56.210.214
+#   bash scripts/bootstrap.sh example.org
+#   bash scripts/bootstrap.sh 149.56.210.214
 #
-# Safe to run again: existing configuration, secrets and data are kept.
+# Run directly on the target server with sudo. Existing configuration,
+# secrets and data are kept.
 set -Eeuo pipefail
 
+original_args=("$@")
 REPO_URL="${REPO_URL:-https://github.com/leokeba/community-stack.git}"
 REF="${REF:-main}"
 INSTALL_DIR="/opt/community-stack"
@@ -23,7 +25,9 @@ skip_firewall=false
 
 usage() {
     cat <<'USAGE'
-Usage: sudo bash bootstrap.sh DOMAIN_OR_IPV4 [options]
+Usage:
+  bash scripts/bootstrap.sh DOMAIN_OR_IPV4 [options]  (from a workstation; SSHes to the server)
+  sudo bash bootstrap.sh DOMAIN_OR_IPV4 [options]    (already on the target Linux server)
 
   DOMAIN_OR_IPV4          Base domain (example.org) or public IPv4 (149.56.210.214)
   --domain DOMAIN         Alias for the positional base domain
@@ -36,6 +40,9 @@ Usage: sudo bash bootstrap.sh DOMAIN_OR_IPV4 [options]
   --dir PATH              Install location (default /opt/community-stack)
   --skip-firewall         Leave the firewall alone
   --dry-run               Print every step without changing anything
+
+  Workstation SSH defaults: VPS_USER=debian, VPS_SSH_PORT=22
+  Set VPS_HOST when the base domain does not resolve to the server.
 USAGE
 }
 
@@ -83,6 +90,7 @@ if [[ -z "$base_domain" ]]; then
     base_domain="$web_domain"
 fi
 [[ -n "$base_domain" ]] || { usage >&2; exit 2; }
+target_host="${VPS_HOST:-$base_domain}"
 base_domain="$(printf '%s' "$base_domain" | tr '[:upper:]' '[:lower:]')"
 if [[ "$base_domain" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
     IFS=. read -r -a ipv4_octets <<<"$base_domain"
@@ -102,6 +110,33 @@ email="${email:-admin@${base_domain}}"
 [[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "--dir must be an absolute path."
 if [[ -z "$project_name" ]]; then
     project_name="$(printf '%s' "${web_domain%%.*}" | tr -c 'a-z0-9_-' '-' | cut -c1-40)"
+fi
+
+host_os="$(uname -s)"
+if [[ "$host_os" != "Linux" ]]; then
+    [[ $EUID -ne 0 ]] || fail "On a workstation, run without sudo; sudo is used on the target server."
+    ssh_user="${VPS_USER:-debian}"
+    ssh_port="${VPS_SSH_PORT:-22}"
+    [[ "$target_host" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "Invalid SSH host; set VPS_HOST to the server's IP or hostname."
+    [[ "$ssh_user" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || fail "Invalid VPS_USER."
+    [[ "$ssh_port" =~ ^[0-9]+$ ]] && ((ssh_port >= 1 && ssh_port <= 65535)) \
+        || fail "VPS_SSH_PORT must be between 1 and 65535."
+    command -v ssh >/dev/null || fail "ssh is required on the workstation."
+
+    remote_command="sudo -n bash -s --"
+    remote_args=("${original_args[@]}" --repo "$REPO_URL" --ref "$REF")
+    for argument in "${remote_args[@]}"; do
+        quoted_argument="${argument//\'/\'\\\'\'}"
+        remote_command+=" '$quoted_argument'"
+    done
+
+    say "Connecting to ${ssh_user}@${target_host} to install on the Debian/Ubuntu server"
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 \
+        -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+        -p "$ssh_port" "${ssh_user}@${target_host}" "$remote_command" <"$0"; then
+        fail "Remote bootstrap failed. Confirm SSH access and passwordless sudo for ${ssh_user}."
+    fi
+    exit 0
 fi
 
 say "Checking this server"
