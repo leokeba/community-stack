@@ -66,9 +66,9 @@ ssh "${ssh_opts[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$target" bash -s -- 
 set -eu
 project_dir=$1
 test -d "$project_dir"
-test -f "$project_dir/community-stack.yaml"
-test -f "$project_dir/.env"
-test -x "$project_dir/.venv/bin/community-stack"
+sudo -n -u community test -f "$project_dir/community-stack.yaml"
+sudo -n -u community test -f "$project_dir/.env"
+sudo -n -u community test -x "$project_dir/.venv/bin/community-stack"
 sudo -n true
 sudo -n docker info >/dev/null
 sudo -n -u community test -w "$project_dir"
