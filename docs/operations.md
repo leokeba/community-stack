@@ -47,6 +47,22 @@ always remain. Sign-ins, failed sign-ins, account changes, publishing actions
 and settings changes are recorded with time, account and client address on
 the Activity log page, and kept for about 13 months.
 
+### Review before publishing
+
+Owners and admins can turn on **Review before publishing** on the Settings
+page. From then on a draft is submitted for review, and someone other than the
+person who submitted it (an owner, admin, publisher or reviewer) approves it or
+sends it back with a note. Only approved announcements can be published or
+scheduled, and editing a submitted, approved or scheduled announcement sends it
+back to draft, so what is published is always what was approved. The dashboard
+lists announcements waiting for your review, and each announcement shows its
+review history.
+
+For safety notices that cannot wait, owners and admins can publish without
+review by giving a reason and their password; the reason is recorded in the
+announcement's review history and the activity log. The server command line
+(`community-stack announce publish`) is not subject to review.
+
 ### Writing announcements
 
 Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,

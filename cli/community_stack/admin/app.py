@@ -53,6 +53,7 @@ from community_stack.announcements.media import (
     validate_alt,
 )
 from community_stack.announcements.models import (
+    UNPUBLISHED,
     Announcement,
     AnnouncementStatus,
     ModelValidationError,
@@ -243,6 +244,24 @@ def create_app(
             raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
         return token
 
+    def review_required() -> bool:
+        return storage.get_setting("review_required", "false") == "true"
+
+    def announcement_or_404(announcement_id: str) -> Announcement:
+        try:
+            return publisher.preview(announcement_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Announcement not found.") from None
+
+    def require_approved(announcement: Announcement) -> None:
+        if review_required() and announcement.status not in (
+            AnnouncementStatus.APPROVED,
+            AnnouncementStatus.SCHEDULED,
+        ):
+            raise HTTPException(
+                status_code=409, detail="Review is on: this announcement must be approved first."
+            )
+
     def parse_tags(form: dict[str, str]) -> list[str]:
         return [item.strip() for item in form.get("tags", "").split(",") if item.strip()]
 
@@ -291,6 +310,15 @@ def create_app(
                 setup_done=sum(step["done"] for step in steps),
                 setup_total=len(steps),
                 announcements=storage.list_announcements(limit=10),
+                awaiting_review=[
+                    a
+                    for a in storage.list_announcements(
+                        status=AnnouncementStatus.IN_REVIEW, limit=50
+                    )
+                    if storage.last_submitter(a.id) != session["username"]
+                ]
+                if can(session["role"], "approve")
+                else [],
                 failed_count=len(storage.get_failed_deliveries()),
                 queued_count=len(storage.get_active_jobs()),
             ),
@@ -478,9 +506,13 @@ def create_app(
             announcement = publisher.preview(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        if announcement.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+        editable = announcement.status == AnnouncementStatus.DRAFT or (
+            announcement.status == AnnouncementStatus.SCHEDULED and not review_required()
+        )
+        if not editable:
             raise HTTPException(
-                status_code=409, detail="Images can only be changed before publication."
+                status_code=409,
+                detail="Images can only be changed on drafts (edit the announcement to reopen it).",
             )
         return announcement
 
@@ -596,6 +628,9 @@ def create_app(
             page(
                 session,
                 announcement=announcement,
+                review_required=review_required(),
+                submitter=storage.last_submitter(announcement_id),
+                review_history=storage.review_history(announcement_id),
                 body_html=Markup(render_html(announcement.body)),
                 scheduled_local=scheduled_local,
                 timezone_name=str(publisher.timezone),
@@ -621,6 +656,7 @@ def create_app(
     @app.post("/admin/announcements/{announcement_id}/update")
     async def update_announcement(request: Request, announcement_id: str) -> Response:
         session, form = await checked_form(request, "edit")
+        before = announcement_or_404(announcement_id).status
         try:
             announcement, _ = publisher.update(
                 announcement_id,
@@ -634,6 +670,16 @@ def create_app(
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except (ValueError, ModelValidationError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if review_required() and before in (
+            AnnouncementStatus.IN_REVIEW,
+            AnnouncementStatus.APPROVED,
+            AnnouncementStatus.SCHEDULED,
+        ):
+            # What gets published must be exactly what was approved.
+            publisher.set_review_status(announcement_id, (before,), AnnouncementStatus.DRAFT)
+            storage.add_review_event(
+                announcement_id, "returned_to_draft", session["username"], "Edited after review."
+            )
         audit(
             request,
             session["username"],
@@ -650,6 +696,7 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="Explicit publish confirmation is required."
             )
+        require_approved(announcement_or_404(announcement_id))
         try:
             announcement, results = publisher.publish_draft(announcement_id)
         except KeyError:
@@ -666,9 +713,117 @@ def create_app(
         )
         return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
 
+    @app.post("/admin/announcements/{announcement_id}/submit")
+    async def submit_for_review(request: Request, announcement_id: str) -> Response:
+        session, _ = await checked_form(request, "edit")
+        try:
+            announcement = publisher.set_review_status(
+                announcement_id, (AnnouncementStatus.DRAFT,), AnnouncementStatus.IN_REVIEW
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Announcement not found.") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        storage.add_review_event(announcement_id, "submitted", session["username"])
+        audit(
+            request,
+            session["username"],
+            "announcement.submitted",
+            announcement_id,
+            title=announcement.title,
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    async def review_decision(request: Request, announcement_id: str, approve: bool) -> Response:
+        session, form = await checked_form(request, "approve")
+        announcement_or_404(announcement_id)
+        if storage.last_submitter(announcement_id) == session["username"]:
+            raise HTTPException(
+                status_code=403, detail="Someone other than the submitter must review it."
+            )
+        note = " ".join(form.get("note", "").split())[:1000] or None
+        if not approve and not note:
+            raise HTTPException(status_code=400, detail="Say what needs to change.")
+        target = AnnouncementStatus.APPROVED if approve else AnnouncementStatus.DRAFT
+        try:
+            announcement = publisher.set_review_status(
+                announcement_id, (AnnouncementStatus.IN_REVIEW,), target
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        action = "approved" if approve else "changes_requested"
+        storage.add_review_event(announcement_id, action, session["username"], note)
+        audit(
+            request,
+            session["username"],
+            f"announcement.{action}",
+            announcement_id,
+            title=announcement.title,
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/announcements/{announcement_id}/approve")
+    async def approve_announcement(request: Request, announcement_id: str) -> Response:
+        return await review_decision(request, announcement_id, approve=True)
+
+    @app.post("/admin/announcements/{announcement_id}/request-changes")
+    async def request_changes(request: Request, announcement_id: str) -> Response:
+        return await review_decision(request, announcement_id, approve=False)
+
+    @app.post("/admin/announcements/{announcement_id}/publish-urgently")
+    async def publish_urgently(request: Request, announcement_id: str) -> Response:
+        """Safety notices that cannot wait for a reviewer: owners and admins, with a reason."""
+        session, form = await checked_form(request, "settings")
+        announcement = announcement_or_404(announcement_id)
+        if announcement.status not in UNPUBLISHED:
+            raise HTTPException(status_code=409, detail="This announcement is already public.")
+        reason = " ".join(form.get("reason", "").split())[:500]
+        if len(reason) < 10:
+            raise HTTPException(status_code=400, detail="Explain why this cannot wait for review.")
+        if not await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("password", "")
+        ):
+            raise HTTPException(status_code=403, detail="Password confirmation failed.")
+        try:
+            announcement, results = publisher.publish_draft(announcement_id)
+        except ValueError:
+            # Submitted or in review: claim it from whatever unpublished state it is in.
+            publisher.set_review_status(
+                announcement_id,
+                (AnnouncementStatus.IN_REVIEW,),
+                AnnouncementStatus.APPROVED,
+            )
+            announcement, results = publisher.publish_draft(announcement_id)
+        storage.add_review_event(
+            announcement_id, "published_without_review", session["username"], reason
+        )
+        audit(
+            request,
+            session["username"],
+            "announcement.published_urgently",
+            announcement_id,
+            title=announcement.title,
+            reason=reason,
+            channels=sorted(results),
+        )
+        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+
+    @app.post("/admin/settings/review")
+    async def update_review_setting(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        enabled = form.get("review_required") == "true"
+        storage.set_setting("review_required", "true" if enabled else "false")
+        audit(request, session["username"], "settings.review", required=enabled)
+        return RedirectResponse("/admin/settings", status_code=303)
+
     @app.post("/admin/announcements/{announcement_id}/schedule")
     async def schedule_announcement(request: Request, announcement_id: str) -> Response:
         session, form = await checked_form(request, "edit")
+        current = announcement_or_404(announcement_id)
+        if review_required() and current.status != AnnouncementStatus.APPROVED:
+            raise HTTPException(
+                status_code=409, detail="Review is on: this announcement must be approved first."
+            )
         try:
             local = datetime.strptime(form.get("scheduled_for", ""), "%Y-%m-%dT%H:%M")
         except ValueError:
@@ -756,7 +911,11 @@ def create_app(
             }
             for adapter in publisher.adapters
         ]
-        return render(request, "settings.html", page(session, channels=channels))
+        return render(
+            request,
+            "settings.html",
+            page(session, channels=channels, review_required=review_required()),
+        )
 
     @app.post("/admin/settings")
     async def update_settings(request: Request) -> Response:

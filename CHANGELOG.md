@@ -143,3 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `install`, `upgrade` and the agent generate Synapse's configuration (PostgreSQL, signing key, ownership) and Element's configuration on first start, never overwriting existing files; the generated Synapse configuration is checked by an opt-in test that boots real Synapse and PostgreSQL containers.
   - Element now reads `data/element/config.json` generated for this homeserver; it previously pointed at `http://localhost`. Caddy receives the domains and ACME email from `.env`.
   - Deploys fall back to pip on servers without uv.
+- **Roadmap Phase 2: Review before publishing:**
+  - Optional review mode (Settings): drafts are submitted, approved or sent back with a note by someone other than the submitter, and only approved announcements can be published or scheduled.
+  - Editing a submitted, approved or scheduled announcement returns it to draft; images can only change on drafts while review is on.
+  - Reviewers can now approve; the dashboard lists announcements waiting for your review, and each announcement shows its review history.
+  - Urgent publication without review for owners and admins, with a required reason and password, recorded in the review history and activity log.

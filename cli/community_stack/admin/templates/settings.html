@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Publishing settings{% endblock %}
 {% block content %}
-<h1>Publishing destinations</h1>
+<h1>Publishing settings</h1>
+<form class="card" method="post" action="/admin/settings/review">
+  <h2>Review before publishing</h2>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label><input type="checkbox" name="review_required" value="true" {% if review_required %}checked{% endif %}> Every announcement must be approved by someone other than the person who submitted it</label>
+  <p class="muted">Owners and admins can still publish urgent safety notices without review, with a written reason that is recorded.</p>
+  <p><button type="submit">Save</button></p>
+</form>
+<h2>Publishing destinations</h2>
 <p>Turn connected channels on or off. To connect a new channel, use the <a href="/admin/channels">Channels</a> page.</p>
 <form class="card" method="post" action="/admin/settings">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

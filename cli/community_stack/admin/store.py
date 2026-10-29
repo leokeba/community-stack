@@ -26,11 +26,12 @@ ROLE_DESCRIPTIONS = {
     "owner": "Everything, including managing other owners.",
     "admin": "Manage accounts (except owners) and publishing destinations, and publish.",
     "publisher": "Write, publish, edit and withdraw announcements.",
-    "reviewer": "Read announcements and delivery history.",
+    "reviewer": "Read announcements, and approve other people's drafts when review is on.",
 }
 PERMISSIONS = {
     "view": {"owner", "admin", "publisher", "reviewer"},
     "edit": {"owner", "admin", "publisher"},
+    "approve": {"owner", "admin", "publisher", "reviewer"},
     "settings": {"owner", "admin"},
     "accounts": {"owner", "admin"},
     "audit": {"owner", "admin"},

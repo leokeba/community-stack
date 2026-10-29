@@ -5,6 +5,12 @@
 {% if setup_total and setup_done < setup_total %}
 <p class="notice"><a href="/admin/start">Finish setting up</a>: {{ setup_done }} of {{ setup_total }} steps done.</p>
 {% endif %}
+{% if awaiting_review %}
+<section class="panel">
+  <h2>Waiting for your review</h2>
+  <ul>{% for item in awaiting_review %}<li><a href="/admin/announcements/{{ item.id }}">{{ item.title }}</a></li>{% endfor %}</ul>
+</section>
+{% endif %}
 <p>Delivery failures needing attention: <strong>{{ failed_count }}</strong></p>
 <p>Deliveries waiting for an automatic retry: <strong>{{ queued_count }}</strong></p>
 <p>{% if perms.edit %}<a href="/admin/announcements/new">Create a draft</a> · {% endif %}<a href="/admin/announcements">View all announcements</a></p>

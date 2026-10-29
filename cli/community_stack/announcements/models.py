@@ -12,10 +12,21 @@ from typing import Any
 
 class AnnouncementStatus(str, Enum):
     DRAFT = "draft"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
     UPDATED = "updated"
     WITHDRAWN = "withdrawn"
+
+
+# Not yet public: editable, and withdrawn without telling any channel.
+UNPUBLISHED = (
+    AnnouncementStatus.DRAFT,
+    AnnouncementStatus.IN_REVIEW,
+    AnnouncementStatus.APPROVED,
+    AnnouncementStatus.SCHEDULED,
+)
 
 
 class ModelValidationError(Exception):

@@ -14,7 +14,8 @@
   {% endif %}
   <div>{{ body_html }}</div>
 </article>
-{% if perms.edit and announcement.status.value in ["draft", "scheduled"] %}
+{% set status = announcement.status.value %}
+{% if perms.edit and (status == "draft" or (status == "scheduled" and not review_required)) %}
 <section class="card" aria-labelledby="image-heading">
   <h2 id="image-heading">Image</h2>
   {% if announcement.image %}
@@ -62,14 +63,48 @@
 {% if announcement.status.value == "scheduled" %}
 <p class="notice" role="status">Scheduled to publish on <strong>{{ scheduled_local }}</strong> ({{ timezone_name }}).</p>
 {% endif %}
-{% if perms.edit and announcement.status.value in ["draft", "scheduled"] %}
+{% if review_required and status in ["draft", "in_review", "approved"] %}
+<section class="card" aria-labelledby="review-heading">
+  <h2 id="review-heading">Review</h2>
+  {% if status == "draft" %}
+  <p>Review is on: someone other than you approves this announcement before it can be published.</p>
+  {% if perms.edit %}
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/submit">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p><button type="submit">Submit for review</button></p>
+  </form>
+  {% endif %}
+  {% elif status == "in_review" %}
+  <p>Waiting for review{% if submitter %}, submitted by <strong>{{ submitter }}</strong>{% endif %}.</p>
+  {% if perms.approve and submitter != username %}
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/approve">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="approve-note">Note (optional)</label>
+    <input id="approve-note" name="note" type="text" maxlength="1000">
+    <p><button type="submit">Approve</button></p>
+  </form>
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/request-changes">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="changes-note">What needs to change</label>
+    <textarea id="changes-note" name="note" maxlength="1000" rows="2" required></textarea>
+    <p><button type="submit">Send back for changes</button></p>
+  </form>
+  {% elif submitter == username %}
+  <p class="muted">Someone else needs to approve it.</p>
+  {% endif %}
+  {% elif status == "approved" %}
+  <p class="notice" role="status">Approved. It can now be published or scheduled. Editing it sends it back for review.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% if perms.edit and (status in ["approved", "scheduled"] or (status == "draft" and not review_required)) %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
   <p><button type="submit">{{ "Publish now instead" if announcement.status.value == "scheduled" else "Publish announcement" }}</button></p>
 </form>
 {% endif %}
-{% if perms.edit and announcement.status.value == "draft" %}
+{% if perms.edit and ((status == "draft" and not review_required) or status == "approved") %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/schedule">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label for="scheduled-for">Publish automatically on ({{ timezone_name }})</label>
@@ -83,7 +118,29 @@
   <p><button type="submit">Cancel schedule (keep as draft)</button></p>
 </form>
 {% endif %}
-{% if perms.edit and announcement.status.value in ["published", "updated"] %}
+{% if review_required and perms.settings and status in ["draft", "in_review", "approved"] %}
+<details class="card">
+  <summary>Urgent: publish without review</summary>
+  <p>For safety notices that cannot wait. This is recorded in the activity log with your reason.</p>
+  <form method="post" action="/admin/announcements/{{ announcement.id }}/publish-urgently">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="urgent-reason">Why this cannot wait</label>
+    <input id="urgent-reason" name="reason" type="text" minlength="10" maxlength="500" required>
+    <label for="urgent-password">Confirm with your password</label>
+    <input id="urgent-password" name="password" type="password" autocomplete="current-password" required>
+    <p><button type="submit">Publish now without review</button></p>
+  </form>
+</details>
+{% endif %}
+{% if review_history %}
+<h2>Review history</h2>
+<ul>
+  {% for event in review_history %}
+  <li><time datetime="{{ event.occurred_at }}">{{ event.occurred_at[:16]|replace("T", " ") }}</time> · {{ event.actor or "—" }}: {{ event.action|replace("_", " ") }}{% if event.note %} — {{ event.note }}{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if perms.edit and status in ["published", "updated"] %}
 <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/withdraw">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label><input type="checkbox" name="confirm" value="withdraw" required> I confirm withdrawal from public channels.</label>

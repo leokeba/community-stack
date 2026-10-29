@@ -20,7 +20,7 @@ from community_stack.announcements.adapters.base import (
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS
-from community_stack.announcements.models import Announcement, AnnouncementStatus
+from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.secrets import parse_env_file
@@ -188,7 +188,11 @@ class AnnouncementPublisher:
     def schedule(self, announcement_id: str, when: datetime) -> Announcement:
         """Schedule a draft for automatic publication at ``when`` (timezone-aware)."""
         ann = self.preview(announcement_id)
-        if ann.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+        if ann.status not in (
+            AnnouncementStatus.DRAFT,
+            AnnouncementStatus.APPROVED,
+            AnnouncementStatus.SCHEDULED,
+        ):
             raise ValueError("Only drafts can be scheduled.")
         if when.tzinfo is None:
             raise ValueError("Schedule times must include a time zone.")
@@ -209,6 +213,23 @@ class AnnouncementPublisher:
         self.storage.save_announcement(ann)
         return ann
 
+    def set_review_status(
+        self,
+        announcement_id: str,
+        from_statuses: tuple[AnnouncementStatus, ...],
+        to: AnnouncementStatus,
+    ) -> Announcement:
+        """Move an unpublished announcement along the review workflow, atomically."""
+        if not self.storage.transition_status(
+            announcement_id, tuple(s.value for s in from_statuses), to.value
+        ):
+            raise ValueError("The announcement changed meanwhile; reload the page.")
+        ann = self.preview(announcement_id)
+        if to == AnnouncementStatus.DRAFT and ann.scheduled_at:
+            ann.scheduled_at = None
+            self.storage.save_announcement(ann)
+        return ann
+
     def publish_due_scheduled(self) -> list[str]:
         """Publish every scheduled announcement whose time has come."""
         published = []
@@ -223,7 +244,11 @@ class AnnouncementPublisher:
     def publish_draft(self, announcement_id: str) -> tuple[Announcement, dict[str, DeliveryResult]]:
         """Publish a saved or scheduled draft and dispatch it to each channel."""
         ann = self.preview(announcement_id)
-        if ann.status not in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+        if ann.status not in (
+            AnnouncementStatus.DRAFT,
+            AnnouncementStatus.APPROVED,
+            AnnouncementStatus.SCHEDULED,
+        ):
             raise ValueError(f"Announcement '{announcement_id}' is not a draft.")
         # Claim the publication atomically so two workers cannot both publish it.
         if not self.storage.transition_status(announcement_id, (ann.status.value,), "published"):
@@ -359,7 +384,7 @@ class AnnouncementPublisher:
         if channel_text is not None:
             ann.channel_text = channel_text
 
-        if ann.status in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED):
+        if ann.status in UNPUBLISHED:
             ann.validate()
             self.storage.save_announcement(ann)
             return ann, {}
@@ -376,7 +401,7 @@ class AnnouncementPublisher:
         if ann.status == AnnouncementStatus.WITHDRAWN:
             raise ValueError(f"Announcement '{announcement_id}' has already been withdrawn.")
 
-        was_draft = ann.status in (AnnouncementStatus.DRAFT, AnnouncementStatus.SCHEDULED)
+        was_draft = ann.status in UNPUBLISHED
         ann.status = AnnouncementStatus.WITHDRAWN
         ann.scheduled_at = None
         self.storage.save_announcement(ann)

@@ -127,6 +127,23 @@ class AnnouncementStorage:
                 ON delivery_attempts (announcement_id, attempted_at, attempt_id);
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS review_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    announcement_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    actor TEXT,
+                    note TEXT,
+                    occurred_at TEXT NOT NULL,
+                    FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS media (
                     id TEXT PRIMARY KEY,
                     announcement_id TEXT NOT NULL,
@@ -680,3 +697,44 @@ class AnnouncementStorage:
         conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
         if row:
             (self.media_dir / row["filename"]).unlink(missing_ok=True)
+
+    def add_review_event(
+        self, announcement_id: str, action: str, actor: str | None, note: str | None = None
+    ) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO review_events (announcement_id, action, actor, note, occurred_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (announcement_id, action, actor, note, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def review_history(self, announcement_id: str) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM review_events WHERE announcement_id = ? ORDER BY event_id",
+                (announcement_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def last_submitter(self, announcement_id: str) -> str | None:
+        """Who sent the announcement for review most recently."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT actor FROM review_events WHERE announcement_id = ? AND action = 'submitted' "
+                "ORDER BY event_id DESC LIMIT 1",
+                (announcement_id,),
+            ).fetchone()
+        return row["actor"] if row else None
+
+    def get_setting(self, key: str, default: str) -> str:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
