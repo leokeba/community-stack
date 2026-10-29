@@ -28,6 +28,10 @@ def test_compose_files_are_valid_yaml():
             assert "services" in data, f"{f} must contain a 'services' block"
 
 
+def test_landing_feed_mountpoint_exists_in_read_only_html_volume():
+    assert Path("services/landing/html/feed").is_dir()
+
+
 def test_images_are_strictly_pinned():
     """Ensure no service uses 'latest' or untagged images (ADR 0001, ADR 0002, Security Policy)."""
     for f in get_compose_files():
