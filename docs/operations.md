@@ -109,6 +109,25 @@ deleted in that group. Use a dedicated Signal account and number: Signal may
 block accounts that look automated. The linked account's keys are kept in
 `data/signal` and included in backups.
 
+### Mirroring Matrix rooms
+
+The **Mirroring** page (owners and admins) turns chosen Matrix rooms into a
+source of announcements, using the stack's Matrix announcements account (the
+one configured for the Matrix announcements channel). Invite that account to a
+room, then add the room with three choices: whose messages count (room
+moderators and admins, or everyone), whether a message is published right away
+or becomes a draft for review, and which channels it goes to. From then on, a
+new message's first line becomes the announcement title and the rest its
+message; editing the message in Matrix updates the announcement, and deleting
+it withdraws the announcement. Only messages sent after the room was added are
+mirrored, at most ten announcements per room per hour, and the announcements
+account's own posts are never mirrored back. When review before publishing is
+on, mirrored messages always wait for review, submitted by `matrix:@sender`.
+
+Edits and withdrawals of any announcement now go only to the channels that
+received it, so a channel added later never gets a correction for a post it
+never had.
+
 ### Writing announcements
 
 Announcement messages use Markdown: `## Heading`, `**bold**`, `*italic*`,

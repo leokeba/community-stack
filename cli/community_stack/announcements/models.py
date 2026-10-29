@@ -58,6 +58,8 @@ class Announcement:
     # Optional text to send instead of title + body, keyed by channel name.
     channel_text: dict[str, str] = field(default_factory=dict)
     image_id: str | None = None
+    # Channels to publish to; empty means every enabled channel.
+    channels: list[str] = field(default_factory=list)
     # Filled in by storage from the media table; not part of the announcement record.
     image: Any = field(default=None, compare=False, repr=False)
 

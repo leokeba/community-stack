@@ -53,6 +53,7 @@ from community_stack.announcements.fediverse import (
     FediverseAdapter,
 )
 from community_stack.announcements.formatting import render_html
+from community_stack.announcements.matrix_mirror import MODERATOR_POWER, mirror_for
 from community_stack.announcements.media import (
     MAX_UPLOAD_BYTES,
     MEDIA_ID,
@@ -136,12 +137,25 @@ def create_app(
     )
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
+    def mirror():
+        return mirror_for(
+            storage,
+            publisher,
+            lambda: storage.get_setting("review_required", "false") == "true",
+        )
+
     async def deliver_due_jobs() -> None:
         while True:
             try:
                 await run_in_threadpool(publisher.process_due_jobs)
             except Exception:
                 logger.exception("Background delivery run failed.")
+            try:
+                rooms = mirror()
+                if rooms is not None:
+                    await run_in_threadpool(rooms.sync_once)
+            except Exception:
+                logger.exception("Matrix room mirroring failed.")
             await asyncio.sleep(worker_interval)
 
     @contextlib.asynccontextmanager
@@ -1312,6 +1326,71 @@ def create_app(
         )
         message = {"kind": kind, "ok": True, "text": "Saved. Use 'Test connection' to check it."}
         return channels_page(request, session, message)
+
+    def mirroring_page(
+        request: Request, session: dict[str, Any], error: str | None = None, status_code: int = 200
+    ):
+        rooms = mirror()
+        labels = {a.name: a.capabilities.label for a in publisher.adapters}
+        return render(
+            request,
+            "mirroring.html",
+            page(
+                session,
+                available=rooms is not None,
+                rooms=rooms.rooms() if rooms else [],
+                channel_labels=labels,
+                error=error,
+            ),
+            status_code=status_code,
+        )
+
+    @app.get("/admin/mirroring")
+    async def mirroring(request: Request) -> Response:
+        return mirroring_page(request, require(request, "settings"))
+
+    @app.post("/admin/mirroring/add")
+    async def add_mirrored_room(request: Request) -> Response:
+        session, _ = await checked_form(request, "settings")
+        raw = await request.form()
+        rooms = mirror()
+        if rooms is None:
+            raise HTTPException(
+                status_code=409, detail="Set up the Matrix announcements channel first."
+            )
+        known = {a.name for a in publisher.adapters}
+        channels = [c for c in raw.getlist("channel") if c in known]
+        if not channels:
+            return mirroring_page(request, session, "Choose at least one channel.", 400)
+        try:
+            added = await run_in_threadpool(
+                rooms.add_room,
+                str(raw.get("room", "")).strip(),
+                str(raw.get("mode", "review")),
+                MODERATOR_POWER if raw.get("who") != "everyone" else 0,
+                channels,
+                session["username"],
+            )
+        except ValueError as exc:
+            return mirroring_page(request, session, str(exc), 400)
+        audit(
+            request,
+            session["username"],
+            "mirroring.room_added",
+            added["room_id"],
+            mode=str(raw.get("mode")),
+            channels=channels,
+        )
+        return RedirectResponse("/admin/mirroring", status_code=303)
+
+    @app.post("/admin/mirroring/remove")
+    async def remove_mirrored_room(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        rooms = mirror()
+        if rooms is not None:
+            rooms.remove_room(form.get("room_id", ""))
+        audit(request, session["username"], "mirroring.room_removed", form.get("room_id", ""))
+        return RedirectResponse("/admin/mirroring", status_code=303)
 
     @app.get("/admin/channels/signal/link")
     async def signal_link(request: Request) -> Response:

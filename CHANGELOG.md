@@ -167,3 +167,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional `signal` service (signal-cli-rest-api 0.101), switchable on the Services page, reachable only on an internal network shared with the announcements service.
   - Linking page that shows the QR code to scan from Signal's Linked devices and lists the account's groups to choose from.
   - Signal connector that posts to the chosen group, edits with `edit_timestamp` and withdraws with remote delete; only rate-limited posts are retried automatically.
+- **Roadmap Phase 2: Mirroring Matrix rooms:**
+  - Mirroring page to follow chosen Matrix rooms with the announcements account: whose messages count (moderators or everyone), publish directly or create drafts for review, and which channels receive them.
+  - New messages become announcements, Matrix edits update them and deletions withdraw them; history is never imported, the account's own posts are ignored, and each room is limited to ten announcements an hour.
+  - Announcements can now target a subset of channels, and edits and withdrawals only go to channels that received the announcement.

@@ -291,8 +291,19 @@ class AnnouncementPublisher:
         """Queue one job per channel and run it now; retryable failures stay queued."""
         results: dict[str, DeliveryResult] = {}
         channel_settings = self.storage.get_channel_settings()
+        # Edits and withdrawals only go where the announcement was sent, so a channel
+        # never gets a correction for a post it never had.
+        reached = (
+            {state["adapter_name"] for state in self.storage.get_delivery_states(ann.id)}
+            if operation != "publish"
+            else set()
+        )
         for adapter in self.adapters:
             if not channel_settings.get(adapter.name, True) and operation != "withdraw":
+                continue
+            if operation == "publish" and ann.channels and adapter.name not in ann.channels:
+                continue
+            if operation != "publish" and adapter.name not in reached:
                 continue
             capabilities = adapter.capabilities
             if (operation == "update" and capabilities.update_mode == UpdateMode.NONE) or (

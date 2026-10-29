@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Mirrored Matrix rooms{% endblock %}
+{% block content %}
+<h1>Mirrored Matrix rooms</h1>
+<p>Messages posted in these Matrix rooms become announcements on the channels you choose. Editing a message updates the announcement; deleting it withdraws the announcement.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not available %}
+<div class="panel">
+  <p>Mirroring uses the stack's Matrix announcements account. Configure the Matrix announcements channel first (see docs/deployment.md, "Matrix delivery").</p>
+</div>
+{% else %}
+{% if rooms %}
+<table>
+  <thead><tr><th>Room</th><th>Who can post</th><th>What happens</th><th>Channels</th><th></th></tr></thead>
+  <tbody>
+  {% for room in rooms %}
+  <tr>
+    <td>{{ room.alias or room.room_id }}</td>
+    <td>{{ "Room moderators and admins" if room.min_power >= 50 else "Everyone in the room" }}</td>
+    <td>{{ "Published right away" if room.mode == "publish" else "Draft for review" }}</td>
+    <td>{% for name in room.channels %}{{ channel_labels.get(name, name) }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td>
+      <form method="post" action="/admin/mirroring/remove">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="room_id" value="{{ room.room_id }}">
+        <button type="submit">Stop mirroring</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+<form class="card" method="post" action="/admin/mirroring/add">
+  <h2>Mirror a room</h2>
+  <p class="muted">Invite the announcements account to the room first. Only new messages are mirrored, never the room's history. When review before publishing is on, mirrored messages always wait for review.</p>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="room">Room address</label>
+  <input id="room" name="room" type="text" placeholder="#news:matrix.ourtown.org" required>
+  <label for="who">Whose messages are mirrored</label>
+  <select id="who" name="who">
+    <option value="moderators">Room moderators and admins only</option>
+    <option value="everyone">Everyone in the room</option>
+  </select>
+  <label for="mode">What happens to a message</label>
+  <select id="mode" name="mode">
+    <option value="review">It becomes a draft waiting for review</option>
+    <option value="publish">It is published right away</option>
+  </select>
+  <fieldset>
+    <legend>Send to</legend>
+    {% for name, label in channel_labels.items() %}
+    <label><input type="checkbox" name="channel" value="{{ name }}" checked> {{ label }}</label>
+    {% endfor %}
+  </fieldset>
+  <p><button type="submit">Start mirroring</button></p>
+</form>
+{% endif %}
+{% endblock %}

@@ -81,6 +81,10 @@ class AnnouncementStorage:
 
             if "scheduled_at" not in announcement_columns:
                 conn.execute("ALTER TABLE announcements ADD COLUMN scheduled_at TEXT")
+            if "channels_json" not in announcement_columns:
+                conn.execute(
+                    "ALTER TABLE announcements ADD COLUMN channels_json TEXT NOT NULL DEFAULT '[]'"
+                )
             if "image_id" not in announcement_columns:
                 conn.execute("ALTER TABLE announcements ADD COLUMN image_id TEXT")
             if "channel_text_json" not in announcement_columns:
@@ -221,8 +225,9 @@ class AnnouncementStorage:
                 INSERT INTO announcements (
                     id, title, body, published_at, language, status,
                     canonical_url, expires_at, audience, author, tags_json,
-                    created_at, updated_at, scheduled_at, channel_text_json, image_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, scheduled_at, channel_text_json, image_id,
+                    channels_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     body=excluded.body,
@@ -237,7 +242,8 @@ class AnnouncementStorage:
                     updated_at=excluded.updated_at,
                     scheduled_at=excluded.scheduled_at,
                     channel_text_json=excluded.channel_text_json,
-                    image_id=excluded.image_id
+                    image_id=excluded.image_id,
+                    channels_json=excluded.channels_json
                 ;
                 """,
                 (
@@ -257,6 +263,7 @@ class AnnouncementStorage:
                     ann.scheduled_at,
                     json.dumps(ann.channel_text),
                     ann.image_id,
+                    json.dumps(ann.channels),
                 ),
             )
             conn.commit()
@@ -278,6 +285,7 @@ class AnnouncementStorage:
             scheduled_at=row["scheduled_at"],
             channel_text=json.loads(row["channel_text_json"] or "{}"),
             image_id=row["image_id"],
+            channels=json.loads(row["channels_json"] or "[]"),
         )
         if announcement.image_id:
             announcement.image = self._media(conn, announcement.image_id)

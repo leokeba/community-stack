@@ -40,6 +40,7 @@
       <a href="/admin/announcements">Announcements</a>
       {% if perms.edit %}<a href="/admin/templates">Templates</a>{% endif %}
       {% if perms.settings %}<a href="/admin/channels">Channels</a>{% endif %}
+      {% if perms.settings %}<a href="/admin/mirroring">Mirroring</a>{% endif %}
       {% if perms.settings %}<a href="/admin/settings">Settings</a>{% endif %}
       {% if perms.accounts %}<a href="/admin/accounts">Accounts</a>{% endif %}
       {% if perms.system %}<a href="/admin/health">Health</a>{% endif %}
