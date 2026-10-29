@@ -151,3 +151,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Roadmap Phase 2: Templates:**
   - Templates page to create, edit and delete reusable announcements (title, message, author, tags, per-channel text), validated like announcements.
   - Start a draft from a template, or save any announcement as a template.
+- **Roadmap Phase 2: Service updates from the console:**
+  - Agent operations `services.versions` and `services.update`: compare running images with the release's pinned images, then back up, pull, restart and health-check one service, restarting the previous images if the new ones are not healthy.
+  - Services page lists versions with upstream release notes and an Update button; PostgreSQL major-version changes are refused.

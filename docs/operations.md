@@ -195,6 +195,19 @@ Domains, Matrix registration and federation, and the WhatsApp bridge are still
 configured from the command line. The **Get started** page lists the remaining
 setup steps, and the dashboard links to it until they are done.
 
+### Software updates
+
+Each release of the stack pins tested versions of Caddy, nginx, Synapse,
+PostgreSQL, Element and the WhatsApp bridge in its Compose files. After a new
+release is installed, the Services page lists every component whose running
+version differs from the release, with a link to the upstream release notes,
+and an **Update** button per service. Updating takes a safety backup, pulls the
+pinned images, restarts the service and waits for it to become healthy; if it
+does not, the previous images are started again. Only the pinned versions can
+be installed this way, and a PostgreSQL major-version change is refused
+because it needs a database migration from the command line. The announcements
+service itself is updated by deploying a new release.
+
 ### Control agent
 
 The admin console's System page (owners and admins) shows service status and

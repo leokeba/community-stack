@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import backups, health
+from community_stack.agent import backups, health, updates
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
@@ -172,6 +172,13 @@ def _backup_settings_call(handler):
     return run
 
 
+def _update_call(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return updates.update(context, params)
+    except updates.UpdateError as exc:
+        raise OperationError(str(exc)) from exc
+
+
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
     return {"values": settings_catalog.current_values(config)}
@@ -263,6 +270,21 @@ CATALOG: dict[str, Operation] = {
             "system",
             _backup_settings_call(backups.use_local),
             summary="Send backups to the server's own disk again.",
+        ),
+        Operation(
+            "services.versions",
+            READ,
+            "system",
+            updates.versions,
+            summary="Compare running service versions with this release's pinned versions.",
+        ),
+        Operation(
+            "services.update",
+            CHANGE,
+            "system",
+            _update_call,
+            params=(Param("service", re.compile("|".join(updates.UPDATABLE)), required=True),),
+            summary="Back up, update one service to its pinned version, roll back on failure.",
         ),
         Operation(
             "config.get",

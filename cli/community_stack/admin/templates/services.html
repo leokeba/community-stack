@@ -3,6 +3,10 @@
 {% block content %}
 <h1>Services and settings</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if outcome %}
+  {% if outcome.error %}<p class="error" role="alert"><strong>{{ outcome.title }}:</strong> {{ outcome.error }}</p>
+  {% else %}<div class="notice" role="status"><p><strong>{{ outcome.title }}</strong></p><ul>{% for step in outcome.steps %}<li>{{ step }}</li>{% endfor %}</ul></div>{% endif %}
+{% endif %}
 {% if not agent_available %}
 <div class="panel">
   <h2>The system agent is not running</h2>
@@ -40,6 +44,32 @@
   <thead><tr><th>Service</th><th>State</th><th>Status</th></tr></thead>
   <tbody>
   {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ container.state }}</td><td>{{ container.status }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if components %}
+<h2>Software versions</h2>
+<p>Each release of the stack pins tested versions of the software it runs. Updating takes a backup first and goes back to the previous version if the new one does not start healthy.</p>
+<table>
+  <thead><tr><th>Component</th><th>Running</th><th>This release</th><th></th></tr></thead>
+  <tbody>
+  {% for row in components %}
+  <tr>
+    <td>{{ row.component }}</td>
+    <td>{{ row.running or "not running" }}</td>
+    <td>{{ row.pinned }}{% if row.release_notes and row.update_available %} (<a href="{{ row.release_notes }}" rel="noopener noreferrer">release notes</a>){% endif %}</td>
+    <td>
+      {% if row.blocked %}<span class="muted">{{ row.blocked }}</span>
+      {% elif row.update_available %}
+      <form method="post" action="/admin/services/update">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="service" value="{{ row.service }}">
+        <button type="submit">Update {{ row.service }}</button>
+      </form>
+      {% elif row.running %}Up to date{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
   </tbody>
 </table>
 {% endif %}

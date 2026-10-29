@@ -1419,13 +1419,17 @@ def create_app(
         session: dict[str, Any],
         error: str | None = None,
         status_code: int = 200,
+        outcome: dict[str, Any] | None = None,
     ) -> HTMLResponse:
-        values, status = None, None
+        values, status, components = None, None, []
         if agent.available():
             try:
                 config = await run_in_threadpool(agent.call, "config.get", session["username"])
                 values = config["values"]
                 status = await run_in_threadpool(agent.call, "status.get", session["username"])
+                components = (
+                    await run_in_threadpool(agent.call, "services.versions", session["username"])
+                )["components"]
             except (AgentUnavailable, AgentRefused) as exc:
                 error = error or str(exc)
         return render(
@@ -1437,6 +1441,8 @@ def create_app(
                 settings=SETTINGS.values(),
                 values=values,
                 status=status,
+                components=components,
+                outcome=outcome,
                 timezones=sorted(available_timezones()),
                 error=error,
             ),
@@ -1449,6 +1455,24 @@ def create_app(
     @app.get("/admin/services")
     async def services(request: Request) -> Response:
         return await services_page(request, require(request, "system"))
+
+    @app.post("/admin/services/update")
+    async def update_service(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        service = form.get("service", "")
+        try:
+            result = await run_in_threadpool(
+                agent.call, "services.update", session["username"], {"service": service}
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(request, session["username"], "system.services.update", service, outcome="failed")
+            return await services_page(
+                request, session, None, 400, {"title": f"Updating {service}", "error": str(exc)}
+            )
+        audit(request, session["username"], "system.services.update", service, outcome="succeeded")
+        return await services_page(
+            request, session, outcome={"title": f"Updating {service}", "steps": result["steps"]}
+        )
 
     @app.post("/admin/services/review")
     async def review_services(request: Request) -> Response:
