@@ -151,6 +151,8 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
         ],
     )
 
+    # Commands without -c/-e use the working directory; keep them out of the checkout.
+    monkeypatch.chdir(tmp_path)
     main(["init", "--dir", str(tmp_path)])
     config_file = tmp_path / "community-stack.yaml"
     env_file = tmp_path / ".env"
@@ -240,6 +242,10 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     assert main(["announce", "show", ann_id]) == 0
     assert main(["announce", "update", ann_id, "--title", "Updated Test Title"]) == 0
     assert main(["announce", "withdraw", ann_id]) == 0
+    assert main(["announce", "retry"]) == 0
+    storage.record_delivery(
+        ann_id, "web_feed", "failed", error="disk full", retryable=False, idempotent=False
+    )
     assert main(["announce", "retry"]) == 1
     assert "none are safely retryable" in capsys.readouterr().out
 
