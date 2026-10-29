@@ -1,21 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h1>Publishing dashboard</h1>
+<div class="page-heading">
+  <div>
+    <h1>Publishing dashboard</h1>
+    <p class="page-intro">A quick view of your publishing activity and anything that needs attention.</p>
+  </div>
+  {% if perms.edit %}<a class="button-link" href="/admin/announcements/new">Create announcement</a>{% endif %}
+</div>
 {% if setup_total and setup_done < setup_total %}
-<p class="notice"><a href="/admin/start">Finish setting up</a>: {{ setup_done }} of {{ setup_total }} steps done.</p>
+<p class="notice notice-warning"><a href="/admin/start">Finish setting up</a>: {{ setup_done }} of {{ setup_total }} steps done.</p>
 {% endif %}
 {% if awaiting_review %}
-<section class="panel">
-  <h2>Waiting for your review</h2>
+<section class="panel review-panel">
+  <div class="section-heading">
+    <h2>Waiting for your review</h2>
+    <span class="status">{{ awaiting_review|length }} pending</span>
+  </div>
   <ul>{% for item in awaiting_review %}<li><a href="/admin/announcements/{{ item.id }}">{{ item.title }}</a></li>{% endfor %}</ul>
 </section>
 {% endif %}
-<p>Delivery failures needing attention: <strong>{{ failed_count }}</strong></p>
-<p>Deliveries waiting for an automatic retry: <strong>{{ queued_count }}</strong></p>
-<p>{% if perms.edit %}<a href="/admin/announcements/new">Create a draft</a> · {% endif %}<a href="/admin/announcements">View all announcements</a></p>
-<h2>Recent announcements</h2>
+<section class="dashboard-stats" aria-label="Delivery status">
+  <article class="stat-card {{ 'attention' if failed_count else '' }}">
+    <p class="stat-label">Delivery failures</p>
+    <strong class="stat-value">{{ failed_count }}</strong>
+    <p class="muted">{% if failed_count %}Needs attention{% else %}All clear{% endif %}</p>
+  </article>
+  <article class="stat-card {{ 'waiting' if queued_count else '' }}">
+    <p class="stat-label">Waiting to retry</p>
+    <strong class="stat-value">{{ queued_count }}</strong>
+    <p class="muted">{% if queued_count %}Automatic retry is scheduled{% else %}No retries queued{% endif %}</p>
+  </article>
+</section>
+<div class="section-heading">
+  <h2>Recent announcements</h2>
+  <a href="/admin/announcements">View all</a>
+</div>
 {% if announcements %}
+<div class="table-wrap">
 <table>
   <thead><tr><th>Title</th><th>Status</th><th>Updated</th></tr></thead>
   <tbody>
@@ -28,7 +50,10 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
-<p class="muted">No announcements yet.</p>
+<div class="empty-state">
+  <p>No announcements yet. {% if perms.edit %}<a href="/admin/announcements/new">Create your first draft</a> to get started.{% else %}New announcements will appear here when they are created.{% endif %}</p>
+</div>
 {% endif %}
 {% endblock %}

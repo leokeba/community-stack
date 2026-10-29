@@ -261,4 +261,4 @@ def test_system_page_runs_operations_through_the_agent(project, socket_path):
 def test_system_page_is_limited_to_owners_and_admins(project, socket_path):
     publisher = signed_in(console(project, socket_path), "pat")
     assert publisher.get("/admin/system").status_code == 403
-    assert "System" not in publisher.get("/admin").text
+    assert 'href="/admin/system"' not in publisher.get("/admin").text
