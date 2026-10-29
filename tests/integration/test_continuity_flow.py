@@ -17,14 +17,17 @@ def test_offline_continuity_end_to_end_flow(tmp_path):
         body="First aid and medical advice available at North High School.",
         author="Health Working Group",
         tags=["medical", "health"],
+        status=AnnouncementStatus.PUBLISHED,
     )
     ann2 = Announcement(
         title="Outdated Curfew Notice",
         body="This notice has been superseded.",
         status=AnnouncementStatus.WITHDRAWN,
     )
+    draft = Announcement(title="Unreleased plan", body="Not public yet.")
     storage.save_announcement(ann1)
     storage.save_announcement(ann2)
+    storage.save_announcement(draft)
 
     # 2. Export offline archive bundle
     exporter = OfflineArchiveExporter(storage=storage, community_name="City Mutual Aid")
@@ -57,8 +60,9 @@ def test_offline_continuity_end_to_end_flow(tmp_path):
     assert "North High School" in html_content
     assert "City Mutual Aid" in html_content
 
-    # Withdrawn announcement must be excluded
+    # Withdrawn announcements and unpublished drafts must be excluded
     assert "Outdated Curfew Notice" not in html_content
+    assert "Unreleased plan" not in html_content
 
     # Structured JSON file must contain exact 1 active announcement
     json_data = json.loads(json_file.read_text(encoding="utf-8"))

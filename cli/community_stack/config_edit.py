@@ -108,3 +108,25 @@ def write_in_place(path: Path, text: str) -> None:
         handle.truncate()
         handle.flush()
         os.fsync(handle.fileno())
+
+
+ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def set_env_values(path: Path, values: dict[str, str]) -> None:
+    """Set KEY=value lines in a .env file in place, appending keys that are missing."""
+    for key, value in values.items():
+        if not ENV_KEY.fullmatch(key):
+            raise ValueError(f"Invalid environment variable name: {key}")
+        if not value or any(ch in value for ch in "\n\r\"'# ") or value != value.strip():
+            raise ValueError(f"The value for {key} contains characters .env cannot hold.")
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    remaining = dict(values)
+    for index, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if "=" in line and not line.lstrip().startswith("#") and key in remaining:
+            lines[index] = f"{key}={remaining.pop(key)}\n"
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.extend(f"{key}={value}\n" for key, value in remaining.items())
+    write_in_place(path, "".join(lines))

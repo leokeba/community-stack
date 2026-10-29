@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from community_stack.admin.store import account_password_matches, can, read_account
+from community_stack.agent import backups
 from community_stack.agent.operations import (
     CATALOG,
     DANGEROUS,
@@ -24,6 +25,7 @@ from community_stack.agent.operations import (
     OperationError,
 )
 from community_stack.backup import BackupError
+from community_stack.redact import is_sensitive_key
 
 MAX_REQUEST_BYTES = 64 * 1024
 READ_TIMEOUT_SECONDS = 10
@@ -85,6 +87,19 @@ class AgentService:
         finally:
             self._change_lock.release()
 
+    def run_scheduled_backup_if_due(self) -> None:
+        """Called by the scheduler thread; skips quietly when another change is running."""
+        if not backups.backup_due(self.context, datetime.now(timezone.utc)):
+            return
+        if not self._change_lock.acquire(blocking=False):
+            return
+        try:
+            state = backups.run_scheduled_backup(self.context)
+        finally:
+            self._change_lock.release()
+        request = {"op": "backup.scheduled", "actor": "scheduler", "params": {}}
+        self._audit(request, state["last_result"], state.get("last_error"))
+
     def _check_password(self, actor: str, account: dict, password: Any) -> str | None:
         now = time.monotonic()
         with self._failures_lock:
@@ -119,7 +134,10 @@ class AgentService:
         params = request.get("params")
         # Bounded so a hostile request cannot bloat the log; passwords are never logged.
         safe_params = (
-            {str(k)[:40]: str(v)[:200] for k, v in list(params.items())[:10]}
+            {
+                str(k)[:40]: "[REDACTED]" if is_sensitive_key(str(k)) else str(v)[:200]
+                for k, v in list(params.items())[:10]
+            }
             if isinstance(params, dict)
             else {}
         )
@@ -222,9 +240,13 @@ def serve(
     socket_path: Path | None = None,
     allowed_uids: set[int] | None = None,
     socket_gid: int | None = None,
+    run_scheduler: bool = True,
 ) -> None:
     context = AgentContext(project_dir=project_dir.resolve())
     path = socket_path or default_socket_path(context.project_dir)
-    with AgentSocketServer(path, AgentService(context), allowed_uids, socket_gid) as server:
+    service = AgentService(context)
+    if run_scheduler:
+        backups.BackupScheduler(service).start()
+    with AgentSocketServer(path, service, allowed_uids, socket_gid) as server:
         logger.info("Control agent listening on %s", path)
         server.serve_forever()

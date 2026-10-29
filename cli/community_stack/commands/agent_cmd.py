@@ -25,6 +25,7 @@ def run_agent(args: argparse.Namespace) -> int:
             socket_path=Path(args.socket) if args.socket else None,
             allowed_uids=set(args.console_uid) if args.console_uid else None,
             socket_gid=args.console_gid,
+            run_scheduler=not getattr(args, "no_scheduler", False),
         )
     except KeyboardInterrupt:
         return 0

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Backups{% endblock %}
+{% block content %}
+<h1>Backups</h1>
+{% if outcome %}
+  {% if outcome.error %}<p class="error" role="alert"><strong>{{ outcome.title }}:</strong> {{ outcome.error }}</p>
+  {% else %}<div class="notice" role="status"><p><strong>{{ outcome.title }}</strong></p><ul>{% for step in outcome.steps %}<li>{{ step }}</li>{% endfor %}</ul></div>{% endif %}
+{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not agent_available %}
+<div class="panel">
+  <h2>The system agent is not running</h2>
+  <p>Automatic backups are made by a separate, privileged agent on the server. Ask the person who manages the server to install it (docs/operations.md, "Control agent").</p>
+</div>
+{% elif status %}
+<table>
+  <tbody>
+    <tr><th scope="row">Where backups go</th><td>{{ status.where }}</td></tr>
+    <tr><th scope="row">Automatic backups</th><td>{% if status.enabled %}{{ status.schedule|capitalize }}, each checked after it is made (<a href="/admin/services">change</a>){% else %}Turned off in the configuration{% endif %}</td></tr>
+    <tr><th scope="row">Latest backup</th><td>{{ status.latest_backup[:16]|replace("T", " ") ~ " UTC" if status.latest_backup else "None yet" }}</td></tr>
+    <tr><th scope="row">Last automatic run</th><td>{% if status.scheduler.last_result %}{{ status.scheduler.last_result }}{% if status.scheduler.last_error %}: {{ status.scheduler.last_error }}{% endif %} ({{ status.scheduler.last_attempt[:16]|replace("T", " ") }} UTC){% else %}Not run yet{% endif %}</td></tr>
+  </tbody>
+</table>
+{% if status.target == "local" %}
+<p class="error">Backups are on the same disk as the data. If the server is lost, so are the backups. Add off-site storage below.</p>
+{% endif %}
+
+<form class="card" method="post" action="/admin/backups/offsite">
+  <h2>{{ "Change off-site storage" if status.target == "s3" else "Send backups off-site" }}</h2>
+  <p>Use a private bucket at any S3-compatible provider, used only for these backups. Backups are encrypted on the server before upload, so the provider cannot read them. The server tests the bucket and makes a first backup there before switching; if anything fails, nothing changes.</p>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="endpoint">Storage address</label>
+  <input id="endpoint" name="endpoint" type="url" placeholder="https://s3.eu-central-003.backblazeb2.com" required>
+  <p class="muted">Examples: Backblaze B2 <code>https://s3.&lt;region&gt;.backblazeb2.com</code>, Scaleway <code>https://s3.fr-par.scw.cloud</code>, OVHcloud <code>https://s3.&lt;region&gt;.io.cloud.ovh.net</code>, AWS <code>https://s3.&lt;region&gt;.amazonaws.com</code>.</p>
+  <label for="bucket">Bucket name</label>
+  <input id="bucket" name="bucket" type="text" required>
+  <label for="prefix">Folder in the bucket (optional)</label>
+  <input id="prefix" name="prefix" type="text" placeholder="community-stack">
+  <label for="region">Region (only if your provider asks for one)</label>
+  <input id="region" name="region" type="text" placeholder="fr-par">
+  <label for="access-key">Access key ID</label>
+  <input id="access-key" name="access_key_id" type="text" autocomplete="off" required>
+  <label for="secret-key">Secret access key</label>
+  <input id="secret-key" name="secret_access_key" type="password" autocomplete="off" required>
+  <label for="offsite-password">Confirm with your password</label>
+  <input id="offsite-password" name="password" type="password" autocomplete="current-password" required>
+  <p><button type="submit">Test and switch to off-site backups</button></p>
+</form>
+
+{% if status.target == "s3" %}
+<form class="card" method="post" action="/admin/backups/local">
+  <h2>Use this server's disk again</h2>
+  <p>New backups go to the server's own disk. Backups already in the bucket are left there.</p>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="local-password">Confirm with your password</label>
+  <input id="local-password" name="password" type="password" autocomplete="current-password" required>
+  <p><button type="submit">Stop using off-site storage</button></p>
+</form>
+{% endif %}
+{% endif %}
+
+<section class="card">
+  <h2>Offline archive</h2>
+  <p>A single file with every published announcement, readable without internet, for USB drives or a local Wi-Fi hotspot during an outage. It contains only public announcements.</p>
+  <p><a href="/admin/backups/offline-archive.zip">Download the offline archive</a></p>
+</section>
+{% endblock %}

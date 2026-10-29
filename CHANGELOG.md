@@ -128,3 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - listmonk connector on the Channels page (address, API user and token, list IDs) with a connection test that checks the lists exist.
   - Each announcement becomes one Markdown campaign, with its image and a link to the online version, started immediately; the announcement ID in the campaign name makes retries reuse it instead of sending twice.
   - Edits send one "Update" email per revision and withdrawals one correction email.
+- **Roadmap Phase 1: Automatic and off-site backups:**
+  - The control agent runs scheduled backups (hourly, daily or weekly, now changeable on the Services page) and verifies each one; failures retry after an hour and show on the Health page.
+  - Console Backups page: where backups go, the last automatic run, a guided switch to any S3-compatible bucket (tested with a first verified backup before it takes effect, rolled back on failure), switching back to local disk, and the offline archive download.
+  - The agent's audit log redacts secret parameters such as access keys.
+  - The offline archive now contains only published announcements; it previously included drafts and scheduled announcements.

@@ -121,7 +121,30 @@ def latest_backup_time(context) -> datetime | None:
     return datetime.fromtimestamp(archives[-1].stat().st_mtime, tz=timezone.utc)
 
 
+def state_path(context):
+    return context.project_dir / "data" / "agent" / "backup-state.json"
+
+
+def read_state(context) -> dict[str, Any]:
+    """The scheduler's record of its last automatic backup."""
+    try:
+        return json.loads(state_path(context).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+SCHEDULE_HOURS = {"hourly": 1, "daily": 24, "weekly": 168}
+
+
 def backup_check(context) -> dict[str, str]:
+    state = read_state(context)
+    if state.get("last_result") == "failed":
+        return _check(
+            "Backups",
+            PROBLEM,
+            f"The last automatic backup failed: {state.get('last_error')}. "
+            "It is retried every hour.",
+        )
     try:
         latest = latest_backup_time(context)
     except BackupError as exc:
@@ -130,8 +153,15 @@ def backup_check(context) -> dict[str, str]:
         return _check("Backups", PROBLEM, "No backup exists yet.")
     hours = (datetime.now(timezone.utc) - latest).total_seconds() / 3600
     details = f"Latest backup {hours:.0f} hours ago."
-    if hours > BACKUP_WARNING_HOURS:
-        return _check("Backups", WARNING, details + " Backups are not created automatically yet.")
+    config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
+    schedule = config.get("operations", {}).get("backups", {}).get("schedule", "daily")
+    allowed = SCHEDULE_HOURS.get(schedule, 24) * 1.5 + 1
+    if hours > max(allowed, BACKUP_WARNING_HOURS if schedule == "hourly" else 0):
+        return _check(
+            "Backups",
+            WARNING,
+            details + f" That is older than the {schedule} schedule; is the agent running?",
+        )
     return _check("Backups", OK, details)
 
 

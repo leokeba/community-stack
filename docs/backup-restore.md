@@ -54,6 +54,25 @@ check` warns about it.
 offline (for example in a password manager held by two maintainers): without
 it, encrypted backups cannot be restored.
 
+### Automatic and off-site backups
+
+With the control agent running, backups happen on their own: the agent checks
+every five minutes and makes a backup when the latest one is older than the
+`schedule` (hourly, daily or weekly; changeable on the console's Services page),
+then verifies it. A failed automatic backup is retried after an hour, shown on
+the Health page, and recorded in the agent's audit log. Backups made by hand or
+by a deployment count towards the schedule.
+
+The console's **Backups** page sends encrypted backups to any S3-compatible
+bucket (for example Backblaze B2, Scaleway, OVHcloud or AWS). The agent writes
+`S3_BUCKET_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` (and `S3_REGION` when given)
+to `.env`, sets `target: "s3"` and `encryption: "restic"`, creates the restic
+repository in the bucket, and makes and verifies a first backup there. If any
+step fails, `.env` and the configuration are restored and backups stay where
+they were. Use a private bucket for these backups only; the provider only ever
+receives encrypted data. The same page can switch back to the server's own disk
+and downloads the offline archive of published announcements.
+
 ### Turning on encryption for an existing deployment
 
 1. Install restic on the host (`sudo apt install restic`; the Ansible host role

@@ -137,6 +137,8 @@ class BackupEngine:
             env["RESTIC_REPOSITORY"] = s3_url
             env["AWS_ACCESS_KEY_ID"] = setting("S3_ACCESS_KEY") or ""
             env["AWS_SECRET_ACCESS_KEY"] = setting("S3_SECRET_KEY") or ""
+            if setting("S3_REGION"):
+                env["AWS_DEFAULT_REGION"] = setting("S3_REGION")
         elif self.target == "sftp":
             if not env.get("RESTIC_REPOSITORY"):
                 raise BackupError(

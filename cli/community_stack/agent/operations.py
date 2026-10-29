@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import health
+from community_stack.agent import backups, health
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
@@ -162,6 +162,16 @@ def _changes_param(params: dict) -> dict[str, Any]:
     return {"changes": params["changes"]}
 
 
+def _backup_settings_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except backups.BackupSettingsError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
+
+
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
     return {"values": settings_catalog.current_values(config)}
@@ -224,6 +234,35 @@ CATALOG: dict[str, Operation] = {
                 Param("lines", re.compile("|".join(health.LOG_LINES))),
             ),
             summary="Read a service's recent logs, with secrets removed.",
+        ),
+        Operation(
+            "backups.status",
+            READ,
+            "system",
+            backups.backups_status,
+            summary="Where backups go, how often, and how the last automatic one went.",
+        ),
+        Operation(
+            "backups.use_offsite",
+            DANGEROUS,
+            "system",
+            _backup_settings_call(backups.use_offsite),
+            params=(
+                Param("endpoint", backups.ENDPOINT, required=True),
+                Param("bucket", backups.BUCKET, required=True),
+                Param("prefix", backups.PREFIX),
+                Param("region", backups.REGION),
+                Param("access_key_id", backups.ACCESS_KEY, required=True),
+                Param("secret_access_key", backups.SECRET_KEY, required=True),
+            ),
+            summary="Send encrypted backups to an S3-compatible bucket, after testing it.",
+        ),
+        Operation(
+            "backups.use_local",
+            DANGEROUS,
+            "system",
+            _backup_settings_call(backups.use_local),
+            summary="Send backups to the server's own disk again.",
         ),
         Operation(
             "config.get",

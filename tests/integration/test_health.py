@@ -108,7 +108,7 @@ def test_backup_age_is_checked(project):
     os.utime(archive, (three_days_ago, three_days_ago))
     check = health.backup_check(context)
     assert check["status"] == health.WARNING
-    assert "not created automatically" in check["details"]
+    assert "older than the daily schedule" in check["details"]
 
 
 def test_restic_times_with_nanoseconds_and_offsets_parse():

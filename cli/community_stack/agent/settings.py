@@ -86,6 +86,14 @@ SETTINGS: dict[str, Setting] = {
             "UTC",
         ),
         Setting(
+            "operations.backups.schedule",
+            "Automatic backups",
+            "How often the server makes and checks a backup on its own.",
+            "choice",
+            "daily",
+            choices=("hourly", "daily", "weekly"),
+        ),
+        Setting(
             "operations.backups.retention_days",
             "Keep backups for (days)",
             "Older snapshots are deleted after each new backup.",

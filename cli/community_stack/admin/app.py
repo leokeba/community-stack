@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +60,7 @@ from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
+from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
 
@@ -1170,6 +1172,82 @@ def create_app(
                 "link": "/admin/announcements/new",
             },
         ]
+
+    async def backups_page(
+        request: Request,
+        session: dict[str, Any],
+        outcome: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        status, error = None, None
+        if agent.available():
+            try:
+                status = await run_in_threadpool(agent.call, "backups.status", session["username"])
+            except (AgentUnavailable, AgentRefused) as exc:
+                error = str(exc)
+        return render(
+            request,
+            "backups.html",
+            page(
+                session,
+                agent_available=agent.available(),
+                status=status,
+                error=error,
+                outcome=outcome,
+            ),
+            status_code=status_code,
+        )
+
+    @app.get("/admin/backups")
+    async def backups(request: Request) -> Response:
+        return await backups_page(request, require(request, "system"))
+
+    async def backup_change(
+        request: Request, op: str, title: str, fields: tuple[str, ...]
+    ) -> HTMLResponse:
+        session, form = await checked_form(request, "system")
+        params = {name: form.get(name, "").strip() for name in fields if form.get(name, "").strip()}
+        try:
+            result = await run_in_threadpool(
+                agent.call, op, session["username"], params, form.get("password") or None
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(request, session["username"], f"system.{op}", outcome="failed")
+            return await backups_page(request, session, {"title": title, "error": str(exc)}, 400)
+        audit(request, session["username"], f"system.{op}", outcome="succeeded")
+        return await backups_page(request, session, {"title": title, "steps": result["steps"]})
+
+    @app.post("/admin/backups/offsite")
+    async def backups_offsite(request: Request) -> Response:
+        return await backup_change(
+            request,
+            "backups.use_offsite",
+            "Off-site backups",
+            ("endpoint", "bucket", "prefix", "region", "access_key_id", "secret_access_key"),
+        )
+
+    @app.post("/admin/backups/local")
+    async def backups_local(request: Request) -> Response:
+        return await backup_change(request, "backups.use_local", "Backups on this server", ())
+
+    @app.get("/admin/backups/offline-archive.zip")
+    async def offline_archive(request: Request) -> Response:
+        session = require(request, "system")
+        try:
+            name = load_config(config_path)["project"]["name"]
+        except (ConfigError, KeyError, OSError):
+            name = "Community"
+        with tempfile.TemporaryDirectory() as directory:
+            path = OfflineArchiveExporter(storage=storage, community_name=name).export_archive(
+                Path(directory) / "offline-announcements.zip"
+            )
+            content = path.read_bytes()
+        audit(request, session["username"], "announcements.offline_archive_downloaded")
+        return Response(
+            content,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="offline-announcements.zip"'},
+        )
 
     @app.get("/admin/health")
     async def health_page(request: Request) -> Response:

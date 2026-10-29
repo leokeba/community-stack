@@ -195,6 +195,9 @@ def create_parser() -> argparse.ArgumentParser:
     p_agent_serve.add_argument(
         "--console-gid", type=int, help="Group that owns the socket so the console can reach it"
     )
+    p_agent_serve.add_argument(
+        "--no-scheduler", action="store_true", help="Do not run scheduled backups"
+    )
 
     # bridge
     p_bridge = subparsers.add_parser("bridge", help="Manage optional WhatsApp bridge integration")

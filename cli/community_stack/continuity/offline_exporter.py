@@ -98,8 +98,12 @@ class OfflineArchiveExporter:
             target = target.with_suffix(".zip")
 
         announcements = self.storage.list_announcements(status=None, limit=200)
-        # Exclude withdrawn items from active view
-        active = [a for a in announcements if a.status != AnnouncementStatus.WITHDRAWN]
+        # Only what is public: drafts and scheduled announcements must never leak.
+        active = [
+            a
+            for a in announcements
+            if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
+        ]
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Build contents
