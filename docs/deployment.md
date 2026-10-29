@@ -13,16 +13,27 @@ services, and the control agent.
 
 ```bash
 curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/leokeba/community-stack/main/scripts/bootstrap.sh
-less bootstrap.sh            # read what it will do
-sudo bash bootstrap.sh --web-domain ourtown.org --matrix-domain matrix.ourtown.org \
-    --email admin@ourtown.org --timezone Europe/Paris
+less bootstrap.sh            # optional: read what it will do
+sudo bash bootstrap.sh example.org
 ```
 
-Add `--dry-run` to see every step without changing anything. The script can be
-run again safely: it keeps existing configuration, secrets and data. It ends by
-printing the setup address and the one-time setup token; from there, the
-console's **Get started** checklist covers the rest. Keep a copy of
-`RESTIC_PASSWORD` from `/opt/community-stack/.env` offline.
+The base domain supplies sensible defaults: the web/admin site is
+`community.example.org`, Matrix is `matrix.example.org`, the ACME contact is
+`admin@example.org`, and the scheduling time zone is UTC. Create DNS records
+for both service hostnames pointing to the server before running the script.
+For a public IPv4 address, pass the address instead; the script adds `.nip.io`
+and derives the same service hostnames automatically:
+
+```bash
+sudo bash bootstrap.sh 149.56.210.214
+```
+
+Optional `--web-domain`, `--matrix-domain`, `--email`, and `--timezone` flags
+override those defaults. Add `--dry-run` to see every step without changing
+anything. On successful installation, the script prints the one-time admin
+setup token and setup URL. It can be run again safely: it keeps existing
+configuration, secrets and data. Keep a copy of `RESTIC_PASSWORD` from
+`/opt/community-stack/.env` offline.
 
 On first install, `community-stack install` also generates what each service
 needs, without ever overwriting existing files: Synapse's `homeserver.yaml`

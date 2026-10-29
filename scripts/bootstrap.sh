@@ -2,8 +2,8 @@
 # Set up the Community Stack on a fresh Debian or Ubuntu server, ending at the
 # browser setup page. Run as root:
 #
-#   sudo bash bootstrap.sh --web-domain ourtown.org --matrix-domain matrix.ourtown.org \
-#        --email admin@ourtown.org --timezone Europe/Paris
+#   sudo bash bootstrap.sh example.org
+#   sudo bash bootstrap.sh 149.56.210.214
 #
 # Safe to run again: existing configuration, secrets and data are kept.
 set -Eeuo pipefail
@@ -12,6 +12,7 @@ REPO_URL="${REPO_URL:-https://github.com/leokeba/community-stack.git}"
 REF="${REF:-main}"
 INSTALL_DIR="/opt/community-stack"
 SERVICE_USER="community"
+base_domain=""
 web_domain=""
 matrix_domain=""
 email=""
@@ -22,11 +23,13 @@ skip_firewall=false
 
 usage() {
     cat <<'USAGE'
-Usage: sudo bash bootstrap.sh --web-domain DOMAIN --matrix-domain DOMAIN --email EMAIL [options]
+Usage: sudo bash bootstrap.sh DOMAIN_OR_IPV4 [options]
 
-  --web-domain DOMAIN     Website and admin console, e.g. ourtown.org
-  --matrix-domain DOMAIN  Matrix chat server, e.g. matrix.ourtown.org
-  --email EMAIL           Address for HTTPS certificate notices
+  DOMAIN_OR_IPV4          Base domain (example.org) or public IPv4 (149.56.210.214)
+  --domain DOMAIN         Alias for the positional base domain
+  --web-domain DOMAIN     Website and admin console (default community.BASE_DOMAIN)
+  --matrix-domain DOMAIN  Matrix chat server (default matrix.BASE_DOMAIN)
+  --email EMAIL           Address for HTTPS certificate notices (default admin@BASE_DOMAIN)
   --timezone ZONE         IANA time zone for scheduling (default UTC)
   --name NAME             Short identifier for this community (default from the domain)
   --repo URL --ref REF    Where to get the code (default REPO_URL / REF variables)
@@ -38,6 +41,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --domain|--base-domain) base_domain="${2:-}"; shift 2 ;;
         --web-domain) web_domain="${2:-}"; shift 2 ;;
         --matrix-domain) matrix_domain="${2:-}"; shift 2 ;;
         --email) email="${2:-}"; shift 2 ;;
@@ -49,7 +53,17 @@ while [[ $# -gt 0 ]]; do
         --skip-firewall) skip_firewall=true; shift ;;
         --dry-run) dry_run=true; shift ;;
         -h|--help) usage; exit 0 ;;
-        *) printf 'Unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+        -* ) printf 'Unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+        *)
+            if [[ -z "$base_domain" ]]; then
+                base_domain="$1"
+                shift
+            else
+                printf 'Unexpected argument: %s\n\n' "$1" >&2
+                usage >&2
+                exit 2
+            fi
+            ;;
     esac
 done
 
@@ -65,7 +79,23 @@ run() {
 as_service_user() { run runuser -u "$SERVICE_USER" -- "$@"; }
 
 domain_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
-[[ -n "$web_domain" && -n "$matrix_domain" && -n "$email" ]] || { usage >&2; exit 2; }
+if [[ -z "$base_domain" ]]; then
+    base_domain="$web_domain"
+fi
+[[ -n "$base_domain" ]] || { usage >&2; exit 2; }
+base_domain="$(printf '%s' "$base_domain" | tr '[:upper:]' '[:lower:]')"
+if [[ "$base_domain" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    IFS=. read -r -a ipv4_octets <<<"$base_domain"
+    for octet in "${ipv4_octets[@]}"; do
+        ((10#$octet <= 255)) || fail "IPv4 address octets must be between 0 and 255."
+    done
+    base_domain="${base_domain}.nip.io"
+fi
+[[ "$base_domain" =~ $domain_re ]] \
+    || fail "Use a base domain such as example.org or a public IPv4 address."
+web_domain="${web_domain:-community.${base_domain}}"
+matrix_domain="${matrix_domain:-matrix.${base_domain}}"
+email="${email:-admin@${base_domain}}"
 [[ "$web_domain" =~ $domain_re && "$matrix_domain" =~ $domain_re ]] \
     || fail "Domains must be lowercase names such as ourtown.org."
 [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || fail "That email address does not look right."
@@ -137,14 +167,16 @@ as_service_user "$INSTALL_DIR/.venv/bin/pip" install --quiet -e "$INSTALL_DIR"
 
 say "Writing the configuration and generating secrets"
 setup_token_flag=()
-if ! grep -q '^COMMUNITY_STACK_ADMIN_SETUP_TOKEN=' "$INSTALL_DIR/.env" 2>/dev/null; then
+existing_token="$(sed -n 's/^COMMUNITY_STACK_ADMIN_SETUP_TOKEN=//p' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+if [[ -z "$existing_token" ]]; then
     setup_token_flag=(--setup-token)
 fi
 as_service_user "$INSTALL_DIR/.venv/bin/community-stack" init --dir "$INSTALL_DIR" \
-    --project-name "$project_name" --base-domain "$web_domain" \
+    --project-name "$project_name" --base-domain "$base_domain" \
     --web-domain "$web_domain" --matrix-domain "$matrix_domain" \
     --timezone "$timezone" --acme-email "$email" \
-    --console-uid "$uid" --console-gid "$gid" "${setup_token_flag[@]}"
+    --console-uid "$uid" --console-gid "$gid" "${setup_token_flag[@]}" \
+    | sed -E 's/(First-administrator setup token \(also in \.env\): ).*/\1[shown after successful installation]/'
 
 if ! $skip_firewall; then
     say "Opening only SSH, HTTP and HTTPS in the firewall"
@@ -174,14 +206,29 @@ fi
 run systemctl daemon-reload
 run systemctl enable --now community-stack-agent
 
-token="$(sed -n 's/^COMMUNITY_STACK_ADMIN_SETUP_TOKEN=//p' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+if $dry_run; then
+    token=""
+else
+    token="$(sed -n 's/^COMMUNITY_STACK_ADMIN_SETUP_TOKEN=//p' "$INSTALL_DIR/.env" 2>/dev/null || true)"
+    if [[ ${#setup_token_flag[@]} -gt 0 && -z "$token" ]]; then
+        fail "The administrator setup token was not written to $INSTALL_DIR/.env."
+    fi
+fi
 cat <<DONE
 
 The Community Stack is installed.
 
   1. Open https://${web_domain}/admin/setup
      (HTTPS can take a minute after DNS points here.)
-  2. Enter this setup token: ${token:-"(see COMMUNITY_STACK_ADMIN_SETUP_TOKEN in ${INSTALL_DIR}/.env)"}
+DONE
+if $dry_run; then
+    printf '  2. Admin setup token: not generated by --dry-run\n'
+elif [[ -n "$token" ]]; then
+    printf '  2. ADMIN_SETUP_TOKEN: %s\n' "$token"
+else
+    printf '  2. Admin setup token: not configured (an existing installation may already be initialized)\n'
+fi
+cat <<DONE
   3. Create the first owner account, then follow the "Get started" checklist.
 
 Keep a copy of RESTIC_PASSWORD from ${INSTALL_DIR}/.env somewhere safe and
