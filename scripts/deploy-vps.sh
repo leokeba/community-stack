@@ -70,7 +70,7 @@ test -f "$project_dir/community-stack.yaml"
 test -f "$project_dir/.env"
 test -x "$project_dir/.venv/bin/community-stack"
 sudo -n true
-docker info >/dev/null
+sudo -n docker info >/dev/null
 REMOTE
 
 printf 'Creating and verifying a restrictive pre-deployment backup...\n'
@@ -112,12 +112,13 @@ else
 fi
 .venv/bin/community-stack --help >/dev/null
 
-compose_app=(docker compose --env-file .env -f services/announcements/docker-compose.yml)
-compose_proxy=(docker compose --env-file .env -f services/proxy/docker-compose.yml)
+docker_cmd=(sudo -n docker)
+compose_app=("${docker_cmd[@]}" compose --env-file .env -f services/announcements/docker-compose.yml)
+compose_proxy=("${docker_cmd[@]}" compose --env-file .env -f services/proxy/docker-compose.yml)
 rollback_tag="community-stack-announcements:rollback-$deploy_id"
-old_image="$(docker image inspect community-stack-announcements:0.1.0 --format '{{.Id}}' 2>/dev/null || true)"
+old_image="$("${docker_cmd[@]}" image inspect community-stack-announcements:0.1.0 --format '{{.Id}}' 2>/dev/null || true)"
 if [ -n "$old_image" ]; then
-    docker image tag "$old_image" "$rollback_tag"
+    "${docker_cmd[@]}" image tag "$old_image" "$rollback_tag"
 else
     rollback_tag="unavailable"
 fi
@@ -128,12 +129,12 @@ fi
 
 healthy=false
 for attempt in $(seq 1 36); do
-    status="$(docker inspect community_announcements --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)"
+    status="$("${docker_cmd[@]}" inspect community_announcements --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)"
     if [ "$status" = healthy ]; then
         healthy=true
         break
     fi
-    state="$(docker inspect community_announcements --format '{{.State.Status}}' 2>/dev/null || echo missing)"
+    state="$("${docker_cmd[@]}" inspect community_announcements --format '{{.State.Status}}' 2>/dev/null || echo missing)"
     if [ "$state" = exited ] || [ "$state" = dead ]; then
         break
     fi
@@ -141,9 +142,9 @@ for attempt in $(seq 1 36); do
 done
 
 if [ "$healthy" != true ]; then
-    docker logs --tail 80 community_announcements || true
+    "${docker_cmd[@]}" logs --tail 80 community_announcements || true
     if [ -n "$old_image" ]; then
-        docker image tag "$rollback_tag" community-stack-announcements:0.1.0
+        "${docker_cmd[@]}" image tag "$rollback_tag" community-stack-announcements:0.1.0
         "${compose_app[@]}" up -d --force-recreate --no-build announcements
     fi
     echo "Announcements health check failed; the prior image was restored when available." >&2
@@ -181,7 +182,7 @@ if missing:
 PY
 
 caddy_backup="backups/Caddyfile.before-$deploy_id"
-if ! docker exec community_proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+if ! "${docker_cmd[@]}" exec community_proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
     install -m 0644 "$caddy_backup" services/proxy/Caddyfile
     exit 1
 fi
@@ -191,8 +192,8 @@ if ! "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy; then
     exit 1
 fi
 
-docker inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
-docker inspect community_proxy --format '{{.State.Status}}' | grep -qx running
+"${docker_cmd[@]}" inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
+"${docker_cmd[@]}" inspect community_proxy --format '{{.State.Status}}' | grep -qx running
 # Pick up new agent code if the control agent is installed; does nothing otherwise.
 sudo -n systemctl try-restart community-stack-agent.service 2>/dev/null || true
 printf 'Deployment healthy. Prior image tag: %s\n' "${rollback_tag:-unavailable}"
