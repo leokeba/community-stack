@@ -1,6 +1,5 @@
 """Integration tests validating Docker Compose services, pinning, and network isolation."""
 
-import json
 from pathlib import Path
 
 import yaml
@@ -114,10 +113,10 @@ def test_caddyfile_exists_and_contains_routes():
     assert "reverse_proxy community_announcements:8080" in content
 
 
-def test_element_config_is_valid_json():
-    element_cfg = Path("services/element/config.json")
-    assert element_cfg.is_file()
-    with open(element_cfg, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    assert "default_server_config" in data
-    assert "brand" in data
+def test_element_uses_the_generated_config_and_caddy_gets_domains():
+    with open("services/element/docker-compose.yml", "r", encoding="utf-8") as stream:
+        element = yaml.safe_load(stream)["services"]["element"]
+    assert "../../data/element/config.json:/app/config.json:ro" in element["volumes"]
+    with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
+        caddy = yaml.safe_load(stream)["services"]["caddy"]
+    assert set(caddy["environment"]) == {"WEB_DOMAIN", "MATRIX_DOMAIN", "ACME_EMAIL"}

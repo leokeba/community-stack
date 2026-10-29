@@ -17,6 +17,7 @@ from community_stack import docker
 from community_stack.backup import BackupError
 from community_stack.config import validate_config
 from community_stack.config_edit import get_value, set_value, write_in_place
+from community_stack.provision import ProvisionError, prepare_service
 from community_stack.secrets import parse_env_file
 
 HEALTH_TIMEOUT_SECONDS = 180
@@ -260,6 +261,11 @@ def wait_for(context, service: str, running: bool) -> None:
 
 def set_service(context, service: str, running: bool) -> None:
     if running:
+        try:
+            config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
+            prepare_service(context.project_dir, service, config, context.env_path)
+        except ProvisionError as exc:
+            raise SettingsError(str(exc)) from exc
         docker.ensure_network("proxy_net")
         args = ["up", "-d", "--remove-orphans"]
     else:

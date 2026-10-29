@@ -2,6 +2,38 @@
 
 This guide details how to deploy the Community Communications Stack onto a clean Linux server (Debian 12 / Ubuntu 22.04 LTS).
 
+## Quick install on a fresh server
+
+On a new Debian 12/13 or Ubuntu 22.04/24.04 server whose DNS records already
+point to it (section 1), one script does everything up to the browser setup
+page: system packages, Docker, a `community` service account, the code in
+`/opt/community-stack`, configuration and generated secrets, the firewall
+(SSH, HTTP and HTTPS only; every port sshd listens on stays open), the
+services, and the control agent.
+
+```bash
+curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/leokeba/community-stack/main/scripts/bootstrap.sh
+less bootstrap.sh            # read what it will do
+sudo bash bootstrap.sh --web-domain ourtown.org --matrix-domain matrix.ourtown.org \
+    --email admin@ourtown.org --timezone Europe/Paris
+```
+
+Add `--dry-run` to see every step without changing anything. The script can be
+run again safely: it keeps existing configuration, secrets and data. It ends by
+printing the setup address and the one-time setup token; from there, the
+console's **Get started** checklist covers the rest. Keep a copy of
+`RESTIC_PASSWORD` from `/opt/community-stack/.env` offline.
+
+On first install, `community-stack install` also generates what each service
+needs, without ever overwriting existing files: Synapse's `homeserver.yaml`
+(PostgreSQL, the configured domain, registration and federation settings),
+its signing key and log configuration in `data/matrix`, owned by Synapse's
+UID 991, and Element's `data/element/config.json` pointing at this
+homeserver. Caddy receives `WEB_DOMAIN`, `MATRIX_DOMAIN` and `ACME_EMAIL` from
+`.env`.
+
+The rest of this guide describes the same steps by hand.
+
 ---
 
 ## 1. Prerequisites

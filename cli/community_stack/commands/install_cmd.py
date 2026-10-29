@@ -6,6 +6,7 @@ from pathlib import Path
 
 from community_stack import docker
 from community_stack.config import ConfigError, load_config
+from community_stack.provision import ProvisionError, prepare_service
 from community_stack.validator import run_checks
 
 
@@ -90,6 +91,19 @@ def run_install(
             continue
 
         print(f"\n--- Deploying {svc} ({svc_dir.name}) ---")
+        try:
+            prepared = prepare_service(
+                Path(config_path).resolve().parent,
+                svc,
+                config,
+                Path(env_path).resolve(),
+                services_root,
+            )
+        except ProvisionError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        if prepared:
+            print(f"  {prepared}")
         res = docker.run_compose(
             project_dir=svc_dir,
             args=["up", "-d", "--remove-orphans"],

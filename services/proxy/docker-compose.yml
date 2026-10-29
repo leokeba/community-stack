@@ -6,6 +6,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Read by the Caddyfile's {$WEB_DOMAIN}, {$MATRIX_DOMAIN} and {$ACME_EMAIL}.
+      WEB_DOMAIN: ${WEB_DOMAIN:-community.example.org}
+      MATRIX_DOMAIN: ${MATRIX_DOMAIN:-matrix.example.org}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.org}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../../data/caddy/data:/data

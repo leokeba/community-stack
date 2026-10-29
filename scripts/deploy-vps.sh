@@ -104,7 +104,12 @@ cd "$project_dir"
 # The host CLI and the control agent run from this editable install; keep its
 # dependencies in step with the code that was just copied.
 uv_bin="$(command -v uv || echo "$HOME/.local/bin/uv")"
-"$uv_bin" sync --frozen --no-dev --quiet
+if [ -x "$uv_bin" ]; then
+    "$uv_bin" sync --frozen --no-dev --quiet
+else
+    # Servers set up with scripts/bootstrap.sh use pip.
+    .venv/bin/pip install --quiet -e .
+fi
 .venv/bin/community-stack --help >/dev/null
 
 compose_app=(docker compose --env-file .env -f services/announcements/docker-compose.yml)

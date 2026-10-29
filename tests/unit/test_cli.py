@@ -127,6 +127,11 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(docker, "ensure_network", lambda net="proxy_net": True)
     monkeypatch.setattr(
         docker,
+        "run_container",
+        lambda args: subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        docker,
         "run_compose",
         lambda project_dir, args, env_file=None, capture_output=False: subprocess.CompletedProcess(
             args=["docker", "compose"], returncode=0, stdout="mock success", stderr=""

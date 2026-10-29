@@ -45,6 +45,17 @@ def create_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Overwrite existing configuration and secrets"
     )
     p_init.add_argument("--example", action="store_true", help="Use repository example config")
+    p_init.add_argument("--project-name", help="Short identifier, e.g. ourtown")
+    p_init.add_argument("--base-domain", help="Community's main domain, e.g. ourtown.org")
+    p_init.add_argument("--web-domain", help="Domain for the website and console")
+    p_init.add_argument("--matrix-domain", help="Domain for the Matrix chat server")
+    p_init.add_argument("--timezone", help="IANA time zone, e.g. Europe/Paris")
+    p_init.add_argument("--acme-email", help="Email for HTTPS certificate notices")
+    p_init.add_argument("--console-uid", type=int, help="User ID the console container runs as")
+    p_init.add_argument("--console-gid", type=int, help="Group ID the console container runs as")
+    p_init.add_argument(
+        "--setup-token", action="store_true", help="Generate a first-administrator setup token"
+    )
 
     # check
     p_check = subparsers.add_parser(
@@ -284,7 +295,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "init":
-        return run_init(dest_dir=args.dir, force=args.force, example=args.example)
+        return run_init(
+            dest_dir=args.dir,
+            force=args.force,
+            example=args.example,
+            project_name=args.project_name,
+            base_domain=args.base_domain,
+            web_domain=args.web_domain,
+            matrix_domain=args.matrix_domain,
+            timezone=args.timezone,
+            acme_email=args.acme_email,
+            console_uid=args.console_uid,
+            console_gid=args.console_gid,
+            setup_token=args.setup_token,
+        )
     elif args.command == "check":
         return run_check(config_path=args.config, env_path=args.env, skip_dns=args.skip_dns)
     elif args.command == "plan":

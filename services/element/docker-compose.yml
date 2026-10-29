@@ -4,7 +4,8 @@ services:
     container_name: community_element
     restart: unless-stopped
     volumes:
-      - ./config.json:/app/config.json:ro
+      # Generated from community-stack.yaml at install (community_stack.provision).
+      - ../../data/element/config.json:/app/config.json:ro
     networks:
       - proxy_net
     healthcheck:

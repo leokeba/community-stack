@@ -72,6 +72,11 @@ def run_compose(
     )
 
 
+def run_container(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a one-off `docker run` and capture its output."""
+    return subprocess.run(["docker", "run", *args], capture_output=True, text=True, check=False)
+
+
 def ensure_network(network_name: str = "proxy_net") -> bool:
     """Ensure that an external Docker network exists."""
     if not is_docker_available():

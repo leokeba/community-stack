@@ -137,3 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optional TOTP two-step login with QR-code setup (password required to start), ten single-use hashed recovery codes, replay protection, and a code step limited to five attempts in five minutes.
   - Owners and admins can turn off two-step login for an account that lost its phone; the Get started checklist asks every owner and admin to turn it on.
   - `community-stack admin list | reset-password | reset-two-step` recovers accounts from the server when nobody can log in; it refuses to run as root against a user-owned database.
+- **Roadmap Phase 1: Fresh-server bootstrap:**
+  - `scripts/bootstrap.sh` takes a fresh Debian or Ubuntu server to the browser setup page: packages, Docker, a service account, the code, configuration and secrets, a firewall that keeps SSH open, the services, and the control agent; `--dry-run` shows every step and re-runs keep existing data.
+  - `community-stack init` gains `--project-name`, domain, `--timezone`, `--acme-email`, `--console-uid/--console-gid` and `--setup-token` options, and creates the announcements and feed data directories.
+  - `install`, `upgrade` and the agent generate Synapse's configuration (PostgreSQL, signing key, ownership) and Element's configuration on first start, never overwriting existing files; the generated Synapse configuration is checked by an opt-in test that boots real Synapse and PostgreSQL containers.
+  - Element now reads `data/element/config.json` generated for this homeserver; it previously pointed at `http://localhost`. Caddy receives the domains and ACME email from `.env`.
+  - Deploys fall back to pip on servers without uv.

@@ -7,6 +7,8 @@ from pathlib import Path
 from community_stack import docker
 from community_stack.backup import BackupEngine, BackupError
 from community_stack.commands.logs_cmd import SERVICE_DIR_MAP, get_services_root
+from community_stack.config import load_config
+from community_stack.provision import ProvisionError, prepare_service
 
 
 def run_upgrade(
@@ -56,6 +58,18 @@ def run_upgrade(
         pull_res = docker.run_compose(project_dir=svc_dir, args=["pull"], env_file=env_p)
         if pull_res.returncode != 0:
             print(f"[WARN] 'docker compose pull' exited with {pull_res.returncode}.")
+
+    try:
+        prepare_service(
+            Path(config_path).resolve().parent,
+            dir_name,
+            load_config(config_path),
+            Path(env_path).resolve(),
+            services_root,
+        )
+    except ProvisionError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
 
     # Step 3: Recreate container with new image
     print(f"[3/3] Recreating and restarting {service}...")
