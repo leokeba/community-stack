@@ -111,15 +111,12 @@ def test_caddyfile_exists_and_contains_routes():
     assert caddyfile.is_file()
     content = caddyfile.read_text(encoding="utf-8")
     assert "handle_path /app*" in content
-    assert (
-        "@element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json"
-        in content
-    )
-    assert content.count("handle @element_assets") == 2
     assert "handle /.well-known/matrix/client" in content
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content
     assert "reverse_proxy community_announcements:8080" in content
+    landing = Path("services/landing/html/index.html").read_text(encoding="utf-8")
+    assert 'href="/app/"' in landing
 
 
 def test_element_uses_the_generated_config_and_caddy_gets_domains():

@@ -71,6 +71,8 @@ test -f "$project_dir/.env"
 test -x "$project_dir/.venv/bin/community-stack"
 sudo -n true
 sudo -n docker info >/dev/null
+sudo -n -u community test -w "$project_dir"
+sudo -n -u community test -w "$project_dir/.venv"
 REMOTE
 
 printf 'Creating and verifying a restrictive pre-deployment backup...\n'
@@ -81,12 +83,22 @@ sudo -n env PYTHONDONTWRITEBYTECODE=1 sh -c "umask 077; cd '$project_dir' && .ve
 sudo -n env PYTHONDONTWRITEBYTECODE=1 sh -c "cd '$project_dir' && .venv/bin/community-stack backup verify"
 REMOTE
 
+printf 'Checking the remote rsync prerequisite...\n'
+ssh "${ssh_opts[@]}" "$target" bash -s <<'REMOTE'
+set -eu
+if ! command -v rsync >/dev/null 2>&1; then
+    sudo -n apt-get update -q
+    sudo -n apt-get install -y -q rsync
+fi
+REMOTE
+
 stage="$(mktemp -d "${TMPDIR:-/tmp}/community-stack-deploy.XXXXXX")"
 trap 'rm -rf -- "$stage"' EXIT
 git archive --format=tar "$commit" | tar -xf - -C "$stage"
 
 printf 'Transferring committed source while preserving production config and data...\n'
 rsync -a -e "ssh ${ssh_opts[*]}" \
+    --rsync-path='sudo -n -u community rsync' \
     --exclude='/.env' \
     --exclude='/community-stack.yaml' \
     --exclude='/data/***' \
@@ -104,13 +116,13 @@ cd "$project_dir"
 # The host CLI and the control agent run from this editable install; keep its
 # dependencies in step with the code that was just copied.
 uv_bin="$(command -v uv || echo "$HOME/.local/bin/uv")"
-if [ -x "$uv_bin" ]; then
-    "$uv_bin" sync --frozen --no-dev --quiet
+if [ -x "$uv_bin" ] && sudo -n -u community test -x "$uv_bin"; then
+    sudo -n -u community "$uv_bin" sync --frozen --no-dev --quiet
 else
     # Servers set up with scripts/bootstrap.sh use pip.
-    .venv/bin/pip install --quiet -e .
+    sudo -n -u community .venv/bin/pip install --quiet -e .
 fi
-.venv/bin/community-stack --help >/dev/null
+sudo -n -u community .venv/bin/community-stack --help >/dev/null
 
 docker_cmd=(sudo -n docker)
 compose_app=("${docker_cmd[@]}" compose --env-file .env -f services/announcements/docker-compose.yml)
@@ -151,7 +163,7 @@ if [ "$healthy" != true ]; then
     exit 1
 fi
 
-python3 - "$deploy_id" <<'PY'
+sudo -n -u community python3 - "$deploy_id" <<'PY'
 from pathlib import Path
 import shutil
 import sys
@@ -163,8 +175,6 @@ routes = [
     "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n"
     "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
     "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
-    "    @element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json\n"
-    "    handle @element_assets {\n        reverse_proxy community_element:80\n    }\n\n",
 ]
 backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
 backup.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +185,7 @@ backup.chmod(0o600)
 missing = [route for route in routes if route not in text]
 if missing:
     anchor = "    handle /feed* {\n        reverse_proxy community_landing:80\n    }\n"
-    if text.count(anchor) < 1:
+    if text.count(anchor) != 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
     path.write_text(text.replace(anchor, "".join(missing) + anchor), encoding="utf-8")
     path.chmod(0o644)
@@ -183,11 +193,11 @@ PY
 
 caddy_backup="backups/Caddyfile.before-$deploy_id"
 if ! "${docker_cmd[@]}" exec community_proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
-    install -m 0644 "$caddy_backup" services/proxy/Caddyfile
+    sudo -n -u community install -m 0644 "$caddy_backup" services/proxy/Caddyfile
     exit 1
 fi
 if ! "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy; then
-    install -m 0644 "$caddy_backup" services/proxy/Caddyfile
+    sudo -n -u community install -m 0644 "$caddy_backup" services/proxy/Caddyfile
     "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy || true
     exit 1
 fi

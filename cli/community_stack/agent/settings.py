@@ -114,7 +114,7 @@ SETTINGS: dict[str, Setting] = {
         Setting(
             "services.element.enabled",
             "Element web chat",
-            "The browser chat app at /app. Turning it off does not affect Matrix itself.",
+            "The browser chat app at /app/. Turning it off does not affect Matrix itself.",
             "bool",
             True,
             service="element",

@@ -158,7 +158,7 @@ done
 say "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 run apt-get update -q
-run apt-get install -y -q ca-certificates curl gnupg git python3 python3-venv restic ufw
+run apt-get install -y -q ca-certificates curl gnupg git python3 python3-venv restic rsync ufw
 
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
     say "Installing Docker from Docker's own repository"
