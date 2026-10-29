@@ -171,3 +171,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Mirroring page to follow chosen Matrix rooms with the announcements account: whose messages count (moderators or everyone), publish directly or create drafts for review, and which channels receive them.
   - New messages become announcements, Matrix edits update them and deletions withdraw them; history is never imported, the account's own posts are ignored, and each room is limited to ten announcements an hour.
   - Announcements can now target a subset of channels, and edits and withdrawals only go to channels that received the announcement.
+- **Synapse 1.163.2:**
+  - Pinned Synapse moves from 1.119.0 to 1.163.2 (security fixes, including the Pillow fix in 1.163.2). Upgrades from 1.119 were tested on SQLite, as production uses, and on the stack's generated PostgreSQL configuration: Synapse migrated and existing users could log in. Fresh installs boot healthy on the new version.
+  - After deploying, update Matrix from the console's Services page; it takes a safety backup first. If a Synapse update fails after migrating its database, the console names the backup to restore.

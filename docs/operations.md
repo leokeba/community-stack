@@ -270,7 +270,10 @@ and an **Update** button per service. Updating takes a safety backup, pulls the
 pinned images, restarts the service and waits for it to become healthy; if it
 does not, the previous images are started again. Only the pinned versions can
 be installed this way, and a PostgreSQL major-version change is refused
-because it needs a database migration from the command line. The announcements
+because it needs a database migration from the command line. Synapse migrates
+its database when a new version first starts and older versions refuse to run
+on it, so if a Synapse update fails after starting, the page names the safety
+backup to restore instead of restarting the old version. The announcements
 service itself is updated by deploying a new release.
 
 ### Control agent

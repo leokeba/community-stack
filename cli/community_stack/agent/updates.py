@@ -106,12 +106,14 @@ def update(context, params: dict[str, Any]) -> dict[str, Any]:
         raise UpdateError(blocked[0])
 
     steps = []
+    snapshot_id = None
     engine = context.backup_engine()
     if engine.backups_cfg.get("enabled", True):
         try:
             snapshot = engine.create_snapshot()
         except BackupError as exc:
             raise UpdateError(f"The safety backup failed, so nothing was updated: {exc}") from exc
+        snapshot_id = snapshot.id
         steps.append(f"Safety backup {snapshot.id} created.")
 
     previous = {
@@ -135,7 +137,14 @@ def update(context, params: dict[str, Any]) -> dict[str, Any]:
             service_control.set_service(context, service, True)
             restored = "The previous version was restored."
         except service_control.SettingsError:
-            restored = "The previous version could not be restarted; check the Health page."
+            # Synapse upgrades its database on first start, and older versions refuse to
+            # run on it; then only the safety backup brings the old version back.
+            restored = "The previous version could not be restarted"
+            restored += (
+                f"; restore safety backup {snapshot_id} (docs/backup-restore.md)."
+                if snapshot_id
+                else "; check the Health page."
+            )
         raise UpdateError(f"{exc} {restored}") from exc
     steps.append(f"{service} is running the new version and is healthy.")
     return {"steps": steps}

@@ -19,7 +19,7 @@ services:
       retries: 5
 
   synapse:
-    image: matrixdotorg/synapse:v1.119.0
+    image: matrixdotorg/synapse:v1.163.2
     container_name: community_synapse
     restart: unless-stopped
     environment:
