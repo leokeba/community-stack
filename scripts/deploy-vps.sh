@@ -50,6 +50,9 @@ fi
 commit="$(git rev-parse --verify HEAD)"
 deploy_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 target="${vps_user}@${vps_host}"
+# Fail within about a minute if the connection dies (for example when the laptop
+# sleeps) instead of hanging forever.
+ssh_opts=(-o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
 printf 'Running local tests and deployment configuration checks...\n'
 uv run pytest -q
@@ -59,7 +62,7 @@ docker compose -f services/announcements/docker-compose.yml config --quiet
 docker compose -f services/proxy/docker-compose.yml config --quiet
 
 printf 'Checking SSH, backup, and Docker prerequisites on %s...\n' "$target"
-ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" bash -s -- "$remote_dir" <<'REMOTE'
+ssh "${ssh_opts[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$target" bash -s -- "$remote_dir" <<'REMOTE'
 set -eu
 project_dir=$1
 test -d "$project_dir"
@@ -71,7 +74,7 @@ docker info >/dev/null
 REMOTE
 
 printf 'Creating and verifying a restrictive pre-deployment backup...\n'
-ssh "$target" bash -s -- "$remote_dir" <<'REMOTE'
+ssh "${ssh_opts[@]}" "$target" bash -s -- "$remote_dir" <<'REMOTE'
 set -eu
 project_dir=$1
 sudo -n env PYTHONDONTWRITEBYTECODE=1 sh -c "umask 077; cd '$project_dir' && .venv/bin/community-stack backup create"
@@ -83,7 +86,7 @@ trap 'rm -rf -- "$stage"' EXIT
 git archive --format=tar "$commit" | tar -xf - -C "$stage"
 
 printf 'Transferring committed source while preserving production config and data...\n'
-rsync -a \
+rsync -a -e "ssh ${ssh_opts[*]}" \
     --exclude='/.env' \
     --exclude='/community-stack.yaml' \
     --exclude='/data/***' \
@@ -92,7 +95,7 @@ rsync -a \
     "$stage/" "$target:$remote_dir/"
 
 printf 'Building and checking the announcements service on the VPS...\n'
-ssh "$target" bash -s -- "$remote_dir" "$deploy_id" <<'REMOTE'
+ssh "${ssh_opts[@]}" "$target" bash -s -- "$remote_dir" "$deploy_id" <<'REMOTE'
 set -eu
 project_dir=$1
 deploy_id=$2
