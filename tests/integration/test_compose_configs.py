@@ -111,6 +111,11 @@ def test_caddyfile_exists_and_contains_routes():
     assert caddyfile.is_file()
     content = caddyfile.read_text(encoding="utf-8")
     assert "handle_path /app*" in content
+    assert (
+        "@element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json"
+        in content
+    )
+    assert content.count("handle @element_assets") == 2
     assert "handle /.well-known/matrix/client" in content
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content

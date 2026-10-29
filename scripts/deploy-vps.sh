@@ -162,6 +162,8 @@ routes = [
     "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n"
     "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
     "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
+    "    @element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json\n"
+    "    handle @element_assets {\n        reverse_proxy community_element:80\n    }\n\n",
 ]
 backup = Path(f"backups/Caddyfile.before-{sys.argv[1]}")
 backup.parent.mkdir(parents=True, exist_ok=True)
@@ -172,7 +174,7 @@ backup.chmod(0o600)
 missing = [route for route in routes if route not in text]
 if missing:
     anchor = "    handle /feed* {\n        reverse_proxy community_landing:80\n    }\n"
-    if text.count(anchor) != 1:
+    if text.count(anchor) < 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
     path.write_text(text.replace(anchor, "".join(missing) + anchor), encoding="utf-8")
     path.chmod(0o644)

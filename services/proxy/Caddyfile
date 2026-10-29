@@ -17,6 +17,12 @@
         reverse_proxy community_element:80
     }
 
+    # Element requests these assets from the host root even when opened at /app.
+    @element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json
+    handle @element_assets {
+        reverse_proxy community_element:80
+    }
+
     # Authenticated announcement publishing interface
     handle /admin* {
         reverse_proxy community_announcements:8080
@@ -89,6 +95,11 @@ http://localhost, http://127.0.0.1 {
 
     # Element Web Matrix Client
     handle_path /app* {
+        reverse_proxy community_element:80
+    }
+
+    @element_assets path /bundles/* /fonts/* /img/* /media/* /vector-icons/* /manifest.json /config.json
+    handle @element_assets {
         reverse_proxy community_element:80
     }
 

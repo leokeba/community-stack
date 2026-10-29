@@ -31,7 +31,8 @@ the services, and the control agent.
 
 The base domain supplies sensible defaults: the web/admin site is
 `community.example.org`, Matrix is `matrix.example.org`, the ACME contact is
-`admin@example.org`, and the scheduling time zone is UTC. Create DNS records
+`admin@example.org`, and the scheduling time zone is UTC. The Element Web
+client is available at `https://community.example.org/app`. Create DNS records
 for both service hostnames pointing to the server before running the script.
 For a public IPv4 address, pass the address instead; the script adds `.nip.io`
 and derives the same service hostnames automatically:
