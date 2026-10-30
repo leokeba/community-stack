@@ -1,229 +1,275 @@
 {% extends "base.html" %}
 {% block title %}{{ announcement.title }}{% endblock %}
 {% block content %}
-<p><a href="/admin/announcements">&larr; Announcements</a></p>
-<h1>{{ announcement.title }}</h1>
-<p class="muted">Status: <strong>{{ announcement.status.value }}</strong> · {{ announcement.published_at[:10] }}</p>
-<article>
-  {% if announcement.author %}<p><strong>By {{ announcement.author }}</strong></p>{% endif %}
-  {% if announcement.image %}
-  <figure>
-    <img src="/admin/media/{{ announcement.image.id }}" alt="{{ announcement.image.alt }}" width="{{ announcement.image.width }}" height="{{ announcement.image.height }}" style="max-width:100%;height:auto">
-    <figcaption class="muted">Description: {{ announcement.image.alt }}</figcaption>
-  </figure>
-  {% endif %}
-  <div>{{ body_html }}</div>
-</article>
 {% set status = announcement.status.value %}
-{% if perms.edit and (status == "draft" or (status == "scheduled" and not review_required)) %}
-<section class="card" aria-labelledby="image-heading">
-  <h2 id="image-heading">Image</h2>
-  {% if announcement.image %}
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/image/alt">
+<a class="back-link" href="/admin/announcements">&larr; Announcements</a>
+<div class="page-heading">
+  <div>
+    <h1>{{ announcement.title }}</h1>
+    <p class="muted">{{ badge(announcement.status) }}{% if announcement.author %} · {{ announcement.author }}{% endif %}</p>
+  </div>
+  {% if perms.edit and status != "withdrawn" %}<a class="button-link" href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a>{% endif %}
+</div>
+
+<div class="detail-layout">
+<div class="detail-main">
+  <article>
+    {% if announcement.image %}
+    <figure>
+      <img src="/admin/media/{{ announcement.image.id }}" alt="{{ announcement.image.alt }}" width="{{ announcement.image.width }}" height="{{ announcement.image.height }}">
+      <figcaption class="muted">Description: {{ announcement.image.alt }}</figcaption>
+    </figure>
+    {% endif %}
+    <div>{{ body_html }}</div>
+  </article>
+
+  {% if perms.edit and (status == "draft" or (status == "scheduled" and not review_required)) %}
+  <details class="card" {% if not announcement.image %}open{% endif %}>
+    <summary>Image</summary>
+    {% if announcement.image %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/image/alt">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="image-alt">Description for people who cannot see the image</label>
+      <textarea id="image-alt" name="alt" maxlength="1000" rows="2" required>{{ announcement.image.alt }}</textarea>
+      <p class="actions">
+        <button type="submit" class="secondary">Save description</button>
+        <button type="submit" class="secondary danger" form="remove-image">Remove image</button>
+      </p>
+    </form>
+    <form id="remove-image" method="post" action="/admin/announcements/{{ announcement.id }}/image/remove" data-confirm="Remove the image from this announcement?" data-confirm-label="Remove image">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    </form>
+    {% endif %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/image" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="image-file">{{ "Replace the image" if announcement.image else "Add an image" }} (JPEG, PNG, WebP or GIF, up to 10 MB)</label>
+      <input id="image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required>
+      <label for="new-image-alt">Description for people who cannot see the image</label>
+      <textarea id="new-image-alt" name="alt" maxlength="1000" rows="2" required></textarea>
+      <p class="muted">Location and camera details are removed from the file, and large images are resized.</p>
+      <p><button type="submit" class="secondary">Upload image</button></p>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if checks and status != "withdrawn" %}
+  <h2>Channels</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Length</th><th>After an edit</th><th>After withdrawal</th></tr></thead>
+    <tbody>
+    {% for check in checks %}
+    <tr>
+      <td>{{ check.capabilities.label }}{% if announcement.image and not check.capabilities.supports_media %}<br><span class="muted">The image is not sent to this channel.</span>{% endif %}<details><summary>What is sent</summary><pre>{{ check.preview }}</pre></details></td>
+      <td>{% if check.over_limit and check.capabilities.shortens_long_text %}{{ check.text_length }} characters: shortened to {{ check.capabilities.max_text_length }} with a link to the full announcement{% elif check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
+      <td>{{ check.capabilities.update_description }}</td>
+      <td>{{ check.capabilities.withdraw_description }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <div class="section-heading">
+    <h2>Channel deliveries</h2>
+    {% if perms.edit and deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/retry">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary small">Retry safe, idempotent failed deliveries</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if deliveries %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead>
+    <tbody>
+    {% for delivery in deliveries %}
+    <tr>
+      <td class="mono">{{ delivery.adapter_name }}</td>
+      <td>{{ badge(delivery.status) }}</td>
+      <td>{{ delivery.attempts }}</td>
+      <td>{{ delivery.last_error or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No channel deliveries have been attempted.</p>
+  {% endif %}
+
+  {% if jobs %}
+  <h2>Scheduled deliveries</h2>
+  <p class="muted">Temporary failures are retried automatically with increasing delays.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Operation</th><th>Next attempt</th><th>Attempts</th><th>Last error</th></tr></thead>
+    <tbody>
+    {% for job in jobs %}
+    <tr>
+      <td class="mono">{{ job.adapter_name }}</td>
+      <td>{{ job.operation }}</td>
+      <td>{% if job.status == "running" %}In progress{% else %}<time class="mono" datetime="{{ job.run_after }}">{{ job.run_after[:16]|replace("T", " ") }}</time> UTC{% endif %}</td>
+      <td>{{ job.attempts }} of {{ job.max_attempts }}</td>
+      <td>{{ job.last_error or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <details class="card">
+    <summary>Delivery attempt history ({{ delivery_attempts|length }})</summary>
+    {% if delivery_attempts %}
+    {% if delivery_attempts|selectattr("legacy_snapshot")|list %}
+    <p class="muted">Legacy snapshot rows preserve the last known state and aggregate attempt count from before detailed history was added; earlier individual results cannot be recovered.</p>
+    {% endif %}
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Attempt</th><th>Channel</th><th>Operation</th><th>Status</th><th>Time</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for attempt in delivery_attempts %}
+      <tr>
+        <td>{{ attempt.attempt_number }}{% if attempt.legacy_snapshot %} (legacy snapshot){% endif %}</td>
+        <td class="mono">{{ attempt.adapter_name }}</td>
+        <td>{{ attempt.operation }}</td>
+        <td>{{ badge(attempt.status) }}</td>
+        <td><time class="mono" datetime="{{ attempt.attempted_at }}">{{ attempt.attempted_at[:19]|replace("T", " ") }}</time></td>
+        <td>{{ attempt.error or "—" }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">No delivery attempts have been recorded.</p>
+    {% endif %}
+  </details>
+</div>
+
+<aside class="detail-rail" aria-label="Status and actions">
+  <section class="card">
+    <h2>Details</h2>
+    <dl class="facts">
+      <dt>Date</dt><dd class="mono">{{ announcement.published_at[:16]|replace("T", " ") }}</dd>
+      {% if announcement.tags %}<dt>Tags</dt><dd>{{ announcement.tags|join(", ") }}</dd>{% endif %}
+      {% if announcement.canonical_url %}<dt>Public page</dt><dd><a href="{{ announcement.canonical_url }}">{{ announcement.canonical_url }}</a></dd>{% endif %}
+    </dl>
+    {% if status == "scheduled" %}
+    <p class="notice" role="status">Scheduled to publish on <strong>{{ scheduled_local }}</strong> ({{ timezone_name }}).</p>
+    {% endif %}
+  </section>
+
+  {% if review_required and status in ["draft", "in_review", "approved"] %}
+  <section class="card" aria-labelledby="review-heading">
+    <h2 id="review-heading">Review</h2>
+    {% if status == "draft" %}
+    <p>Review is on: someone other than you approves this announcement before it can be published.</p>
+    {% if perms.edit %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/submit">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p><button type="submit">Submit for review</button></p>
+    </form>
+    {% endif %}
+    {% elif status == "in_review" %}
+    <p>Waiting for review{% if submitter %}, submitted by <strong>{{ submitter }}</strong>{% endif %}.</p>
+    {% if perms.approve and submitter != username %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/approve">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="approve-note">Note (optional)</label>
+      <input id="approve-note" name="note" type="text" maxlength="1000">
+      <p><button type="submit">Approve</button></p>
+    </form>
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/request-changes">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="changes-note">What needs to change</label>
+      <textarea id="changes-note" name="note" maxlength="1000" rows="2" required></textarea>
+      <p><button type="submit" class="secondary">Send back for changes</button></p>
+    </form>
+    {% elif submitter == username %}
+    <p class="muted">Someone else needs to approve it.</p>
+    {% endif %}
+    {% elif status == "approved" %}
+    <p class="notice" role="status">Approved. It can now be published or scheduled. Editing it sends it back for review.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if perms.edit and (status in ["approved", "scheduled"] or (status == "draft" and not review_required)) %}
+  <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
+    <h2>Publish</h2>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="image-alt">Description for people who cannot see the image</label>
-    <textarea id="image-alt" name="alt" maxlength="1000" rows="2" required>{{ announcement.image.alt }}</textarea>
-    <p><button type="submit">Save description</button></p>
-  </form>
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/image/remove">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <p><button type="submit">Remove image</button></p>
+    <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
+    <p><button type="submit">{{ "Publish now instead" if status == "scheduled" else "Publish announcement" }}</button></p>
   </form>
   {% endif %}
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/image" enctype="multipart/form-data">
+
+  {% if perms.edit and ((status == "draft" and not review_required) or status == "approved") %}
+  <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/schedule">
+    <h2>Schedule</h2>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="image-file">{{ "Replace the image" if announcement.image else "Add an image" }} (JPEG, PNG, WebP or GIF, up to 10 MB)</label>
-    <input id="image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required>
-    <label for="new-image-alt">Description for people who cannot see the image</label>
-    <textarea id="new-image-alt" name="alt" maxlength="1000" rows="2" required></textarea>
-    <p class="muted">Location and camera details are removed from the file, and large images are resized.</p>
-    <p><button type="submit">Upload image</button></p>
+    <label for="scheduled-for">Publish automatically on ({{ timezone_name }})</label>
+    <input id="scheduled-for" name="scheduled_for" type="datetime-local" min="{{ now_local }}" required>
+    <p><button type="submit" class="secondary">Schedule</button></p>
   </form>
-</section>
-{% endif %}
-{% if perms.edit and announcement.status.value != "withdrawn" %}
-<p><a href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a></p>
-{% endif %}
-{% if checks and announcement.status.value != "withdrawn" %}
-<h2>Channels</h2>
-<table>
-  <thead><tr><th>Channel</th><th>Length</th><th>After an edit</th><th>After withdrawal</th></tr></thead>
-  <tbody>
-  {% for check in checks %}
-  <tr>
-    <td>{{ check.capabilities.label }}{% if announcement.image and not check.capabilities.supports_media %}<br><span class="muted">The image is not sent to this channel.</span>{% endif %}<details><summary>What is sent</summary><pre style="white-space: pre-wrap">{{ check.preview }}</pre></details></td>
-    <td>{% if check.over_limit and check.capabilities.shortens_long_text %}{{ check.text_length }} characters: shortened to {{ check.capabilities.max_text_length }} with a link to the full announcement{% elif check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
-    <td>{{ check.capabilities.update_description }}</td>
-    <td>{{ check.capabilities.withdraw_description }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-{% if announcement.status.value == "scheduled" %}
-<p class="notice" role="status">Scheduled to publish on <strong>{{ scheduled_local }}</strong> ({{ timezone_name }}).</p>
-{% endif %}
-{% if review_required and status in ["draft", "in_review", "approved"] %}
-<section class="card" aria-labelledby="review-heading">
-  <h2 id="review-heading">Review</h2>
-  {% if status == "draft" %}
-  <p>Review is on: someone other than you approves this announcement before it can be published.</p>
+  {% endif %}
+
+  {% if perms.edit and status == "scheduled" %}
+  <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/unschedule">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Cancel schedule (keep as draft)</button>
+  </form>
+  {% endif %}
+
+  {% if review_required and perms.settings and status in ["draft", "in_review", "approved"] %}
+  <details class="card">
+    <summary>Urgent: publish without review</summary>
+    <p>For safety notices that cannot wait. This is recorded in the activity log with your reason.</p>
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/publish-urgently">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="urgent-reason">Why this cannot wait</label>
+      <input id="urgent-reason" name="reason" type="text" minlength="10" maxlength="500" required>
+      <label for="urgent-password">Confirm with your password</label>
+      <input id="urgent-password" name="password" type="password" autocomplete="current-password" required>
+      <p><button type="submit" class="danger">Publish now without review</button></p>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if perms.edit and status in ["published", "updated"] %}
+  <form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/withdraw">
+    <h2>Withdraw</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="confirm" value="withdraw" required> I confirm withdrawal from public channels.</label>
+    <p><button type="submit" class="danger">Withdraw announcement</button></p>
+  </form>
+  {% endif %}
+
   {% if perms.edit %}
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/submit">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <p><button type="submit">Submit for review</button></p>
-  </form>
+  <details class="card">
+    <summary>Save as a template</summary>
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/save-as-template">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="template-name">Template name</label>
+      <input id="template-name" name="name" type="text" maxlength="80" value="{{ announcement.title[:80] }}">
+      <p><button type="submit" class="secondary">Save as template</button></p>
+    </form>
+  </details>
   {% endif %}
-  {% elif status == "in_review" %}
-  <p>Waiting for review{% if submitter %}, submitted by <strong>{{ submitter }}</strong>{% endif %}.</p>
-  {% if perms.approve and submitter != username %}
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/approve">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="approve-note">Note (optional)</label>
-    <input id="approve-note" name="note" type="text" maxlength="1000">
-    <p><button type="submit">Approve</button></p>
-  </form>
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/request-changes">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="changes-note">What needs to change</label>
-    <textarea id="changes-note" name="note" maxlength="1000" rows="2" required></textarea>
-    <p><button type="submit">Send back for changes</button></p>
-  </form>
-  {% elif submitter == username %}
-  <p class="muted">Someone else needs to approve it.</p>
+
+  {% if review_history %}
+  <section class="card">
+    <h2>Review history</h2>
+    <ul>
+      {% for event in review_history %}
+      <li><time class="mono" datetime="{{ event.occurred_at }}">{{ event.occurred_at[:16]|replace("T", " ") }}</time> · {{ event.actor or "—" }}: {{ event.action|replace("_", " ") }}{% if event.note %} — {{ event.note }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
   {% endif %}
-  {% elif status == "approved" %}
-  <p class="notice" role="status">Approved. It can now be published or scheduled. Editing it sends it back for review.</p>
-  {% endif %}
-</section>
-{% endif %}
-{% if perms.edit and (status in ["approved", "scheduled"] or (status == "draft" and not review_required)) %}
-<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/publish">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label><input type="checkbox" name="confirm" value="publish" required> I reviewed this announcement and want to publish it.</label>
-  <p><button type="submit">{{ "Publish now instead" if announcement.status.value == "scheduled" else "Publish announcement" }}</button></p>
-</form>
-{% endif %}
-{% if perms.edit and ((status == "draft" and not review_required) or status == "approved") %}
-<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/schedule">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label for="scheduled-for">Publish automatically on ({{ timezone_name }})</label>
-  <input id="scheduled-for" name="scheduled_for" type="datetime-local" min="{{ now_local }}" required>
-  <p><button type="submit">Schedule</button></p>
-</form>
-{% endif %}
-{% if perms.edit and announcement.status.value == "scheduled" %}
-<form method="post" action="/admin/announcements/{{ announcement.id }}/unschedule">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <p><button type="submit">Cancel schedule (keep as draft)</button></p>
-</form>
-{% endif %}
-{% if review_required and perms.settings and status in ["draft", "in_review", "approved"] %}
-<details class="card">
-  <summary>Urgent: publish without review</summary>
-  <p>For safety notices that cannot wait. This is recorded in the activity log with your reason.</p>
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/publish-urgently">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="urgent-reason">Why this cannot wait</label>
-    <input id="urgent-reason" name="reason" type="text" minlength="10" maxlength="500" required>
-    <label for="urgent-password">Confirm with your password</label>
-    <input id="urgent-password" name="password" type="password" autocomplete="current-password" required>
-    <p><button type="submit">Publish now without review</button></p>
-  </form>
-</details>
-{% endif %}
-{% if perms.edit %}
-<details class="card">
-  <summary>Save as a template</summary>
-  <form method="post" action="/admin/announcements/{{ announcement.id }}/save-as-template">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="template-name">Template name</label>
-    <input id="template-name" name="name" type="text" maxlength="80" value="{{ announcement.title[:80] }}">
-    <p><button type="submit">Save as template</button></p>
-  </form>
-</details>
-{% endif %}
-{% if review_history %}
-<h2>Review history</h2>
-<ul>
-  {% for event in review_history %}
-  <li><time datetime="{{ event.occurred_at }}">{{ event.occurred_at[:16]|replace("T", " ") }}</time> · {{ event.actor or "—" }}: {{ event.action|replace("_", " ") }}{% if event.note %} — {{ event.note }}{% endif %}</li>
-  {% endfor %}
-</ul>
-{% endif %}
-{% if perms.edit and status in ["published", "updated"] %}
-<form class="card" method="post" action="/admin/announcements/{{ announcement.id }}/withdraw">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label><input type="checkbox" name="confirm" value="withdraw" required> I confirm withdrawal from public channels.</label>
-  <p><button type="submit">Withdraw announcement</button></p>
-</form>
-{% endif %}
-<h2>Channel deliveries</h2>
-{% if deliveries %}
-<table>
-  <thead><tr><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead>
-  <tbody>
-  {% for delivery in deliveries %}
-  <tr>
-    <td>{{ delivery.adapter_name }}</td>
-    <td>{{ delivery.status }}</td>
-    <td>{{ delivery.attempts }}</td>
-    <td>{{ delivery.last_error or "—" }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">No channel deliveries have been attempted.</p>
-{% endif %}
-{% if jobs %}
-<h2>Scheduled deliveries</h2>
-<p class="muted">Temporary failures are retried automatically with increasing delays.</p>
-<table>
-  <thead><tr><th>Channel</th><th>Operation</th><th>Next attempt</th><th>Attempts</th><th>Last error</th></tr></thead>
-  <tbody>
-  {% for job in jobs %}
-  <tr>
-    <td>{{ job.adapter_name }}</td>
-    <td>{{ job.operation }}</td>
-    <td>{% if job.status == "running" %}In progress{% else %}<time datetime="{{ job.run_after }}">{{ job.run_after[:16]|replace("T", " ") }} UTC</time>{% endif %}</td>
-    <td>{{ job.attempts }} of {{ job.max_attempts }}</td>
-    <td>{{ job.last_error or "—" }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-<h2>Delivery attempt history</h2>
-{% if delivery_attempts %}
-{% if delivery_attempts|selectattr("legacy_snapshot")|list %}
-<p class="muted">Legacy snapshot rows preserve the last known state and aggregate attempt count from before detailed history was added; earlier individual results cannot be recovered.</p>
-{% endif %}
-<table>
-  <thead><tr><th>Attempt</th><th>Channel</th><th>Operation</th><th>Status</th><th>Time</th><th>Details</th></tr></thead>
-  <tbody>
-  {% for attempt in delivery_attempts %}
-  <tr>
-    <td>{{ attempt.attempt_number }}{% if attempt.legacy_snapshot %} (legacy snapshot){% endif %}</td>
-    <td>{{ attempt.adapter_name }}</td>
-    <td>{{ attempt.operation }}</td>
-    <td>{{ attempt.status }}</td>
-    <td><time datetime="{{ attempt.attempted_at }}">{{ attempt.attempted_at }}</time></td>
-    <td>{{ attempt.error or "—" }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">No delivery attempts have been recorded.</p>
-{% endif %}
-{% if perms.edit and deliveries|selectattr("status", "equalto", "failed")|selectattr("retryable")|selectattr("idempotent")|list %}
-<form method="post" action="/admin/announcements/{{ announcement.id }}/retry">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit">Retry safe, idempotent failed deliveries</button>
-</form>
-{% endif %}
-{% if announcement.canonical_url %}
-<p>Public page: <a href="{{ announcement.canonical_url }}">{{ announcement.canonical_url }}</a></p>
-{% endif %}
+</aside>
+</div>
 {% endblock %}

@@ -1,11 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Backups{% endblock %}
 {% block content %}
-<h1>Backups</h1>
-{% if outcome %}
-  {% if outcome.error %}<p class="error" role="alert"><strong>{{ outcome.title }}:</strong> {{ outcome.error }}</p>
-  {% else %}<div class="notice" role="status"><p><strong>{{ outcome.title }}</strong></p><ul>{% for step in outcome.steps %}<li>{{ step }}</li>{% endfor %}</ul></div>{% endif %}
-{% endif %}
+<div class="page-heading">
+  <h1>Backups</h1>
+  {% if agent_available %}
+  <div class="actions">
+    <form method="post" action="/admin/system/verify">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">Check the latest backup</button>
+    </form>
+    <form method="post" action="/admin/system/backup">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Back up now</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if not agent_available %}
 <div class="panel">
@@ -13,6 +23,7 @@
   <p>Automatic backups are made by a separate, privileged agent on the server. Ask the person who manages the server to install it (docs/operations.md, "Control agent").</p>
 </div>
 {% elif status %}
+<div class="table-wrap">
 <table>
   <tbody>
     <tr><th scope="row">Where backups go</th><td>{{ status.where }}</td></tr>
@@ -21,8 +32,9 @@
     <tr><th scope="row">Last automatic run</th><td>{% if status.scheduler.last_result %}{{ status.scheduler.last_result }}{% if status.scheduler.last_error %}: {{ status.scheduler.last_error }}{% endif %} ({{ status.scheduler.last_attempt[:16]|replace("T", " ") }} UTC){% else %}Not run yet{% endif %}</td></tr>
   </tbody>
 </table>
+</div>
 {% if status.target == "local" %}
-<p class="error">Backups are on the same disk as the data. If the server is lost, so are the backups. Add off-site storage below.</p>
+<p class="notice notice-warning">Backups are on the same disk as the data. If the server is lost, so are the backups. Add off-site storage below.</p>
 {% endif %}
 
 <form class="card" method="post" action="/admin/backups/offsite">
@@ -47,14 +59,23 @@
   <p><button type="submit">Test and switch to off-site backups</button></p>
 </form>
 
+<form class="card" id="restore-drill" method="post" action="/admin/system/drill">
+  <h2>Restore drill</h2>
+  <p>Restores the latest backup into a scratch folder on the server, checks that it is complete, then deletes the copy. Live services are not touched. Run one after changing where backups go, and every few months.</p>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="drill-password">Confirm with your password</label>
+  <input id="drill-password" name="password" type="password" autocomplete="current-password" required>
+  <p><button type="submit" class="secondary">Run restore drill</button></p>
+</form>
+
 {% if status.target == "s3" %}
-<form class="card" method="post" action="/admin/backups/local">
+<form class="card" method="post" action="/admin/backups/local" data-confirm="New backups will be stored on this server's disk only. If the server is lost, so are they." data-confirm-label="Use this server's disk">
   <h2>Use this server's disk again</h2>
   <p>New backups go to the server's own disk. Backups already in the bucket are left there.</p>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label for="local-password">Confirm with your password</label>
   <input id="local-password" name="password" type="password" autocomplete="current-password" required>
-  <p><button type="submit">Stop using off-site storage</button></p>
+  <p><button type="submit" class="secondary danger">Stop using off-site storage</button></p>
 </form>
 {% endif %}
 {% endif %}
@@ -62,6 +83,6 @@
 <section class="card">
   <h2>Offline archive</h2>
   <p>A single file with every published announcement, readable without internet, for USB drives or a local Wi-Fi hotspot during an outage. It contains only public announcements.</p>
-  <p><a href="/admin/backups/offline-archive.zip">Download the offline archive</a></p>
+  <p><a href="/admin/backups/offline-archive.zip" download>Download the offline archive</a></p>
 </section>
 {% endblock %}

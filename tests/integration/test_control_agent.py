@@ -233,22 +233,30 @@ def csrf(response) -> str:
     return re.search(r'name="csrf_token" value="([^"]+)"', response.text).group(1)
 
 
-def test_system_page_explains_a_missing_agent(project, tmp_path):
+def test_server_pages_explain_a_missing_agent(project, tmp_path):
     owner = signed_in(console(project, tmp_path / "absent.sock"), "olga")
-    page = owner.get("/admin/system")
-    assert page.status_code == 200
-    assert "The system agent is not running" in page.text
+    for path in ("/admin/backups", "/admin/services", "/admin/health"):
+        page = owner.get(path)
+        assert page.status_code == 200
+        assert "The system agent is not running" in page.text
+    assert "System agent not running" in owner.get("/admin").text
 
 
-def test_system_page_runs_operations_through_the_agent(project, socket_path):
+def test_backup_operations_run_through_the_agent(project, socket_path):
     owner = signed_in(console(project, socket_path), "olga")
-    page = owner.get("/admin/system")
-    assert "community_synapse" in page.text
+    assert owner.get("/admin/system").headers["location"] == "/admin/backups"
+    assert "community_synapse" in owner.get("/admin/services").text
+    # The dashboard's status line lists the running services.
+    assert "synapse" in owner.get("/admin").text
+    page = owner.get("/admin/backups")
 
     backup = owner.post("/admin/system/backup", data={"csrf_token": csrf(page)})
-    assert backup.status_code == 200
+    assert backup.status_code == 303
+    backup = owner.get(backup.headers["location"])
     assert "Backup finished." in backup.text
     assert "not encrypted" in backup.text
+    # The result is shown once, so reloading the page does not repeat it.
+    assert "Backup finished." not in owner.get("/admin/backups").text
 
     drill = owner.post("/admin/system/drill", data={"csrf_token": csrf(page), "password": "wrong"})
     assert drill.status_code == 400

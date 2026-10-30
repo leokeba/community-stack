@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ "Not found" if status_code == 404 else "Something went wrong" }}{% endblock %}
+{% block content %}
+<div class="{{ 'auth-card' if not username else 'panel' }}">
+  <h1>{{ "Page not found" if status_code == 404 else "That did not work" }}</h1>
+  <p class="error" role="alert" data-error-message>{{ message }}</p>
+  <p class="actions">
+    {% if username %}<button type="button" data-history-back hidden>Go back</button> <a href="/admin">Dashboard</a>
+    {% else %}<a class="button-link" href="/admin/login">Log in</a>{% endif %}
+  </p>
+</div>
+{% endblock %}

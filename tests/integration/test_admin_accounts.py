@@ -91,6 +91,8 @@ def test_publisher_can_publish_but_not_manage_accounts_or_settings(app):
     assert publisher.get("/admin/accounts").status_code == 403
     assert publisher.get("/admin/settings").status_code == 403
     assert "Accounts" not in publisher.get("/admin").text
+    # Server state is for roles that may manage the server.
+    assert "Service status" not in publisher.get("/admin").text
 
 
 def test_admin_cannot_create_or_manage_owners(app):

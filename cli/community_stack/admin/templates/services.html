@@ -3,10 +3,6 @@
 {% block content %}
 <h1>Services and settings</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-{% if outcome %}
-  {% if outcome.error %}<p class="error" role="alert"><strong>{{ outcome.title }}:</strong> {{ outcome.error }}</p>
-  {% else %}<div class="notice" role="status"><p><strong>{{ outcome.title }}</strong></p><ul>{% for step in outcome.steps %}<li>{{ step }}</li>{% endfor %}</ul></div>{% endif %}
-{% endif %}
 {% if not agent_available %}
 <div class="panel">
   <h2>The system agent is not running</h2>
@@ -43,7 +39,7 @@
 <table>
   <thead><tr><th>Service</th><th>State</th><th>Status</th></tr></thead>
   <tbody>
-  {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ container.state }}</td><td>{{ container.status }}</td></tr>{% endfor %}
+  {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ badge(container.state, tone="success" if container.state == "running" else "danger") }}</td><td>{{ container.status }}</td></tr>{% endfor %}
   </tbody>
 </table>
 {% endif %}
@@ -61,12 +57,12 @@
     <td>
       {% if row.blocked %}<span class="muted">{{ row.blocked }}</span>
       {% elif row.update_available %}
-      <form method="post" action="/admin/services/update">
+      <form method="post" action="/admin/services/update" data-confirm="Update {{ row.service }} to {{ row.pinned }}? A backup is taken first, and the previous version comes back if the new one does not start healthy." data-confirm-label="Update {{ row.service }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="service" value="{{ row.service }}">
         <button type="submit">Update {{ row.service }}</button>
       </form>
-      {% elif row.running %}Up to date{% endif %}
+      {% elif row.running %}{{ badge("current", "Up to date", "success") }}{% endif %}
     </td>
   </tr>
   {% endfor %}

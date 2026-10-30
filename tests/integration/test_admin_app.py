@@ -50,7 +50,7 @@ def test_admin_setup_auth_csrf_and_publish_flow(tmp_path):
     setup_admin(client)
     dashboard = client.get("/admin")
     assert dashboard.status_code == 200
-    assert "Publishing dashboard" in dashboard.text
+    assert "Needs attention" in dashboard.text
     csrf_token = extract_csrf(dashboard)
 
     new_page = client.get("/admin/announcements/new")
@@ -67,7 +67,7 @@ def test_admin_setup_auth_csrf_and_publish_flow(tmp_path):
     detail_url = create_response.headers["location"]
     draft_id = detail_url.rsplit("/", 1)[-1]
     detail = client.get(detail_url)
-    assert "draft" in detail.text
+    assert "Draft" in detail.text
     assert "Public web feed" in detail.text
     assert "Edits change the published post." in detail.text
     assert "Bring supplies." in detail.text
@@ -247,7 +247,7 @@ def test_delivery_error_and_safe_retry_are_visible_to_admin(tmp_path):
     assert len(attempts) == 2
     healthy_detail = client.get(detail_url)
     assert "temporary Matrix outage" in healthy_detail.text
-    assert "delivered" in healthy_detail.text
+    assert "Delivered" in healthy_detail.text
     assert "Delivery attempt history" in healthy_detail.text
 
 
@@ -304,3 +304,112 @@ def test_setup_rejects_non_ascii_token_without_server_error(tmp_path):
         },
     )
     assert response.status_code == 403
+
+
+def test_console_errors_are_pages_and_public_errors_stay_json(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    setup_admin(client)
+    csrf_token = extract_csrf(client.get("/admin"))
+
+    refused = client.post(
+        "/admin/announcements/missing/publish",
+        data={"csrf_token": csrf_token, "confirm": "publish"},
+    )
+    assert refused.status_code == 404
+    assert refused.headers["content-type"].startswith("text/html")
+    assert "Announcement not found." in refused.text
+    assert 'aria-label="Administration"' in refused.text
+
+    unknown = client.get("/admin/no-such-page")
+    assert unknown.status_code == 404
+    assert "This page does not exist." in unknown.text
+
+    assert client.get("/ap/notes/missing").headers["content-type"] == "application/json"
+
+
+def test_action_results_are_shown_once_on_the_next_page(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    setup_admin(client)
+    assert "Welcome, organizer." in client.get("/admin").text
+
+    page = client.get("/admin/accounts")
+    created = client.post(
+        "/admin/accounts/create",
+        data={
+            "csrf_token": extract_csrf(page),
+            "username": "camille",
+            "password": "another-long-password",
+            "role": "publisher",
+        },
+    )
+    assert created.status_code == 303
+    assert created.headers["location"] == "/admin/accounts"
+    assert "Created the account camille." in client.get("/admin/accounts").text
+    assert "Created the account camille." not in client.get("/admin/accounts").text
+
+    refused = client.post(
+        "/admin/accounts/create",
+        data={
+            "csrf_token": extract_csrf(page),
+            "username": "sami",
+            "password": "short",
+            "role": "publisher",
+        },
+    )
+    assert refused.status_code == 400
+    assert 'class="toast toast-error"' in refused.text
+
+
+def test_signed_out_pages_use_the_full_width_layout(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    for path in ("/admin/setup", "/admin/login"):
+        page = client.get(path)
+        assert 'class="auth-shell"' in page.text
+        assert 'aria-label="Administration"' not in page.text
+        assert "data-console" not in page.text
+
+
+def test_sessions_from_before_messages_existed_gain_the_column(tmp_path):
+    db_path = tmp_path / "announcements.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE admin_sessions (token_hash TEXT PRIMARY KEY, username TEXT,"
+            " csrf_token TEXT NOT NULL, expires_at TEXT NOT NULL)"
+        )
+    store = AdminStore(db_path)
+    token, _ = store.new_session(None)
+    store.set_flash(token, {"tone": "success", "text": "Saved."})
+    assert store.pop_flash(token) == {"tone": "success", "text": "Saved."}
+    assert store.pop_flash(token) is None
+
+
+def test_console_pages_load_nothing_from_other_sites(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    login = client.get("/admin/login")
+    assert "default-src 'self'" in login.headers["content-security-policy"]
+    assert "style=" not in login.text
+    setup_admin(client)
+    dashboard = client.get("/admin")
+    assert "script-src 'self'" in dashboard.headers["content-security-policy"]
+    assert "<style" not in dashboard.text and "style=" not in dashboard.text
+    font = client.get("/admin/static/fonts/source-sans-3-latin.woff2")
+    assert font.status_code == 200
+    assert font.headers["content-type"] == "font/woff2"
+    assert "content-security-policy" not in client.get("/health").headers
+
+
+def test_announcement_list_filters_by_status(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    setup_admin(client)
+    for title in ("Water outage", "Assembly"):
+        page = client.get("/admin/announcements/new")
+        client.post(
+            "/admin/announcements/new",
+            data={"csrf_token": extract_csrf(page), "title": title, "body": "Details."},
+        )
+    drafts = client.get("/admin/announcements?status=draft")
+    assert "Water outage" in drafts.text and "Assembly" in drafts.text
+    published = client.get("/admin/announcements?status=published")
+    assert "Water outage" not in published.text
+    assert "No announcements with this status." in published.text
+    assert "Water outage" in client.get("/admin/announcements?status=nonsense").text

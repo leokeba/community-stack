@@ -153,6 +153,11 @@ class AdminStore:
                     conn.execute(f"ALTER TABLE admin_users ADD COLUMN {column} TEXT")
             if "totp_last_step" not in columns:
                 conn.execute("ALTER TABLE admin_users ADD COLUMN totp_last_step INTEGER")
+            session_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(admin_sessions)")
+            }
+            if "flash_json" not in session_columns:
+                conn.execute("ALTER TABLE admin_sessions ADD COLUMN flash_json TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -482,6 +487,30 @@ class AdminStore:
                     "DELETE FROM admin_sessions WHERE token_hash = ?",
                     (self._token_hash(token),),
                 )
+
+    def set_flash(self, token: str | None, flash: dict[str, Any]) -> None:
+        """Keep a message for the session's next page, such as the result of an action."""
+        if token:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE admin_sessions SET flash_json = ? WHERE token_hash = ?",
+                    (json.dumps(flash), self._token_hash(token)),
+                )
+
+    def pop_flash(self, token: str | None) -> dict[str, Any] | None:
+        if not token:
+            return None
+        token_hash = self._token_hash(token)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT flash_json FROM admin_sessions WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+            if row is None or row["flash_json"] is None:
+                return None
+            conn.execute(
+                "UPDATE admin_sessions SET flash_json = NULL WHERE token_hash = ?", (token_hash,)
+            )
+        return json.loads(row["flash_json"])
 
     # Login rate limits
 

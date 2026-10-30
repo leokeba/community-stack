@@ -1,22 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Announcements{% endblock %}
 {% block content %}
-<h1>Announcements</h1>
-{% if perms.edit %}<p><a href="/admin/announcements/new">Create a draft</a></p>{% endif %}
+<div class="page-heading">
+  <h1>Announcements</h1>
+  {% if perms.edit %}<a class="button-link" href="/admin/announcements/new">Create a draft</a>{% endif %}
+</div>
+<nav class="tabs" aria-label="Filter by status">
+  {% for item in filters %}
+  <a class="tab" href="/admin/announcements{% if item.key %}?status={{ item.key }}{% endif %}" {% if item.key == selected %}aria-current="page"{% endif %}>{{ item.label }} <span class="tab-count">{{ item.count }}</span></a>
+  {% endfor %}
+</nav>
 {% if announcements %}
+<div class="table-wrap">
 <table>
-  <thead><tr><th>Title</th><th>Status</th><th>Date</th></tr></thead>
+  <thead><tr><th>Title</th><th>Status</th><th>Author or group</th><th>Date</th></tr></thead>
   <tbody>
   {% for announcement in announcements %}
   <tr>
     <td><a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
-    <td>{{ announcement.status.value }}</td>
-    <td>{{ announcement.published_at[:10] }}</td>
+    <td>{{ badge(announcement.status) }}</td>
+    <td>{{ announcement.author or "—" }}</td>
+    <td class="mono">{{ announcement.published_at[:10] }}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
-<p>No announcements yet.</p>
+<div class="empty-state"><p>{% if selected %}No announcements with this status.{% else %}No announcements yet.{% endif %}</p></div>
 {% endif %}
 {% endblock %}

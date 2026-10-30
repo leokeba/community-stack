@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
+import mimetypes
 import os
 import re
 import secrets
 import tempfile
 from collections.abc import AsyncIterator
 from datetime import datetime
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -28,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from community_stack.admin import totp
 from community_stack.admin.store import (
@@ -86,8 +91,59 @@ STATIC_DIR = Path(__file__).parent / "static"
 WORKER_INTERVAL_SECONDS = 15.0
 MAX_INBOX_BYTES = 256 * 1024
 DEFAULT_AGENT_SOCKET = "/run/community-stack-agent/agent.sock"
+# Everything a console page uses is served from here; nothing is loaded from elsewhere.
+CONSOLE_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
+    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+    "base-uri 'none'; object-src 'none'"
+)
+# The dashboard shows service status; it must never wait on a slow agent.
+DASHBOARD_AGENT_TIMEOUT_SECONDS = 5.0
+
+mimetypes.add_type("font/woff2", ".woff2")
 
 logger = logging.getLogger(__name__)
+
+# Announcement, delivery, job and health states as people read them, with a colour tone.
+STATUS_BADGES = {
+    "draft": ("Draft", "neutral"),
+    "in_review": ("In review", "warning"),
+    "approved": ("Approved", "info"),
+    "scheduled": ("Scheduled", "info"),
+    "published": ("Published", "success"),
+    "updated": ("Updated", "success"),
+    "withdrawn": ("Withdrawn", "neutral"),
+    "delivered": ("Delivered", "success"),
+    "failed": ("Failed", "danger"),
+    "queued": ("Waiting to retry", "warning"),
+    "running": ("In progress", "info"),
+    "ok": ("OK", "success"),
+    "warning": ("Needs attention", "warning"),
+    "problem": ("Problem", "danger"),
+}
+
+
+def status_badge(value: Any, label: str | None = None, tone: str | None = None) -> Markup:
+    key = str(getattr(value, "value", value))
+    known_label, known_tone = STATUS_BADGES.get(
+        key, (key.replace("_", " ").capitalize(), "neutral")
+    )
+    return Markup('<span class="badge badge-{}">{}</span>').format(
+        tone or known_tone, label or known_label
+    )
+
+
+def flash(text: str, tone: str = "success", details: list[str] | None = None, **extra: Any):
+    """A message shown once at the top of the next page: success, warning or error."""
+    return {"tone": tone, "text": text, "details": details or [], **extra}
+
+
+def static_version() -> str:
+    """Changes whenever a static file does, so browsers never mix old scripts with new pages."""
+    digest = hashlib.sha256()
+    for path in sorted(item for item in STATIC_DIR.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(STATIC_DIR).as_posix().encode() + path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 class LoginRequired(Exception):
@@ -139,6 +195,8 @@ def create_app(
         )
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+    templates.env.globals["badge"] = status_badge
+    templates.env.globals["static_version"] = static_version()
 
     def mirror():
         return mirror_for(
@@ -179,9 +237,45 @@ def create_app(
     app.state.publisher = publisher
     app.state.agent = agent
 
+    @app.middleware("http")
+    async def console_headers(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/admin") and response.headers.get(
+            "content-type", ""
+        ).startswith("text/html"):
+            response.headers.setdefault("Content-Security-Policy", CONSOLE_CSP)
+            response.headers.setdefault("Referrer-Policy", "same-origin")
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return response
+
     @app.exception_handler(LoginRequired)
     async def login_required(_request: Request, _exc: LoginRequired) -> Response:
         return login_redirect()
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
+        """Console errors are pages in the console; public and JSON endpoints keep JSON."""
+        path = request.url.path
+        if not path.startswith("/admin") or path.startswith(
+            ("/admin/preview", "/admin/static/", "/admin/media/", "/admin/channels/signal/qr")
+        ):
+            return await http_exception_handler(request, exc)
+        message = exc.detail
+        if message == HTTPStatus(exc.status_code).phrase:
+            message = {
+                404: "This page does not exist.",
+                405: "This address only works from a button in the console.",
+            }.get(exc.status_code, message)
+        session = authenticated(request)
+        context = page(session) if session else {"csrf_token": ""}
+        response = render(
+            request,
+            "error.html",
+            {**context, "status_code": exc.status_code, "message": message},
+            status_code=exc.status_code,
+        )
+        response.headers.update(exc.headers or {})
+        return response
 
     def set_cookie(
         response: Response, token: str, name: str = SESSION_COOKIE, path: str = "/admin"
@@ -202,11 +296,34 @@ def create_app(
         context: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
+        context = {"template_name": template, **(context or {})}
+        if "username" in context and "flash" not in context:
+            context["flash"] = auth_store.pop_flash(request.cookies.get(SESSION_COOKIE))
         return templates.TemplateResponse(
             request=request,
             name=template,
-            context=context or {},
+            context=context,
             status_code=status_code,
+        )
+
+    def redirect_with(request: Request, url: str, message: dict[str, Any]) -> RedirectResponse:
+        """Post/redirect/get with a message for the page the redirect lands on."""
+        auth_store.set_flash(request.cookies.get(SESSION_COOKIE), message)
+        return RedirectResponse(url, status_code=303)
+
+    def channel_label(name: str) -> str:
+        return next((a.capabilities.label for a in publisher.adapters if a.name == name), name)
+
+    def delivery_message(text: str, results: dict[str, Any]) -> dict[str, Any]:
+        failed = sorted(
+            channel_label(name) for name, result in results.items() if not result.success
+        )
+        if not failed:
+            return flash(text)
+        return flash(
+            f"{text} Some channels failed: {', '.join(failed)}.",
+            "warning",
+            ["Failures that are safe to repeat are retried automatically. See the delivery list."],
         )
 
     def page(session: dict[str, Any], **context: Any) -> dict[str, Any]:
@@ -509,10 +626,45 @@ def create_app(
         )
         return JSONResponse({"result": message}, status_code=status)
 
+    status_agent = AgentClient(agent.socket_path, timeout=DASHBOARD_AGENT_TIMEOUT_SECONDS)
+
+    async def service_status(session: dict[str, Any]) -> dict[str, Any] | None:
+        """Running services for the dashboard strip, or why they are unknown."""
+        if not can(session["role"], "system"):
+            return None
+        if not agent.available():
+            return {"error": "System agent not running"}
+        try:
+            status = await run_in_threadpool(status_agent.call, "status.get", session["username"])
+        except (AgentUnavailable, AgentRefused):
+            return {"error": "System agent not answering"}
+        if not status.get("docker_available"):
+            return {"error": "Docker is not reachable"}
+        return {"containers": status.get("containers") or []}
+
     @app.get("/admin")
     async def dashboard(request: Request) -> Response:
         session = require(request, "view")
         steps = setup_steps() if can(session["role"], "system") else []
+        everything = storage.list_announcements(limit=None)
+        month = datetime.now(publisher.timezone).strftime("%Y-%m")
+        failed = storage.get_failed_deliveries()
+        titles = {a.id: a.title for a in everything}
+        failures: dict[str, dict[str, Any]] = {}
+        for delivery in failed:
+            entry = failures.setdefault(
+                delivery["adapter_name"],
+                {
+                    "label": channel_label(delivery["adapter_name"]),
+                    "count": 0,
+                    "error": delivery.get("last_error"),
+                    "announcement_id": delivery["announcement_id"],
+                },
+            )
+            entry["count"] += 1
+        failing = set(failures)
+        enabled = storage.get_channel_settings()
+        recent = everything[:8]
         return render(
             request,
             "dashboard.html",
@@ -520,18 +672,43 @@ def create_app(
                 session,
                 setup_done=sum(step["done"] for step in steps),
                 setup_total=len(steps),
-                announcements=storage.list_announcements(limit=10),
+                next_step=next((step for step in steps if not step["done"]), None),
+                announcements=recent,
+                deliveries={a.id: storage.get_delivery_states(a.id) for a in recent},
                 awaiting_review=[
                     a
-                    for a in storage.list_announcements(
-                        status=AnnouncementStatus.IN_REVIEW, limit=50
-                    )
-                    if storage.last_submitter(a.id) != session["username"]
+                    for a in everything
+                    if a.status == AnnouncementStatus.IN_REVIEW
+                    and storage.last_submitter(a.id) != session["username"]
                 ]
                 if can(session["role"], "approve")
                 else [],
-                failed_count=len(storage.get_failed_deliveries()),
-                queued_count=len(storage.get_active_jobs()),
+                counts={
+                    "published": sum(
+                        1
+                        for a in everything
+                        if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
+                        and (a.published_at or "").startswith(month)
+                    ),
+                    "scheduled": sum(a.status == AnnouncementStatus.SCHEDULED for a in everything),
+                    "in_review": sum(a.status == AnnouncementStatus.IN_REVIEW for a in everything),
+                },
+                failed_count=len(failed),
+                failures=list(failures.values()),
+                jobs=[
+                    {**job, "title": titles.get(job["announcement_id"], "")}
+                    for job in storage.get_active_jobs()
+                ],
+                channels=[
+                    {
+                        "label": adapter.capabilities.label,
+                        "state": "failing"
+                        if adapter.name in failing
+                        else ("on" if enabled.get(adapter.name, True) else "off"),
+                    }
+                    for adapter in publisher.adapters
+                ],
+                services=await service_status(session),
             ),
         )
 
@@ -573,6 +750,9 @@ def create_app(
         audit(request, username, "setup.completed", username, role="owner")
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
         token, _ = auth_store.new_session(username)
+        auth_store.set_flash(
+            token, flash(f"Welcome, {username}. Next, work through the setup checklist.")
+        )
         response = RedirectResponse("/admin", status_code=303)
         set_cookie(response, token)
         return response
@@ -674,13 +854,34 @@ def create_app(
         )
         return response
 
+    ANNOUNCEMENT_FILTERS = {
+        "draft": ("Drafts", (AnnouncementStatus.DRAFT, AnnouncementStatus.APPROVED)),
+        "in_review": ("In review", (AnnouncementStatus.IN_REVIEW,)),
+        "scheduled": ("Scheduled", (AnnouncementStatus.SCHEDULED,)),
+        "published": ("Published", (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)),
+        "withdrawn": ("Withdrawn", (AnnouncementStatus.WITHDRAWN,)),
+    }
+
     @app.get("/admin/announcements")
     async def announcement_list(request: Request) -> Response:
         session = require(request, "view")
+        everything = storage.list_announcements(limit=None)
+        selected = request.query_params.get("status", "")
+        if selected not in ANNOUNCEMENT_FILTERS:
+            selected = ""
+        filters = [{"key": "", "label": "All", "count": len(everything)}] + [
+            {"key": key, "label": label, "count": sum(a.status in states for a in everything)}
+            for key, (label, states) in ANNOUNCEMENT_FILTERS.items()
+        ]
+        shown = (
+            [a for a in everything if a.status in ANNOUNCEMENT_FILTERS[selected][1]]
+            if selected
+            else everything
+        )
         return render(
             request,
             "announcements.html",
-            page(session, announcements=storage.list_announcements(limit=None)),
+            page(session, announcements=shown, filters=filters, selected=selected),
         )
 
     TEMPLATE_ID = re.compile(r"^tpl_[A-Za-z0-9_-]{8,40}$")
@@ -758,7 +959,7 @@ def create_app(
             context.update(template_mode=True, form_action="/admin/templates/new")
             return render(request, "editor.html", context, status_code=400)
         audit(request, session["username"], "template.created", template_id, name=form.get("name"))
-        return RedirectResponse("/admin/templates", status_code=303)
+        return redirect_with(request, "/admin/templates", flash("Template saved."))
 
     @app.get("/admin/templates/{template_id}/edit")
     async def edit_template_page(request: Request, template_id: str) -> Response:
@@ -778,7 +979,7 @@ def create_app(
             context.update(template_mode=True, form_action=f"/admin/templates/{template_id}/update")
             return render(request, "editor.html", context, status_code=400)
         audit(request, session["username"], "template.updated", template_id, name=form.get("name"))
-        return RedirectResponse("/admin/templates", status_code=303)
+        return redirect_with(request, "/admin/templates", flash("Template saved."))
 
     @app.post("/admin/templates/{template_id}/delete")
     async def delete_template(request: Request, template_id: str) -> Response:
@@ -786,7 +987,9 @@ def create_app(
         template = template_or_404(template_id)
         storage.delete_template(template_id)
         audit(request, session["username"], "template.deleted", template_id, name=template["name"])
-        return RedirectResponse("/admin/templates", status_code=303)
+        return redirect_with(
+            request, "/admin/templates", flash(f"Deleted the template {template['name']}.")
+        )
 
     @app.post("/admin/announcements/{announcement_id}/save-as-template")
     async def save_as_template(request: Request, announcement_id: str) -> Response:
@@ -805,7 +1008,7 @@ def create_app(
             session["username"],
         )
         audit(request, session["username"], "template.created", template_id, name=name)
-        return RedirectResponse("/admin/templates", status_code=303)
+        return redirect_with(request, "/admin/templates", flash(f"Saved as the template {name}."))
 
     @app.post("/admin/announcements/new")
     async def create_announcement(request: Request) -> Response:
@@ -829,7 +1032,9 @@ def create_app(
             announcement.id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement.id}", status_code=303)
+        return redirect_with(
+            request, f"/admin/announcements/{announcement.id}", flash("Draft saved.")
+        )
 
     def editable_announcement(announcement_id: str):
         try:
@@ -873,7 +1078,9 @@ def create_app(
             width=image.width,
             height=image.height,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request, f"/admin/announcements/{announcement_id}", flash("Image added.")
+        )
 
     @app.post("/admin/announcements/{announcement_id}/image/alt")
     async def change_image_alt(request: Request, announcement_id: str) -> Response:
@@ -886,7 +1093,9 @@ def create_app(
         except MediaError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         audit(request, session["username"], "announcement.image_described", announcement_id)
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request, f"/admin/announcements/{announcement_id}", flash("Image description saved.")
+        )
 
     @app.post("/admin/announcements/{announcement_id}/image/remove")
     async def remove_image(request: Request, announcement_id: str) -> Response:
@@ -894,7 +1103,9 @@ def create_app(
         editable_announcement(announcement_id)
         storage.remove_image(announcement_id)
         audit(request, session["username"], "announcement.image_removed", announcement_id)
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request, f"/admin/announcements/{announcement_id}", flash("Image removed.")
+        )
 
     @app.get("/admin/media/{media_id}")
     async def media(request: Request, media_id: str) -> Response:
@@ -1000,6 +1211,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except (ValueError, ModelValidationError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        message = flash("Changes saved.")
         if review_required() and before in (
             AnnouncementStatus.IN_REVIEW,
             AnnouncementStatus.APPROVED,
@@ -1010,6 +1222,10 @@ def create_app(
             storage.add_review_event(
                 announcement_id, "returned_to_draft", session["username"], "Edited after review."
             )
+            message = flash(
+                "Changes saved. It changed after review, so it is a draft again and needs a new review.",
+                "warning",
+            )
         audit(
             request,
             session["username"],
@@ -1017,7 +1233,7 @@ def create_app(
             announcement_id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(request, f"/admin/announcements/{announcement_id}", message)
 
     @app.post("/admin/announcements/{announcement_id}/publish")
     async def publish_announcement(request: Request, announcement_id: str) -> Response:
@@ -1041,7 +1257,11 @@ def create_app(
             title=announcement.title,
             channels=sorted(results),
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            delivery_message("Published.", results),
+        )
 
     @app.post("/admin/announcements/{announcement_id}/submit")
     async def submit_for_review(request: Request, announcement_id: str) -> Response:
@@ -1062,7 +1282,11 @@ def create_app(
             announcement_id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash("Submitted for review. Someone else needs to approve it."),
+        )
 
     async def review_decision(request: Request, announcement_id: str, approve: bool) -> Response:
         session, form = await checked_form(request, "approve")
@@ -1090,7 +1314,12 @@ def create_app(
             announcement_id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        text = (
+            "Approved. It can now be published or scheduled."
+            if approve
+            else "Sent back for changes, with your note."
+        )
+        return redirect_with(request, f"/admin/announcements/{announcement_id}", flash(text))
 
     @app.post("/admin/announcements/{announcement_id}/approve")
     async def approve_announcement(request: Request, announcement_id: str) -> Response:
@@ -1136,7 +1365,13 @@ def create_app(
             reason=reason,
             channels=sorted(results),
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            delivery_message(
+                "Published without review. Your reason is in the activity log.", results
+            ),
+        )
 
     @app.post("/admin/settings/review")
     async def update_review_setting(request: Request) -> Response:
@@ -1144,7 +1379,10 @@ def create_app(
         enabled = form.get("review_required") == "true"
         storage.set_setting("review_required", "true" if enabled else "false")
         audit(request, session["username"], "settings.review", required=enabled)
-        return RedirectResponse("/admin/settings", status_code=303)
+        state = "on" if enabled else "off"
+        return redirect_with(
+            request, "/admin/settings", flash(f"Review before publishing is now {state}.")
+        )
 
     @app.post("/admin/announcements/{announcement_id}/schedule")
     async def schedule_announcement(request: Request, announcement_id: str) -> Response:
@@ -1174,7 +1412,12 @@ def create_app(
             title=announcement.title,
             scheduled_at=announcement.scheduled_at,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        when = local.strftime("%A %d %B %Y, %H:%M")
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash(f"Scheduled for {when} ({publisher.timezone})."),
+        )
 
     @app.post("/admin/announcements/{announcement_id}/unschedule")
     async def unschedule_announcement(request: Request, announcement_id: str) -> Response:
@@ -1192,7 +1435,11 @@ def create_app(
             announcement_id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash("Schedule cancelled. The announcement is a draft again."),
+        )
 
     @app.post("/admin/announcements/{announcement_id}/withdraw")
     async def withdraw_announcement(request: Request, announcement_id: str) -> Response:
@@ -1202,7 +1449,7 @@ def create_app(
                 status_code=400, detail="Explicit withdrawal confirmation is required."
             )
         try:
-            announcement, _ = publisher.withdraw(announcement_id)
+            announcement, results = publisher.withdraw(announcement_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except ValueError as exc:
@@ -1214,7 +1461,11 @@ def create_app(
             announcement_id,
             title=announcement.title,
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            delivery_message("Withdrawn from public channels.", results),
+        )
 
     @app.post("/admin/announcements/{announcement_id}/retry")
     async def retry_announcement(request: Request, announcement_id: str) -> Response:
@@ -1227,7 +1478,8 @@ def create_app(
             announcement_id,
             channels=sorted(key.split(":", 1)[1] for key in results),
         )
-        return RedirectResponse(f"/admin/announcements/{announcement_id}", status_code=303)
+        text = f"Retried {len(results)} failed deliveries." if results else "Nothing to retry."
+        return redirect_with(request, f"/admin/announcements/{announcement_id}", flash(text))
 
     @app.get("/admin/settings")
     async def settings_page(request: Request) -> Response:
@@ -1265,7 +1517,7 @@ def create_app(
                 if settings.get("web_feed", True):
                     adapter.rebuild()
         audit(request, session["username"], "settings.updated", enabled=sorted(enabled_names))
-        return RedirectResponse("/admin/settings", status_code=303)
+        return redirect_with(request, "/admin/settings", flash("Publishing destinations saved."))
 
     def channels_page(
         request: Request,
@@ -1273,6 +1525,7 @@ def create_app(
         message: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
+        """The channels page; `message` (an error from a form) replaces the stored flash."""
         saved = storage.list_connections()
         enabled = storage.get_channel_settings()
         connectors = [
@@ -1290,12 +1543,10 @@ def create_app(
             }
             for kind, connector in CONNECTORS.items()
         ]
-        return render(
-            request,
-            "channels.html",
-            page(session, connectors=connectors, message=message),
-            status_code=status_code,
-        )
+        context = page(session, connectors=connectors)
+        if message:
+            context["flash"] = message
+        return render(request, "channels.html", context, status_code=status_code)
 
     def connector_for(kind: str):
         connector = CONNECTORS.get(kind)
@@ -1315,22 +1566,17 @@ def create_app(
             return channels_page(
                 request,
                 session,
-                {
-                    "kind": kind,
-                    "ok": False,
-                    "text": "Enable the WhatsApp bridge first on the Services page.",
-                },
+                flash("Enable the WhatsApp bridge first on the Services page.", "error"),
                 409,
             )
         if kind == "whatsapp" and publisher.matrix_auth is None:
             return channels_page(
                 request,
                 session,
-                {
-                    "kind": kind,
-                    "ok": False,
-                    "text": "Connect Matrix announcements first; WhatsApp forwarding uses that account.",
-                },
+                flash(
+                    "Connect Matrix announcements first; WhatsApp forwarding uses that account.",
+                    "error",
+                ),
                 409,
             )
         saved = storage.list_connections().get(kind, {})
@@ -1339,8 +1585,7 @@ def create_app(
                 connector.validate, merge_values(connector, form, saved)
             )
         except (UnsafeURLError, ValueError) as exc:
-            message = {"kind": kind, "ok": False, "text": str(exc)}
-            return channels_page(request, session, message, 400)
+            return channels_page(request, session, flash(f"{connector.label}: {exc}", "error"), 400)
         storage.save_connection(kind, values, session["username"])
         publisher.reload_connections()
         public = {f.name: values.get(f.name) for f in connector.fields if not f.secret}
@@ -1351,8 +1596,11 @@ def create_app(
             kind,
             **public,
         )
-        message = {"kind": kind, "ok": True, "text": "Saved. Use 'Test connection' to check it."}
-        return channels_page(request, session, message)
+        return redirect_with(
+            request,
+            f"/admin/channels#channel-{kind}",
+            flash(f"{connector.label} saved. Use 'Test connection' to check it."),
+        )
 
     def mirroring_page(
         request: Request, session: dict[str, Any], error: str | None = None, status_code: int = 200
@@ -1367,7 +1615,7 @@ def create_app(
                 available=rooms is not None,
                 rooms=rooms.rooms() if rooms else [],
                 channel_labels=labels,
-                error=error,
+                **({"flash": flash(error, "error")} if error else {}),
             ),
             status_code=status_code,
         )
@@ -1408,7 +1656,9 @@ def create_app(
             mode=str(raw.get("mode")),
             channels=channels,
         )
-        return RedirectResponse("/admin/mirroring", status_code=303)
+        return redirect_with(
+            request, "/admin/mirroring", flash(f"Mirroring {raw.get('room', '')}.".strip())
+        )
 
     @app.post("/admin/mirroring/remove")
     async def remove_mirrored_room(request: Request) -> Response:
@@ -1417,7 +1667,7 @@ def create_app(
         if rooms is not None:
             rooms.remove_room(form.get("room_id", ""))
         audit(request, session["username"], "mirroring.room_removed", form.get("room_id", ""))
-        return RedirectResponse("/admin/mirroring", status_code=303)
+        return redirect_with(request, "/admin/mirroring", flash("Stopped mirroring that room."))
 
     async def matrix_users_page(
         request: Request,
@@ -1441,7 +1691,7 @@ def create_app(
                 agent_available=agent.available(),
                 listing=listing,
                 error=error,
-                outcome=outcome,
+                **({"flash": outcome} if outcome else {}),
             ),
             status_code=status_code,
         )
@@ -1467,14 +1717,19 @@ def create_app(
                 params.get("user_id") or params.get("username"),
                 outcome="failed",
             )
-            return await matrix_users_page(
-                request, session, {"title": title, "error": str(exc)}, 400
-            )
-        # Temporary passwords are shown once and never written to the activity log.
+            return await matrix_users_page(request, session, flash(f"{title}: {exc}", "error"), 400)
+        # Temporary passwords are shown once and never written to the activity log or
+        # stored as a message: this response is the only place they appear.
         audit(
             request, session["username"], f"system.{op}", result.get("user_id"), outcome="succeeded"
         )
-        return await matrix_users_page(request, session, {"title": title, "result": result})
+        message = flash(f"{title}: {result.get('user_id')}")
+        if result.get("temporary_password"):
+            message.update(
+                secret=result["temporary_password"],
+                secret_label="Temporary password, shown only now",
+            )
+        return await matrix_users_page(request, session, message)
 
     @app.post("/admin/matrix-users/create")
     async def create_matrix_user(request: Request) -> Response:
@@ -1543,12 +1798,16 @@ def create_app(
         audit(
             request, session["username"], "channel.connected", "signal", group=values["group_name"]
         )
-        return RedirectResponse("/admin/channels", status_code=303)
+        return redirect_with(
+            request,
+            "/admin/channels#channel-signal",
+            flash(f"Announcements will be posted to the Signal group {values['group_name']}."),
+        )
 
     @app.post("/admin/channels/{kind}/test")
     async def test_channel(request: Request, kind: str) -> Response:
         session, _ = await checked_form(request, "settings")
-        connector_for(kind)
+        connector = connector_for(kind)
         if kind == "whatsapp" and not (
             publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None
         ):
@@ -1567,23 +1826,24 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         result = await run_in_threadpool(adapter.health_check)
         audit(request, session["username"], "channel.tested", kind, ok=result.ok)
-        return channels_page(
-            request, session, {"kind": kind, "ok": result.ok, "text": result.details}
+        return redirect_with(
+            request,
+            f"/admin/channels#channel-{kind}",
+            flash(f"{connector.label}: {result.details}", "success" if result.ok else "error"),
         )
 
     @app.post("/admin/channels/{kind}/disconnect")
     async def disconnect_channel(request: Request, kind: str) -> Response:
         session, _ = await checked_form(request, "settings")
-        connector_for(kind)
+        connector = connector_for(kind)
         storage.delete_connection(kind)
         publisher.reload_connections()
         audit(request, session["username"], "channel.disconnected", kind)
-        message = {
-            "kind": kind,
-            "ok": True,
-            "text": "Disconnected. Saved credentials were deleted.",
-        }
-        return channels_page(request, session, message)
+        return redirect_with(
+            request,
+            f"/admin/channels#channel-{kind}",
+            flash(f"{connector.label} disconnected. Its saved credentials were deleted."),
+        )
 
     @app.get("/admin/whatsapp")
     async def whatsapp_setup(request: Request) -> Response:
@@ -1616,7 +1876,7 @@ def create_app(
                 accounts=auth_store.list_accounts(),
                 assignable_roles=assignable,
                 role_descriptions=ROLE_DESCRIPTIONS,
-                error=error,
+                **({"flash": flash(error, "error")} if error else {}),
             ),
             status_code=status_code,
         )
@@ -1654,7 +1914,11 @@ def create_app(
         except ValueError as exc:
             return accounts_page(request, session, str(exc), 400)
         audit(request, session["username"], "account.created", username, role=role)
-        return RedirectResponse("/admin/accounts", status_code=303)
+        return redirect_with(
+            request,
+            "/admin/accounts",
+            flash(f"Created the account {username}. Share the temporary password privately."),
+        )
 
     @app.post("/admin/accounts/role")
     async def change_role(request: Request) -> Response:
@@ -1675,7 +1939,9 @@ def create_app(
             previous=account["role"],
             role=role,
         )
-        return RedirectResponse("/admin/accounts", status_code=303)
+        return redirect_with(
+            request, "/admin/accounts", flash(f"{account['username']} is now {role}.")
+        )
 
     @app.post("/admin/accounts/access")
     async def change_access(request: Request) -> Response:
@@ -1688,7 +1954,12 @@ def create_app(
             return accounts_page(request, session, str(exc), 400)
         action = "account.disabled" if disable else "account.enabled"
         audit(request, session["username"], action, account["username"])
-        return RedirectResponse("/admin/accounts", status_code=303)
+        text = (
+            f"{account['username']} can no longer sign in."
+            if disable
+            else f"{account['username']} can sign in again."
+        )
+        return redirect_with(request, "/admin/accounts", flash(text))
 
     @app.post("/admin/accounts/password")
     async def reset_password(request: Request) -> Response:
@@ -1701,7 +1972,11 @@ def create_app(
         except ValueError as exc:
             return accounts_page(request, session, str(exc), 400)
         audit(request, session["username"], "account.password_reset", account["username"])
-        return RedirectResponse("/admin/accounts", status_code=303)
+        return redirect_with(
+            request,
+            "/admin/accounts",
+            flash(f"Password reset for {account['username']}. Share it with them privately."),
+        )
 
     def account_page(
         request: Request,
@@ -1713,7 +1988,6 @@ def create_app(
         values = {
             "role_description": ROLE_DESCRIPTIONS[session["role"]],
             "error": None,
-            "saved": False,
             "two_step": auth_store.totp_enabled(username),
             "codes_left": auth_store.recovery_codes_left(username),
             "setup": None,
@@ -1729,12 +2003,19 @@ def create_app(
         account = managed_account(session, form)
         auth_store.disable_totp(account["username"])
         audit(request, session["username"], "two_step.reset", account["username"])
-        return RedirectResponse("/admin/accounts", status_code=303)
+        return redirect_with(
+            request,
+            "/admin/accounts",
+            flash(
+                f"Two-step login is off for {account['username']}. "
+                "They can turn it on again from My account."
+            ),
+        )
 
     @app.get("/admin/account")
     async def my_account(request: Request) -> Response:
         session = require(request, "view")
-        return account_page(request, session, saved=request.query_params.get("saved") == "1")
+        return account_page(request, session)
 
     @app.post("/admin/account/two-step/start")
     async def start_two_step(request: Request) -> Response:
@@ -1787,7 +2068,7 @@ def create_app(
             )
         auth_store.disable_totp(session["username"])
         audit(request, session["username"], "two_step.disabled", session["username"])
-        return account_page(request, session)
+        return redirect_with(request, "/admin/account", flash("Two-step login is off."))
 
     @app.post("/admin/account")
     async def change_my_password(request: Request) -> Response:
@@ -1808,33 +2089,12 @@ def create_app(
                 error = str(exc)
             else:
                 audit(request, session["username"], "password.changed", session["username"])
-                return RedirectResponse("/admin/account?saved=1", status_code=303)
+                return redirect_with(
+                    request,
+                    "/admin/account",
+                    flash("Password changed. Your other sessions were signed out."),
+                )
         return account_page(request, session, 400, error=error)
-
-    async def system_page(
-        request: Request,
-        session: dict[str, Any],
-        outcome: dict[str, Any] | None = None,
-        status_code: int = 200,
-    ) -> HTMLResponse:
-        status, agent_error = None, None
-        if agent.available():
-            try:
-                status = await run_in_threadpool(agent.call, "status.get", session["username"])
-            except (AgentUnavailable, AgentRefused) as exc:
-                agent_error = str(exc)
-        return render(
-            request,
-            "system.html",
-            page(
-                session,
-                agent_available=agent.available(),
-                agent_error=agent_error,
-                status=status,
-                outcome=outcome,
-            ),
-            status_code=status_code,
-        )
 
     async def run_system_operation(
         request: Request,
@@ -1847,13 +2107,24 @@ def create_app(
             result = await run_in_threadpool(agent.call, op, session["username"], None, password)
         except (AgentUnavailable, AgentRefused) as exc:
             audit(request, session["username"], f"system.{op}", outcome="refused")
-            return await system_page(request, session, {"title": title, "error": str(exc)}, 400)
+            return await backups_page(
+                request, session, flash(f"{title} failed: {exc}", "error"), 400
+            )
         audit(request, session["username"], f"system.{op}", outcome="succeeded")
-        return await system_page(request, session, {"title": title, "result": result})
+        details = []
+        if result.get("id"):
+            encrypted = "encrypted" if result.get("encrypted") else "not encrypted"
+            details.append(f"Snapshot {result['id']}, {encrypted}.")
+        details += [f"Warning: {line}" for line in result.get("warnings") or []]
+        details += list(result.get("messages") or []) + list(result.get("checks") or [])
+        tone = "warning" if result.get("warnings") else "success"
+        return redirect_with(request, "/admin/backups", flash(f"{title} finished.", tone, details))
 
     @app.get("/admin/system")
     async def system(request: Request) -> Response:
-        return await system_page(request, require(request, "system"))
+        # Its backup actions moved to Backups and its service list to Services.
+        require(request, "system")
+        return RedirectResponse("/admin/backups", status_code=303)
 
     @app.post("/admin/system/backup")
     async def system_backup(request: Request) -> Response:
@@ -1875,11 +2146,10 @@ def create_app(
     async def services_page(
         request: Request,
         session: dict[str, Any],
-        error: str | None = None,
+        message: dict[str, Any] | None = None,
         status_code: int = 200,
-        outcome: dict[str, Any] | None = None,
     ) -> HTMLResponse:
-        values, status, components = None, None, []
+        values, status, components, error = None, None, [], None
         if agent.available():
             try:
                 config = await run_in_threadpool(agent.call, "config.get", session["username"])
@@ -1889,7 +2159,7 @@ def create_app(
                     await run_in_threadpool(agent.call, "services.versions", session["username"])
                 )["components"]
             except (AgentUnavailable, AgentRefused) as exc:
-                error = error or str(exc)
+                error = str(exc)
         return render(
             request,
             "services.html",
@@ -1900,9 +2170,9 @@ def create_app(
                 values=values,
                 status=status,
                 components=components,
-                outcome=outcome,
                 timezones=sorted(available_timezones()),
                 error=error,
+                **({"flash": message} if message else {}),
             ),
             status_code=status_code,
         )
@@ -1925,11 +2195,11 @@ def create_app(
         except (AgentUnavailable, AgentRefused) as exc:
             audit(request, session["username"], "system.services.update", service, outcome="failed")
             return await services_page(
-                request, session, None, 400, {"title": f"Updating {service}", "error": str(exc)}
+                request, session, flash(f"Updating {service} failed: {exc}", "error"), 400
             )
         audit(request, session["username"], "system.services.update", service, outcome="succeeded")
-        return await services_page(
-            request, session, outcome={"title": f"Updating {service}", "steps": result["steps"]}
+        return redirect_with(
+            request, "/admin/services", flash(f"Updated {service}.", details=result["steps"])
         )
 
     @app.post("/admin/services/review")
@@ -1941,9 +2211,11 @@ def create_app(
                 agent.call, "config.plan", session["username"], {"changes": changes}
             )
         except (AgentUnavailable, AgentRefused) as exc:
-            return await services_page(request, session, str(exc), 400)
+            return await services_page(request, session, flash(str(exc), "error"), 400)
         if not plan["changes"]:
-            return await services_page(request, session, "Nothing was changed.", 400)
+            return await services_page(
+                request, session, flash("Nothing was changed.", "warning"), 400
+            )
         applied = {change["key"]: form[f"setting:{change['key']}"] for change in plan["changes"]}
         return render(
             request, "services_review.html", page(session, plan=plan, changes=applied, result=None)
@@ -2015,7 +2287,7 @@ def create_app(
             {
                 "label": "Install the system agent on the server",
                 "done": agent.available(),
-                "link": "/admin/system",
+                "link": "/admin/health",
             },
             {
                 "label": "Set the community time zone",
@@ -2030,7 +2302,7 @@ def create_app(
             {
                 "label": "Run a restore drill",
                 "done": auth_store.has_event("system.restore.drill", outcome="succeeded"),
-                "link": "/admin/system",
+                "link": "/admin/backups#restore-drill",
             },
             {
                 "label": "Connect a publishing channel",
@@ -2064,7 +2336,7 @@ def create_app(
                 agent_available=agent.available(),
                 status=status,
                 error=error,
-                outcome=outcome,
+                **({"flash": outcome} if outcome else {}),
             ),
             status_code=status_code,
         )
@@ -2084,9 +2356,9 @@ def create_app(
             )
         except (AgentUnavailable, AgentRefused) as exc:
             audit(request, session["username"], f"system.{op}", outcome="failed")
-            return await backups_page(request, session, {"title": title, "error": str(exc)}, 400)
+            return await backups_page(request, session, flash(f"{title}: {exc}", "error"), 400)
         audit(request, session["username"], f"system.{op}", outcome="succeeded")
-        return await backups_page(request, session, {"title": title, "steps": result["steps"]})
+        return redirect_with(request, "/admin/backups", flash(title, details=result["steps"]))
 
     @app.post("/admin/backups/offsite")
     async def backups_offsite(request: Request) -> Response:

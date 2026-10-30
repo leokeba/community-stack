@@ -1,59 +1,137 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
+{% block strip %}
+{% if services %}
+<div class="status-strip" aria-label="Service status">
+  {% if services.error %}
+  <span><span class="dot dot-warning"></span>{{ services.error }}</span>
+  {% else %}
+  {% for container in services.containers %}
+  <span><span class="dot {{ 'dot-ok' if container.state == 'running' else 'dot-problem' }}"></span>{{ container.name|replace("community_", "") }}{% if container.state != "running" %} {{ container.state }}{% endif %}</span>
+  {% else %}
+  <span><span class="dot"></span>No services running</span>
+  {% endfor %}
+  {% endif %}
+  <a href="/admin/health">Health and logs</a>
+</div>
+{% endif %}
+{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div>
-    <h1>Publishing dashboard</h1>
-    <p class="page-intro">A quick view of your publishing activity and anything that needs attention.</p>
-  </div>
-  {% if perms.edit %}<a class="button-link" href="/admin/announcements/new">Create announcement</a>{% endif %}
+  <h1>Dashboard</h1>
+  {% if perms.edit %}<a class="button-link" href="/admin/announcements/new">New announcement</a>{% endif %}
 </div>
-{% if setup_total and setup_done < setup_total %}
-<p class="notice notice-warning"><a href="/admin/start">Finish setting up</a>: {{ setup_done }} of {{ setup_total }} steps done.</p>
-{% endif %}
-{% if awaiting_review %}
-<section class="panel review-panel">
-  <div class="section-heading">
-    <h2>Waiting for your review</h2>
-    <span class="status">{{ awaiting_review|length }} pending</span>
-  </div>
-  <ul>{% for item in awaiting_review %}<li><a href="/admin/announcements/{{ item.id }}">{{ item.title }}</a></li>{% endfor %}</ul>
+
+<section class="kpis" aria-label="Publishing at a glance">
+  <div class="kpi"><p class="kpi-label">Published this month</p><p class="kpi-value"><a href="/admin/announcements?status=published">{{ counts.published }}</a></p></div>
+  <div class="kpi"><p class="kpi-label">Scheduled</p><p class="kpi-value"><a href="/admin/announcements?status=scheduled">{{ counts.scheduled }}</a></p></div>
+  <div class="kpi"><p class="kpi-label">In review</p><p class="kpi-value"><a href="/admin/announcements?status=in_review">{{ counts.in_review }}</a></p></div>
+  <div class="kpi{% if failed_count %} kpi-danger{% endif %}"><p class="kpi-label">Failed deliveries</p><p class="kpi-value">{{ failed_count }}</p></div>
+  <div class="kpi"><p class="kpi-label">Waiting to retry</p><p class="kpi-value">{{ jobs|length }}</p></div>
 </section>
-{% endif %}
-<section class="dashboard-stats" aria-label="Delivery status">
-  <article class="stat-card {{ 'attention' if failed_count else '' }}">
-    <p class="stat-label">Delivery failures</p>
-    <strong class="stat-value">{{ failed_count }}</strong>
-    <p class="muted">{% if failed_count %}Needs attention{% else %}All clear{% endif %}</p>
-  </article>
-  <article class="stat-card {{ 'waiting' if queued_count else '' }}">
-    <p class="stat-label">Waiting to retry</p>
-    <strong class="stat-value">{{ queued_count }}</strong>
-    <p class="muted">{% if queued_count %}Automatic retry is scheduled{% else %}No retries queued{% endif %}</p>
-  </article>
-</section>
-<div class="section-heading">
-  <h2>Recent announcements</h2>
-  <a href="/admin/announcements">View all</a>
+
+<div class="dash">
+  <div class="dash-main">
+    <section class="card" aria-labelledby="attention-heading">
+      {% set attention = failures|length + awaiting_review|length + (1 if setup_total and setup_done < setup_total else 0) %}
+      <div class="card-h"><h2 id="attention-heading">Needs attention</h2><span class="muted">{{ attention }} open</span></div>
+      {% for failure in failures %}
+      <div class="attn">
+        {{ badge("failed") }}
+        <div class="attn-body">
+          <p><strong>{{ failure.label }}</strong>: {{ failure.count }} failed {{ "delivery" if failure.count == 1 else "deliveries" }}</p>
+          {% if failure.error %}<p class="muted">{{ failure.error }}</p>{% endif %}
+        </div>
+        <a class="button-link secondary small" href="/admin/announcements/{{ failure.announcement_id }}">Open</a>
+      </div>
+      {% endfor %}
+      {% for item in awaiting_review %}
+      <div class="attn">
+        {{ badge("in_review", "Review") }}
+        <div class="attn-body">
+          <p>Waiting for your review: {{ item.title }}</p>
+        </div>
+        <a class="button-link secondary small" href="/admin/announcements/{{ item.id }}">Review</a>
+      </div>
+      {% endfor %}
+      {% if setup_total and setup_done < setup_total %}
+      <div class="attn">
+        {{ badge("setup", "Setup", "info") }}
+        <div class="attn-body">
+          <p>Finish setting up: {{ setup_done }} of {{ setup_total }} steps done</p>
+          {% if next_step %}<p class="muted">Next: {{ next_step.label }}</p>{% endif %}
+        </div>
+        <a class="button-link secondary small" href="/admin/start">Checklist</a>
+      </div>
+      {% endif %}
+      {% if not attention %}<p class="attn-empty">Nothing needs attention.</p>{% endif %}
+    </section>
+
+    <section class="card" aria-labelledby="recent-heading">
+      <div class="card-h"><h2 id="recent-heading">Recent announcements</h2><a href="/admin/announcements">All announcements</a></div>
+      {% if announcements %}
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Title</th><th>Status</th><th>Channels</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for announcement in announcements %}
+        {% set states = deliveries[announcement.id] %}
+        <tr>
+          <td><a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
+          <td>{{ badge(announcement.status) }}</td>
+          <td>
+            {% if states %}
+            {% set delivered = states|selectattr("status", "equalto", "delivered")|list|length %}
+            <span class="squares" role="img" aria-label="{{ delivered }} of {{ states|length }} delivered">{% for state in states %}<i class="sq-{{ state.status }}"></i>{% endfor %}</span>
+            {% elif announcement.status.value == "scheduled" and announcement.scheduled_at %}<span class="mono">{{ announcement.scheduled_at[:16]|replace("T", " ") }}</span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="mono">{{ announcement.published_at[:16]|replace("T", " ") }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <p class="attn-empty">No announcements yet.{% if perms.edit %} <a href="/admin/announcements/new">Create your first draft</a>.{% endif %}</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="dash-rail">
+    <section class="card" aria-labelledby="queue-heading">
+      <div class="card-h"><h2 id="queue-heading">Retry queue</h2><span class="muted">{{ jobs|length }} {{ "job" if jobs|length == 1 else "jobs" }}</span></div>
+      {% for job in jobs %}
+      <div class="rail-row">
+        <div>
+          <p class="mono">{{ job.adapter_name }} · {{ job.operation }}</p>
+          <p class="muted">{{ job.title }} · {% if job.status == "running" %}in progress{% else %}next <span class="mono">{{ job.run_after[11:16] }}</span> UTC{% endif %} · {{ job.attempts }}/{{ job.max_attempts }}</p>
+        </div>
+      </div>
+      {% else %}
+      <p class="attn-empty">Nothing waiting to retry.</p>
+      {% endfor %}
+    </section>
+
+    <section class="card" aria-labelledby="channels-heading">
+      <div class="card-h"><h2 id="channels-heading">Channels</h2>{% if perms.settings %}<a href="/admin/channels">Manage</a>{% endif %}</div>
+      {% for channel in channels %}
+      <div class="rail-row">
+        <p><span class="dot {{ 'dot-problem' if channel.state == 'failing' else ('dot-ok' if channel.state == 'on' else '') }}"></span>{{ channel.label }}</p>
+        <p class="muted">{{ {"failing": "failing", "on": "on", "off": "off"}[channel.state] }}</p>
+      </div>
+      {% else %}
+      <p class="attn-empty">No channels yet.</p>
+      {% endfor %}
+    </section>
+
+    {% if setup_total %}
+    <section class="card" aria-labelledby="setup-heading">
+      <div class="card-h"><h2 id="setup-heading">Setup</h2><span class="muted">{{ setup_done }} of {{ setup_total }}</span></div>
+      <div class="progress"><span class="progress-{{ (setup_done * 100 // setup_total) // 10 * 10 }}"></span></div>
+      <p class="progress-note">{% if next_step %}Next: <a href="{{ next_step.link or '/admin/start' }}">{{ next_step.label }}</a>{% else %}All steps done.{% endif %}</p>
+    </section>
+    {% endif %}
+  </div>
 </div>
-{% if announcements %}
-<div class="table-wrap">
-<table>
-  <thead><tr><th>Title</th><th>Status</th><th>Updated</th></tr></thead>
-  <tbody>
-  {% for announcement in announcements %}
-  <tr>
-    <td><a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
-    <td class="status">{{ announcement.status.value }}</td>
-    <td>{{ announcement.published_at[:10] }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<div class="empty-state">
-  <p>No announcements yet. {% if perms.edit %}<a href="/admin/announcements/new">Create your first draft</a> to get started.{% else %}New announcements will appear here when they are created.{% endif %}</p>
-</div>
-{% endif %}
 {% endblock %}

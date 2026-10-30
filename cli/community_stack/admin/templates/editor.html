@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ "Edit announcement" if announcement else "New draft" }}{% endblock %}
 {% block content %}
+<div class="page-heading">
 <h1>{% if template_mode %}{{ "Edit template" if announcement and announcement.name else "New template" }}{% else %}{{ "Edit announcement" if announcement and announcement.id else "Create a draft" }}{% endif %}</h1>
-{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if templates and not template_mode %}
-<form class="inline" method="get" action="/admin/announcements/new">
+<form class="inline template-picker" method="get" action="/admin/announcements/new">
   <label for="template">Start from a template</label>
   <select id="template" name="template">{% for item in templates %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select>
-  <button type="submit">Use template</button>
+  <button type="submit" class="secondary">Use template</button>
 </form>
 {% endif %}
+</div>
+{% if error %}<p class="error" role="alert" data-reveal>{{ error }}</p>{% endif %}
+<div class="editor-layout">
 <form class="card" method="post" data-preview-url="/admin/preview" action="{{ form_action if template_mode else ('/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% if template_mode %}
@@ -39,11 +42,12 @@
   {% endif %}
   <p><button type="submit">{% if template_mode %}Save template{% else %}{{ "Save changes" if announcement and announcement.id else "Save draft" }}{% endif %}</button></p>
 </form>
-<section aria-labelledby="preview-heading" hidden data-preview-panel>
+<section class="editor-preview" aria-labelledby="preview-heading" hidden data-preview-panel>
   <h2 id="preview-heading">Preview</h2>
   <article id="live-preview" aria-live="polite"></article>
   <h3>On each channel</h3>
   <div id="channel-previews"></div>
 </section>
-<script src="/admin/static/editor.js" defer></script>
+</div>
+<script src="/admin/static/editor.js?v={{ static_version }}" defer></script>
 {% endblock %}

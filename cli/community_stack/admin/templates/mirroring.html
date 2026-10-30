@@ -3,7 +3,6 @@
 {% block content %}
 <h1>Mirrored Matrix rooms</h1>
 <p>Messages posted in these Matrix rooms become announcements on the channels you choose. Editing a message updates the announcement; deleting it withdraws the announcement.</p>
-{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if not available %}
 <div class="panel">
   <p>Mirroring needs a Matrix announcements connection. Connect a dedicated Matrix account on the <a href="/admin/channels">Channels page</a>, then return here.</p>
@@ -11,6 +10,7 @@
 </div>
 {% else %}
 {% if rooms %}
+<div class="table-wrap">
 <table>
   <thead><tr><th>Room</th><th>Who can post</th><th>What happens</th><th>Channels</th><th></th></tr></thead>
   <tbody>
@@ -21,16 +21,17 @@
     <td>{{ "Published right away" if room.mode == "publish" else "Draft for review" }}</td>
     <td>{% for name in room.channels %}{{ channel_labels.get(name, name) }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
     <td>
-      <form method="post" action="/admin/mirroring/remove">
+      <form method="post" action="/admin/mirroring/remove" data-confirm="Stop mirroring {{ room.alias or room.room_id }}? New messages in that room will no longer become announcements." data-confirm-label="Stop mirroring">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="room_id" value="{{ room.room_id }}">
-        <button type="submit">Stop mirroring</button>
+        <button type="submit" class="secondary small danger">Stop mirroring</button>
       </form>
     </td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 <form class="card" method="post" action="/admin/mirroring/add">
   <h2>Mirror a room</h2>

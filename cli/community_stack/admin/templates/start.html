@@ -1,11 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Get started{% endblock %}
+{% block title %}Setup checklist{% endblock %}
 {% block content %}
-<h1>Get started</h1>
-<p>{{ steps|selectattr("done")|list|length }} of {{ steps|length }} steps done.</p>
-<ol>
-{% for step in steps %}
-  <li>{% if step.done %}<span aria-label="Done">✓</span> {{ step.label }}{% else %}{% if step.link %}<a href="{{ step.link }}">{{ step.label }}</a>{% else %}{{ step.label }}{% endif %}{% endif %}</li>
-{% endfor %}
-</ol>
+{% set done = steps|selectattr("done")|list|length %}
+<div class="page-heading">
+  <div>
+    <h1>Setup checklist</h1>
+    <p class="muted">{{ done }} of {{ steps|length }} steps done.</p>
+  </div>
+</div>
+<section class="card card-flush">
+  <div class="progress"><span class="progress-{{ (done * 100 // steps|length) // 10 * 10 }}"></span></div>
+  <ol class="checklist">
+  {% for step in steps %}
+    <li class="rail-row">
+      <p>{% if step.done or not step.link %}{{ step.label }}{% else %}<a href="{{ step.link }}">{{ step.label }}</a>{% endif %}</p>
+      {% if step.done %}{{ badge("done", "Done", "success") }}{% else %}{{ badge("todo", "To do", "neutral") }}{% endif %}
+    </li>
+  {% endfor %}
+  </ol>
+</section>
 {% endblock %}

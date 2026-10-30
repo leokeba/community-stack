@@ -301,13 +301,17 @@ def test_console_connects_tests_and_publishes_to_a_channel(console):
             "access_token": "secret-token-value",
         },
     )
-    assert saved.status_code == 200
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/admin/channels#channel-mastodon"
+    saved = client.get("/admin/channels")
+    assert "Mastodon saved." in saved.text
     assert "secret-token-value" not in saved.text
     assert "https://social.example" in saved.text
 
     transport.replies.append(("GET", "verify_credentials", 200, {"acct": "community"}))
     tested = client.post("/admin/channels/mastodon/test", data={"csrf_token": csrf(page)})
-    assert "Connected as @community." in tested.text
+    assert tested.status_code == 303
+    assert "Connected as @community." in client.get("/admin/channels").text
 
     transport.replies.append(("POST", "/api/v1/statuses", 200, {"id": "5"}))
     _, results = app.state.publisher.publish("Hello fediverse", "First post")
@@ -352,14 +356,15 @@ def test_meta_connectors_are_available_and_testable_in_admin(console):
             f"/admin/channels/{kind}/save",
             data={"csrf_token": token, **values},
         )
-        assert saved.status_code == 200
-        assert values["access_token"] not in saved.text
+        assert saved.status_code == 303
+        assert values["access_token"] not in client.get("/admin/channels").text
         transport.replies.append(("GET", path, 200, body))
         tested = client.post(
             f"/admin/channels/{kind}/test",
             data={"csrf_token": token},
         )
-        assert expected in tested.text
+        assert tested.status_code == 303
+        assert expected in client.get("/admin/channels").text
 
 
 def test_saving_without_a_new_secret_keeps_the_old_one(console):
@@ -416,8 +421,8 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
             "access_token": "matrix-access-token",
         },
     )
-    assert saved.status_code == 200
-    assert "matrix-access-token" not in saved.text
+    assert saved.status_code == 303
+    assert "matrix-access-token" not in client.get("/admin/channels").text
 
     mirror_page = client.get("/admin/mirroring")
     assert "Mirror a room" in mirror_page.text
@@ -432,7 +437,7 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
         "/admin/channels/whatsapp/save",
         data={"csrf_token": csrf(page), "room_id": "!portal:community.test"},
     )
-    assert saved_wa.status_code == 200
+    assert saved_wa.status_code == 303
     assert any(adapter.name == "whatsapp" for adapter in app.state.publisher.adapters)
 
 

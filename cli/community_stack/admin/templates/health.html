@@ -15,7 +15,7 @@
   <thead><tr><th>Check</th><th>Status</th><th>Details</th></tr></thead>
   <tbody>
   {% for check in health.checks %}
-  <tr><td>{{ check.name }}</td><td class="status">{{ labels[check.status] }}</td><td>{{ check.details }}</td></tr>
+  <tr><td>{{ check.name }}</td><td>{{ badge(check.status) }}</td><td>{{ check.details }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -34,7 +34,7 @@
 </form>
 {% if logs %}
 <p class="muted">Last {{ logs.lines }} lines of {{ logs.service }}. Passwords, tokens and channel credentials are removed; logs can still contain people's IP addresses and account names.</p>
-<pre style="white-space: pre-wrap; max-height: 40rem; overflow: auto; background: #fff; border: 1px solid #d5dde2; padding: .75rem">{{ logs.text or "(no output)" }}</pre>
+<pre class="log-output">{{ logs.text or "(no output)" }}</pre>
 {% endif %}
 {% endif %}
 {% endblock %}

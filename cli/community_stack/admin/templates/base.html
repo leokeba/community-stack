@@ -3,315 +3,99 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f6f8">
+  <meta name="theme-color" content="#11161c">
   <title>{% block title %}Announcements{% endblock %} · Community Stack</title>
-  <style>
-    :root {
-      color-scheme: light;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.55;
-      color: #182b3a;
-      background: #f3f6f8;
-      font-synthesis: none;
-      text-rendering: optimizeLegibility;
-      --ink: #182b3a;
-      --muted: #566a79;
-      --line: #dce4e9;
-      --paper: #fff;
-      --canvas: #f3f6f8;
-      --blue: #17618a;
-      --blue-dark: #104c70;
-      --blue-soft: #eaf3f8;
-      --green: #19653d;
-      --green-soft: #eaf5ee;
-      --amber: #80530c;
-      --amber-soft: #fff5dc;
-      --red: #a52c27;
-      --red-soft: #fff0ee;
-      --radius: .8rem;
-      --shadow: 0 8px 24px rgb(22 45 63 / 5%);
-    }
-    * { box-sizing: border-box; }
-    body { min-width: 20rem; margin: 0; }
-    a { color: var(--blue); text-underline-offset: .18em; }
-    a:hover { color: var(--blue-dark); }
-    :focus-visible { outline: 3px solid #e49b20; outline-offset: 3px; }
-    [hidden] { display: none !important; }
-
-    .topbar { background: var(--paper); border-bottom: 1px solid var(--line); }
-    .topbar-inner {
-      display: flex;
-      max-width: 88rem;
-      min-height: 4.5rem;
-      margin: auto;
-      padding: .85rem 1.5rem;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-    }
-    .brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: .7rem; color: var(--ink); text-decoration: none; }
-    .brand-mark {
-      display: grid;
-      width: 2rem;
-      height: 2rem;
-      place-items: center;
-      border-radius: .6rem;
-      background: var(--blue);
-      color: white;
-      font-size: .95rem;
-      font-weight: 800;
-    }
-    .brand-name { font-size: 1rem; font-weight: 750; letter-spacing: -.025em; white-space: nowrap; }
-    .account-bar { display: flex; align-items: center; justify-content: flex-end; gap: .8rem; }
-    .account-bar button { flex-shrink: 0; white-space: nowrap; }
-    .user-chip {
-      max-width: 15rem;
-      padding: .35rem .7rem;
-      overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--muted);
-      font-size: .82rem;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .button-link {
-      display: inline-flex;
-      min-height: 2.55rem;
-      align-items: center;
-      justify-content: center;
-      padding: .55rem .9rem;
-      border: 1px solid var(--blue);
-      border-radius: .5rem;
-      background: var(--blue);
-      color: white;
-      font-weight: 700;
-      text-decoration: none;
-    }
-    .button-link:hover { border-color: var(--blue-dark); background: var(--blue-dark); color: white; }
-    .account-bar form { margin: 0; }
-    .app-frame {
-      display: grid;
-      grid-template-columns: 14rem minmax(0, 1fr);
-      align-items: start;
-      gap: 1.75rem;
-      max-width: 88rem;
-      margin: auto;
-      padding: 1.5rem;
-    }
-    .sidebar {
-      position: sticky;
-      top: 1.5rem;
-      padding: .75rem;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper);
-      box-shadow: var(--shadow);
-    }
-    .nav-group + .nav-group { margin-top: 1rem; padding-top: .85rem; border-top: 1px solid var(--line); }
-    .nav-heading {
-      margin: 0 0 .35rem;
-      padding: 0 .65rem;
-      color: #71818d;
-      font-size: .68rem;
-      font-weight: 800;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-    }
-    .nav-link {
-      display: flex;
-      min-height: 2.45rem;
-      align-items: center;
-      padding: .45rem .65rem;
-      border-radius: .5rem;
-      color: #344c5c;
-      font-size: .9rem;
-      font-weight: 550;
-      text-decoration: none;
-    }
-    .nav-link:hover { background: #f2f6f8; color: var(--ink); }
-    .nav-link[aria-current="page"] { background: var(--blue-soft); color: var(--blue-dark); font-weight: 750; }
-    main { min-width: 0; padding: .25rem 0 3rem; }
-    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin: 0 0 1.25rem; }
-    h1 { margin: 0; color: var(--ink); font-size: clamp(1.7rem, 3vw, 2.15rem); line-height: 1.2; letter-spacing: -.045em; }
-    h2 { margin: 1.8rem 0 .75rem; font-size: 1.2rem; line-height: 1.3; letter-spacing: -.02em; }
-    h3 { margin: 1.35rem 0 .55rem; font-size: 1rem; }
-    p { margin: .65rem 0; }
-    .page-intro { max-width: 52rem; margin: .55rem 0 1.4rem; color: var(--muted); }
-    article, .panel, form.card, section.card, details.card {
-      margin: 1rem 0;
-      padding: 1.25rem;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper);
-      box-shadow: var(--shadow);
-    }
-    .panel h2:first-child, .card h2:first-child { margin-top: 0; }
-    label { display: block; margin: .9rem 0 .3rem; color: #2a4050; font-size: .9rem; font-weight: 680; }
-    input, textarea, button, select { box-sizing: border-box; max-width: 100%; font: inherit; }
-    input[type=text], input[type=password], input[type=url], input[type=number], textarea, select {
-      min-height: 2.75rem;
-      padding: .6rem .75rem;
-      border: 1px solid #b8c6cf;
-      border-radius: .5rem;
-      background: white;
-      color: var(--ink);
-    }
-    input[type=text], input[type=password], input[type=url], input[type=number], textarea { width: 100%; }
-    input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: var(--blue); vertical-align: -.15em; }
-    textarea { min-height: 12rem; resize: vertical; }
-    input::placeholder { color: #71818d; }
-    button {
-      min-height: 2.55rem;
-      padding: .55rem .9rem;
-      border: 1px solid var(--blue);
-      border-radius: .5rem;
-      background: var(--blue);
-      color: white;
-      cursor: pointer;
-      font-weight: 700;
-      transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
-    }
-    button:hover { border-color: var(--blue-dark); background: var(--blue-dark); }
-    button:active { transform: translateY(1px); }
-    button.secondary { border-color: var(--line); background: white; color: #344c5c; }
-    button.secondary:hover { border-color: #b8c6cf; background: #f5f8fa; }
-    button.danger { border-color: var(--red); background: var(--red); }
-    button.danger:hover { border-color: #84221f; background: #84221f; }
-    .error, .notice {
-      margin: 1rem 0;
-      padding: .9rem 1rem;
-      border: 1px solid transparent;
-      border-radius: .6rem;
-    }
-    .error { border-color: #f0c6c1; background: var(--red-soft); color: #7d2420; }
-    .notice { border-color: #c6e2ce; background: var(--green-soft); color: #174f31; }
-    .notice-warning { border-color: #eed79f; background: var(--amber-soft); color: #714d0b; }
-    .muted { color: var(--muted); }
-    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-    .status { font-weight: 750; }
-    .table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: .65rem; background: var(--paper); }
-    table {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-collapse: separate;
-      border-spacing: 0;
-      border-radius: .65rem;
-      background: var(--paper);
-      overflow: hidden;
-    }
-    th, td { padding: .8rem .85rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { background: #f7f9fa; color: #465e6e; font-size: .75rem; font-weight: 800; letter-spacing: .045em; text-transform: uppercase; }
-    tr:last-child th, tr:last-child td { border-bottom: 0; }
-    tbody tr:hover { background: #fafcfd; }
-    .actions { display: flex; flex-wrap: wrap; gap: .65rem; }
-    .inline { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; margin: 0; }
-    .inline label { margin: 0; }
-    select { min-width: 7rem; }
-    .notice a, .error a { color: inherit; font-weight: 750; }
-    .dashboard-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; margin: 1.25rem 0; }
-    .stat-card { padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--paper); box-shadow: var(--shadow); }
-    .stat-card p { margin: 0; }
-    .stat-label { color: var(--muted); font-size: .8rem; font-weight: 650; }
-    .stat-value { display: block; margin-top: .2rem; font-size: 1.8rem; font-weight: 800; line-height: 1.2; letter-spacing: -.04em; }
-    .stat-card.attention { border-color: #efc6c1; background: #fffaf9; }
-    .stat-card.attention .stat-value { color: var(--red); }
-    .stat-card.waiting .stat-value { color: var(--amber); }
-    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1.8rem 0 .75rem; }
-    .section-heading h2 { margin: 0; }
-    .empty-state { padding: 1.4rem; border: 1px dashed #b8c6cf; border-radius: .75rem; background: #fbfcfd; color: var(--muted); }
-    .empty-state p { margin: 0; }
-    .actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin: 1.25rem 0; }
-    .login-layout { width: min(100%, 28rem); margin: clamp(2rem, 10vh, 6rem) auto; }
-    .login-layout h1 { margin-bottom: 1rem; }
-    details summary { cursor: pointer; font-weight: 700; }
-    pre { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: .6rem; background: #fff; padding: .9rem; }
-    @media (max-width: 56rem) {
-      .app-frame { grid-template-columns: minmax(0, 1fr); gap: 1rem; padding: 1rem; }
-      .sidebar { position: static; }
-      .sidebar > nav { display: flex; flex-wrap: wrap; gap: .3rem; }
-      .nav-group { display: contents; }
-      .nav-group + .nav-group { margin: 0; padding: 0; border: 0; }
-      .nav-heading { display: none; }
-      .nav-link { min-height: 2.3rem; background: #f7f9fa; white-space: nowrap; }
-    }
-    @media (max-width: 38rem) {
-      .topbar-inner { min-height: 4rem; padding: .7rem .75rem; }
-      .brand { gap: .5rem; }
-      .brand-name { font-size: .8rem; }
-      .account-bar { flex: 0 0 auto; gap: .35rem; }
-      .account-bar button { min-height: 2.3rem; padding: .45rem .6rem; font-size: .8rem; }
-      .user-chip { max-width: 5.25rem; padding: .3rem .45rem; font-size: .7rem; }
-      .app-frame { padding: .75rem; }
-      .sidebar { padding: .5rem; border-radius: .65rem; }
-      .nav-link { min-height: 2.1rem; padding: .35rem .5rem; font-size: .8rem; }
-      .page-heading { flex-direction: column; }
-      .dashboard-stats { grid-template-columns: 1fr; }
-      article, .panel, form.card, section.card, details.card { padding: 1rem; }
-      th, td { padding: .65rem; }
-      table { display: block; min-width: 36rem; max-width: 100%; overflow-x: auto; }
-      .inline { align-items: stretch; }
-    }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
-  </style>
+  <link rel="stylesheet" href="/admin/static/admin.css?v={{ static_version }}">
+  <script src="/admin/static/admin.js?v={{ static_version }}" defer></script>
 </head>
-<body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" href="/admin" aria-label="Community Stack administration">
-        <span class="brand-mark" aria-hidden="true">C</span>
-        <span class="brand-name">Community Stack</span>
-      </a>
-    {% if username %}
-      <div class="account-bar">
-        <span class="user-chip">{{ username }} · {{ role|capitalize }}</span>
-        <form method="post" action="/admin/logout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit">Log out</button>
-        </form>
-      </div>
-    {% endif %}
-    </div>
-  </header>
-  <div class="app-frame">
-    {% if username %}
+{% macro nav_link(href, label, match=None, exact=False) -%}
+{%- set path = request.url.path -%}
+<a class="nav-link" href="{{ href }}" {% if (exact and path == href) or (not exact and path.startswith(match or href)) %}aria-current="page"{% endif %}>{{ label }}</a>
+{%- endmacro %}
+{% macro flash_message() -%}
+{% if flash %}
+<div class="toast-region">
+  <div class="toast toast-{{ flash.tone }}" role="{{ 'alert' if flash.tone == 'error' else 'status' }}" {% if flash.tone == 'success' and not flash.secret %}data-toast="auto"{% else %}data-toast{% endif %}>
+    <p class="toast-text">{{ flash.text }}</p>
+    {% if flash.details %}<ul>{% for line in flash.details %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+    {% if flash.secret %}<p>{{ flash.secret_label }}: <code>{{ flash.secret }}</code></p>{% endif %}
+    <button type="button" class="toast-close" data-toast-close aria-label="Dismiss message">&times;</button>
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+<body{% if username %} data-console{% endif %} data-page="{{ template_name }}">
+  <div class="load-bar" aria-hidden="true"></div>
+  {% if username %}
+  <div class="shell">
     <aside class="sidebar">
-      <nav aria-label="Administration">
+      <div class="sidebar-top">
+        <a class="brand" href="/admin" aria-label="Community Stack administration"><span class="brand-mark" aria-hidden="true">C</span><span>Community Stack</span></a>
+        <button type="button" class="nav-toggle small" aria-expanded="false" aria-controls="console-nav" data-nav-toggle>Menu</button>
+      </div>
+      <nav class="nav" id="console-nav" aria-label="Administration">
         <div class="nav-group">
-          <p class="nav-heading">Overview</p>
-          <a class="nav-link" href="/admin" {% if request.url.path == "/admin" %}aria-current="page"{% endif %}>Dashboard</a>
+          {{ nav_link("/admin", "Dashboard", exact=True) }}
         </div>
         <div class="nav-group">
           <p class="nav-heading">Publishing</p>
-          <a class="nav-link" href="/admin/announcements" {% if request.url.path.startswith("/admin/announcements") %}aria-current="page"{% endif %}>Announcements</a>
-          {% if perms.edit %}<a class="nav-link" href="/admin/templates" {% if request.url.path.startswith("/admin/templates") %}aria-current="page"{% endif %}>Templates</a>{% endif %}
-          {% if perms.settings %}<a class="nav-link" href="/admin/channels" {% if request.url.path.startswith("/admin/channels") %}aria-current="page"{% endif %}>Channels</a>{% endif %}
-          {% if perms.settings %}<a class="nav-link" href="/admin/mirroring" {% if request.url.path.startswith("/admin/mirroring") %}aria-current="page"{% endif %}>Mirroring</a>{% endif %}
+          {{ nav_link("/admin/announcements", "Announcements") }}
+          {% if perms.edit %}{{ nav_link("/admin/templates", "Templates") }}{% endif %}
         </div>
+        {% if perms.settings %}
         <div class="nav-group">
-          <p class="nav-heading">Administration</p>
-          {% if perms.settings %}<a class="nav-link" href="/admin/settings" {% if request.url.path.startswith("/admin/settings") %}aria-current="page"{% endif %}>Settings</a>{% endif %}
-          {% if perms.accounts %}<a class="nav-link" href="/admin/accounts" {% if request.url.path.startswith("/admin/accounts") %}aria-current="page"{% endif %}>Accounts</a>{% endif %}
-          {% if perms.system %}<a class="nav-link" href="/admin/matrix-users" {% if request.url.path.startswith("/admin/matrix-users") %}aria-current="page"{% endif %}>Matrix users</a>{% endif %}
+          <p class="nav-heading">Channels</p>
+          {{ nav_link("/admin/channels", "Channels", match=("/admin/channels", "/admin/whatsapp")) }}
+          {{ nav_link("/admin/mirroring", "Mirrored rooms") }}
+          {{ nav_link("/admin/settings", "Publishing settings") }}
         </div>
+        {% endif %}
+        {% if perms.accounts or perms.system %}
         <div class="nav-group">
-          <p class="nav-heading">Operations</p>
-          {% if perms.system %}<a class="nav-link" href="/admin/health" {% if request.url.path.startswith("/admin/health") %}aria-current="page"{% endif %}>Health</a>{% endif %}
-          {% if perms.system %}<a class="nav-link" href="/admin/backups" {% if request.url.path.startswith("/admin/backups") %}aria-current="page"{% endif %}>Backups</a>{% endif %}
-          {% if perms.system %}<a class="nav-link" href="/admin/services" {% if request.url.path.startswith("/admin/services") %}aria-current="page"{% endif %}>Services</a>{% endif %}
-          {% if perms.system %}<a class="nav-link" href="/admin/system" {% if request.url.path.startswith("/admin/system") %}aria-current="page"{% endif %}>System</a>{% endif %}
-          {% if perms.audit %}<a class="nav-link" href="/admin/audit" {% if request.url.path.startswith("/admin/audit") %}aria-current="page"{% endif %}>Activity log</a>{% endif %}
+          <p class="nav-heading">People</p>
+          {% if perms.accounts %}{{ nav_link("/admin/accounts", "Console accounts") }}{% endif %}
+          {% if perms.system %}{{ nav_link("/admin/matrix-users", "Matrix users") }}{% endif %}
         </div>
+        {% endif %}
+        {% if perms.system %}
         <div class="nav-group">
-          <p class="nav-heading">Account</p>
-          <a class="nav-link" href="/admin/account" {% if request.url.path == "/admin/account" or request.url.path.startswith("/admin/account/") %}aria-current="page"{% endif %}>My account</a>
+          <p class="nav-heading">Server</p>
+          {{ nav_link("/admin/health", "Health and logs") }}
+          {{ nav_link("/admin/services", "Services and updates") }}
+          {{ nav_link("/admin/backups", "Backups") }}
+          {{ nav_link("/admin/start", "Setup checklist") }}
         </div>
+        {% endif %}
+        {% if perms.audit %}
+        <div class="nav-group">
+          {{ nav_link("/admin/audit", "Activity log") }}
+        </div>
+        {% endif %}
       </nav>
+      <div class="sidebar-footer">
+        <p><strong>{{ username }}</strong> · {{ role }}</p>
+        <a href="/admin/account">My account</a> ·
+        <form method="post" action="/admin/logout" data-reload>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">Log out</button>
+        </form>
+      </div>
     </aside>
-    {% endif %}
-    <main class="{% if not username %}login-layout{% endif %}">
-      {% block content %}{% endblock %}
+    <div class="workspace">
+      {% block strip %}{% endblock %}
+      <main class="content">
+        {{ flash_message() }}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  {% else %}
+  <div class="auth-shell">
+    <a class="brand" href="/admin" aria-label="Community Stack administration"><span class="brand-mark" aria-hidden="true">C</span><span>Community Stack</span></a>
+    <main class="login-layout">
+      {% block auth_content %}{{ self.content() }}{% endblock %}
     </main>
   </div>
+  {% endif %}
 </body>
 </html>

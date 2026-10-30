@@ -172,6 +172,8 @@ def test_console_page_shows_accounts_and_temporary_passwords_once(project):
         )
         password = re.search(r"shown only now: <code>([^<]+)</code>", created.text).group(1)
         assert password not in json.dumps(app.state.auth_store.list_events())
+        database = (root / "data" / "announcements" / "announcements.db").read_bytes()
+        assert password.encode() not in database
         assert password not in client.get("/admin/matrix-users").text
     finally:
         server.shutdown()

@@ -1,9 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Templates{% endblock %}
 {% block content %}
-<h1>Templates</h1>
-<p>Reusable starting points for announcements you send often, such as meeting notices or alerts. <a href="/admin/templates/new">Create a template</a>, or save any announcement as one from its page.</p>
+<div class="page-heading">
+  <div>
+    <h1>Templates</h1>
+    <p class="page-intro">Reusable starting points for announcements you send often, such as meeting notices or alerts. You can also save any announcement as a template from its page.</p>
+  </div>
+  <a class="button-link" href="/admin/templates/new">Create a template</a>
+</div>
 {% if templates %}
+<div class="table-wrap">
 <table>
   <thead><tr><th>Name</th><th>Title</th><th>Last changed</th><th></th></tr></thead>
   <tbody>
@@ -15,16 +21,17 @@
     <td class="actions">
       <a href="/admin/announcements/new?template={{ item.id }}">Use</a>
       <a href="/admin/templates/{{ item.id }}/edit">Edit</a>
-      <form method="post" action="/admin/templates/{{ item.id }}/delete">
+      <form method="post" action="/admin/templates/{{ item.id }}/delete" data-confirm="Delete the template {{ item.name }}? Announcements made from it are not affected." data-confirm-label="Delete template">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit">Delete</button>
+        <button type="submit" class="secondary small danger">Delete</button>
       </form>
     </td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
-<p class="muted">No templates yet.</p>
+<div class="empty-state"><p>No templates yet.</p></div>
 {% endif %}
 {% endblock %}
