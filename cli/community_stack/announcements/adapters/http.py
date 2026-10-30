@@ -11,7 +11,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from community_stack.announcements.formatting import to_plain_text
 from community_stack.announcements.models import Announcement
@@ -46,6 +46,16 @@ class Multipart:
             )
         parts.append(f"--{boundary}--\r\n".encode())
         return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+@dataclass(frozen=True)
+class Form:
+    """A URL-encoded application/x-www-form-urlencoded payload."""
+
+    fields: dict[str, str]
+
+    def encode(self) -> tuple[bytes, str]:
+        return urlencode(self.fields).encode(), "application/x-www-form-urlencoded"
 
 
 @dataclass(frozen=True)
@@ -89,13 +99,13 @@ def assert_public_https(url: str, allowed_hosts: set[str] | None = None) -> str:
 
 
 def send(method: str, url: str, headers: dict[str, str], payload: Any) -> tuple[int, Any]:
-    """Default transport: JSON over HTTPS to public addresses only."""
+    """Default transport: HTTPS to public addresses only."""
     try:
         assert_public_https(url)
     except UnsafeURLError as exc:
         return 0, {"error": str(exc)}
     request_headers = {"User-Agent": "community-stack", **headers}
-    if isinstance(payload, Multipart):
+    if isinstance(payload, (Multipart, Form)):
         data, request_headers["Content-Type"] = payload.encode()
     elif isinstance(payload, RawBody):
         data, request_headers["Content-Type"] = payload.content, payload.content_type

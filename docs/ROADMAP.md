@@ -1,6 +1,6 @@
 # Community Stack Roadmap
 
-As of 2026-10-28. Audience: maintainers, contributors and hosting partners.
+As of 2026-10-30. Audience: maintainers, contributors and hosting partners.
 
 The goal of this roadmap is that an organizer with no server experience can
 deploy the stack, switch services on, and publish one announcement to every
@@ -56,21 +56,33 @@ Every track must respect these principles:
 
 ## 2. Where the stack is today
 
-The engine is solid, but anything beyond announcements still needs SSH, YAML
-and the `community-stack` CLI. Only two channels deliver for real today: the web
-feed and Matrix.
+The fresh-VPS acceptance drill was run on 2026-10-30, and the latest Matrix and
+WhatsApp admin changes are deployed to the VPS. The user confirmed the drill
+passed the Phase 1 acceptance criteria.
 
-| Area | Today | Gap for a non-technical operator |
+| Area | Today | Remaining gap for a non-technical operator |
 | --- | --- | --- |
-| Deployment | CLI `init` / `check` / `plan` / `install` / `upgrade`, Ansible playbooks, `deploy-vps.sh` | Needs a terminal, SSH keys, Docker and YAML knowledge |
-| Service management | Synapse + Postgres, Element, landing page, Caddy, announcements; optional mautrix-whatsapp bridge | No UI to enable, configure, update or monitor services; bridge not live-verified |
-| Admin console | `/admin`: one administrator, drafts, publish, withdraw, safe retry, channel on/off | One account, no roles, no service or user management |
-| Publishing editor | Plain-text title, body, author, tags | No rich text, media, scheduling, review step, translations or per-channel preview |
-| Delivery | Adapters run synchronously inside the web request | No background worker, so no scheduling and no automatic retries |
-| Channels | Web feed (HTML, RSS, Atom, JSON Feed) and Matrix room work; ActivityPub, email and WhatsApp forwarder are prototypes | No mainstream social networks; ActivityPub has no signing, inbox or followers |
-| Audience | Subscriber list managed from the CLI | No public sign-up page or double opt-in |
-| Backups | Manual CLI snapshots, owner-only but not encrypted | No schedule, no encryption, no off-site copy, no restore from a browser |
-| Continuity | Offline HTML/JSON archive export from the CLI | Not reachable from the console |
+| Deployment | `bootstrap.sh` and `deploy-vps.sh` cover fresh setup and code deployment; the VPS acceptance drill passed | Keep the passing acceptance flow as the release baseline |
+| Service management | The admin console uses a privileged agent for service settings; Matrix connections and opt-in WhatsApp bridge provisioning are available in the UI | Record live service setup results; the WhatsApp bridge still requires account pairing and is not one-way |
+| Admin console | `/admin` includes role-based accounts, two-step login, audit, service settings, health, backups, Matrix users, channels and mirroring | Verify the critical operator workflows in the acceptance checklist |
+| Publishing | Drafts, templates, media, scheduling and a background delivery worker with retries are implemented | Expand coverage as Phase 2 adds reviewed publishing and more channels |
+| Channels | The UI offers the web feed, Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, email, SMS, Signal, WhatsApp, Facebook Pages, Instagram and Threads; Meta uses manually supplied access tokens | Track live acceptance per connector; Meta token issuance and refresh still happen outside the UI |
+| Audience | Public subscription and confirmation pages are available | Verify real email/SMS delivery and unsubscribe behavior |
+| Backups | Admin backup controls support encrypted/off-site configuration; deployment creates and verifies a pre-deployment backup | Record a restore test separately from backup creation |
+| Continuity | Offline announcement archives can be downloaded from the admin console | Verify recovery and access to the restored archive during acceptance |
+
+### Current decision point
+
+**Phase 1 gate: PASSED (2026-10-30, user-confirmed).** The fresh-VPS setup,
+browser-based configuration, five-channel publication, and backup/recovery
+acceptance criteria passed. Phase 1 is complete; Phase 2 is active. The review
+workflow (B5), templates (B6), and edit/withdraw lifecycle sync (B7) are already
+implemented and covered by tests. The Services page also has pinned-version
+updates (A6), and basic Matrix user management exists (part of A7, not Ketesa).
+Facebook Pages, Instagram and Threads now have guided token-based setup in
+Channels (A8); live account acceptance and automatic token refresh remain open.
+The main Phase 2 gate is one reviewed announcement delivered to eight or more
+configured channels, with withdrawal propagation checked.
 
 ## 3. Track A: Administration console
 
@@ -177,11 +189,11 @@ matter. Open protocols ship first, then platforms behind app review.
 | Discord and Slack | Incoming webhooks | Paste a webhook URL | Discord: edit and delete; Slack: none | 1 (quick win) |
 | Native ActivityPub actor | Finish the prototype: WebFinger, HTTP Signatures, followers inbox, so `@announcements@community` is followable from any fediverse server. Possibly via [Fedify](https://fedify.dev/) or an embedded server | None, but real implementation work | Update and Delete activities | 2 |
 | Facebook Page | [Pages API](https://developers.facebook.com/docs/pages-api/manage-pages) with `pages_manage_posts` | Meta developer app; see the Meta note below | Edit and delete | 2 |
-| Instagram | [Content Publishing API](https://developers.facebook.com/docs/instagram-platform/content-publishing) on a Professional account, 100 API posts per 24 h | Meta app plus a Professional account; image or video required | No edit; delete support to confirm | 2 |
+| Instagram | [Content Publishing API](https://developers.facebook.com/docs/instagram-platform/content-publishing) on a Professional account, 100 API posts per 24 h | Meta app plus a Professional account; image required | No edit or withdrawal through this API | 2 |
 | Threads | [Threads API](https://developers.facebook.com/docs/threads/posts): container, then publish; 500 characters, 250 posts per 24 h | Meta app; Advanced Access needed beyond app testers | Delete only | 2 |
 | SMS alerts | Gateway abstraction: an Android phone running [SMS Gateway for Android](https://hub.docker.com/r/capcom6/sms-gateway) (Apache-2.0) for small groups, commercial providers as plug-ins | Phone or provider account; per-message cost; explicit consent | Corrections sent as a follow-up | 2 |
 | Signal group | [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) (unofficial) with a dedicated number | No official bot API; ban risk if traffic looks automated | Delete for everyone | 2, experimental |
-| WhatsApp group | Existing mautrix-whatsapp bridge, one-way forwarding | Unofficial; account ban risk | Limited | 3, experimental |
+| WhatsApp group | mautrix-whatsapp bridge; canonical announcements are sent to a linked Matrix portal room | Unofficial, account-ban risk; the bridge itself is bidirectional | Follow-up / notice | Early opt-in experiment; live acceptance pending |
 | WhatsApp Channel | No official Meta API found; only third-party gateways such as [Whapi.Cloud](https://whapi.cloud/how-to-automate-whatsapp-channels-api) | Commercial gateway and a linked phone | Gateway-dependent | 3, watch |
 | X | API v2 pay-per-use, reported at about $0.015 per post and $0.20 with a link ([vendor summary](https://postproxy.dev/blog/x-api-pricing-2026)) | Paid developer account, bring your own credentials | Delete only | 3, optional |
 | LinkedIn, YouTube, TikTok, Pinterest | Optional bridge to a self-hosted [Postiz](https://github.com/gitroomhq/postiz-app) through its public API | Postiz's own requirements (Postgres, Redis, Temporal) | Postiz-dependent | 3, optional |
@@ -199,6 +211,10 @@ every community.
 **Account-safety rules for unofficial channels** (Signal, WhatsApp): a dedicated
 number, low volume, pinned client versions, a visible "experimental" label in
 the console, and never enabled by default.
+
+Some connectors, including WhatsApp, have been implemented ahead of their
+planned wave as opt-in experiments. Being present in the console does not mean
+they have passed live acceptance or are supported for production use.
 
 ## 6. Landscape: what to reuse or learn from
 
@@ -241,9 +257,9 @@ flowchart LR
 | Phase | Scope | Exit criteria |
 | --- | --- | --- |
 | **0. Foundations** | Background worker and job queue (B1); control agent skeleton with allowlisted operations and audit log (A.1); accounts and roles (A5); connector capability model (Track C); Restic encryption for backups | Current features run through the worker and agent; existing tests pass; security review of the agent boundary |
-| **1. Self-host MVP** | Setup wizard (A1), service catalog (A2), health and logs (A3), backups UI (A4); editor v2, scheduling and media (B2–B4); wave-1 connectors: Mastodon, Bluesky, Telegram, listmonk email, Discord and Slack | A non-technical tester goes from a fresh VPS to a published announcement on five channels without a terminal |
+| **1. Self-host MVP** | Setup wizard (A1), service catalog (A2), health and logs (A3), backups UI (A4); editor v2, scheduling and media (B2–B4); wave-1 connectors: Mastodon, Bluesky, Telegram, Matrix, listmonk email, Discord and Slack | A tester starts with a fresh VPS, runs the single bootstrap command, then completes setup in the browser and publishes to five channels without further SSH, YAML edits or CLI work; backup and recovery results are recorded |
 | **2. Reach and workflow** | Updates UI (A6), Ketesa (A7), guided Meta connection (A8); review workflow, templates, lifecycle sync, subscription page (B5–B8); wave-2 connectors: native ActivityPub, Facebook, Instagram, Threads, SMS, Signal (experimental) | One reviewed announcement reaches 8+ channels; a withdrawal propagates everywhere that supports it |
-| **3. Partners and long tail** | Fleet view (A10), Matrix single sign-on (A9); insights and multilingual announcements (B9–B10); wave-3 connectors: WhatsApp (experimental), X, Postiz bridge | A hosting partner runs 3+ instances from one dashboard; long-tail channels work through the bridge |
+| **3. Partners and long tail** | Fleet view (A10), Matrix single sign-on (A9); insights and multilingual announcements (B9–B10); wave-3 connectors: X, Postiz bridge | A hosting partner runs 3+ instances from one dashboard; long-tail channels work through the bridge |
 
 ## 8. Risks and open decisions
 

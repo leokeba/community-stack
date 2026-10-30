@@ -319,6 +319,49 @@ def test_console_connects_tests_and_publishes_to_a_channel(console):
     assert all("secret-token-value" not in str(e) for e in app.state.auth_store.list_events())
 
 
+def test_meta_connectors_are_available_and_testable_in_admin(console):
+    _, client, transport = console
+    page = client.get("/admin/channels")
+    token = csrf(page)
+    channels = (
+        (
+            "facebook",
+            {"page_id": "123456789", "access_token": "facebook-access-token"},
+            "/123456789?fields=",
+            {"id": "123456789", "name": "Community"},
+            "Connected to Facebook Page Community.",
+        ),
+        (
+            "instagram",
+            {"account_id": "17841400000000000", "access_token": "instagram-access-token"},
+            "/me?fields=",
+            {"id": "17841400000000000", "username": "community"},
+            "Connected as @community.",
+        ),
+        (
+            "threads",
+            {"user_id": "123456789", "access_token": "threads-access-token"},
+            "/me?fields=",
+            {"id": "123456789", "username": "community"},
+            "Connected as @community.",
+        ),
+    )
+
+    for kind, values, path, body, expected in channels:
+        saved = client.post(
+            f"/admin/channels/{kind}/save",
+            data={"csrf_token": token, **values},
+        )
+        assert saved.status_code == 200
+        assert values["access_token"] not in saved.text
+        transport.replies.append(("GET", path, 200, body))
+        tested = client.post(
+            f"/admin/channels/{kind}/test",
+            data={"csrf_token": token},
+        )
+        assert expected in tested.text
+
+
 def test_saving_without_a_new_secret_keeps_the_old_one(console):
     app, client, _ = console
     page = client.get("/admin/channels")

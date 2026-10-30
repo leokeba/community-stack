@@ -15,6 +15,11 @@ from community_stack.announcements.adapters.messaging import (
     SlackWebhookAdapter,
     TelegramAdapter,
 )
+from community_stack.announcements.adapters.meta import (
+    FacebookPageAdapter,
+    InstagramAdapter,
+    ThreadsAdapter,
+)
 from community_stack.announcements.adapters.signal import SignalAdapter
 from community_stack.announcements.adapters.social import BlueskyAdapter, MastodonAdapter
 from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
@@ -80,6 +85,30 @@ def _validate_telegram(values: dict[str, str]) -> dict[str, str]:
     if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{30,64}", token):
         raise ValueError("The bot token from @BotFather looks like 123456789:AA...")
     return {"chat_id": chat_id, "bot_token": token}
+
+
+def _validate_meta(
+    values: dict[str, str], account_field: str, account_label: str
+) -> dict[str, str]:
+    account_id = values.get(account_field, "").strip()
+    if not re.fullmatch(r"\d{5,30}", account_id):
+        raise ValueError(f"Enter the numeric {account_label} from Meta.")
+    return {
+        account_field: account_id,
+        "access_token": _token(values, "access_token", "The access token"),
+    }
+
+
+def _validate_facebook(values: dict[str, str]) -> dict[str, str]:
+    return _validate_meta(values, "page_id", "Facebook Page ID")
+
+
+def _validate_instagram(values: dict[str, str]) -> dict[str, str]:
+    return _validate_meta(values, "account_id", "Instagram professional account ID")
+
+
+def _validate_threads(values: dict[str, str]) -> dict[str, str]:
+    return _validate_meta(values, "user_id", "Threads user ID")
 
 
 def _validate_matrix_room(values: dict[str, str]) -> dict[str, str]:
@@ -237,6 +266,66 @@ CONNECTORS: dict[str, ConnectorType] = {
             validate=_validate_bluesky,
             build=lambda c: BlueskyAdapter(c["handle"], c["app_password"], c["service_url"]),
             caveat="Bluesky posts cannot be edited; edits are not sent there.",
+        ),
+        ConnectorType(
+            kind="facebook",
+            label="Facebook Page",
+            steps=(
+                "Create a Meta app with the Pages API enabled and sign in as an admin of the Page.",
+                "Use Graph API Explorer to grant pages_show_list, pages_read_engagement, and pages_manage_posts; select the Page and copy its Page access token.",
+                "Enter the Page's numeric ID and its Page access token. Do not use a personal user token.",
+            ),
+            fields=(
+                ConnectorField("page_id", "Facebook Page ID"),
+                ConnectorField("access_token", "Page access token", secret=True),
+            ),
+            validate=_validate_facebook,
+            build=lambda c: FacebookPageAdapter(c["page_id"], c["access_token"]),
+            caveat="Use a long-lived Page token and reconnect when it expires. Images must be publicly reachable from your announcement feed. Text edits are supported; image changes are not.",
+            setup_page=(
+                "Facebook Pages API setup",
+                "https://developers.facebook.com/documentation/pages-api/posts",
+            ),
+        ),
+        ConnectorType(
+            kind="instagram",
+            label="Instagram professional account",
+            steps=(
+                "Use an Instagram professional (Business or Creator) account and create a Meta app with Instagram API using Instagram Login.",
+                "Grant instagram_business_basic and instagram_business_content_publish, then create a long-lived user access token.",
+                "Enter the account's numeric Instagram professional account ID and that access token.",
+            ),
+            fields=(
+                ConnectorField("account_id", "Instagram professional account ID"),
+                ConnectorField("access_token", "Instagram access token", secret=True),
+            ),
+            validate=_validate_instagram,
+            build=lambda c: InstagramAdapter(c["account_id"], c["access_token"]),
+            caveat="Instagram publishing requires an image on every announcement and a publicly reachable feed URL. This API does not support editing or withdrawing published posts. Reconnect when the token expires.",
+            setup_page=(
+                "Instagram Content Publishing setup",
+                "https://developers.facebook.com/documentation/instagram-platform/content-publishing",
+            ),
+        ),
+        ConnectorType(
+            kind="threads",
+            label="Threads",
+            steps=(
+                "Create a Threads app and authorize the account that should publish announcements.",
+                "Grant threads_basic and threads_content_publish; also grant threads_delete if you want withdrawal to remove published posts.",
+                "Use a long-lived user access token, then enter the account's numeric Threads user ID and token.",
+            ),
+            fields=(
+                ConnectorField("user_id", "Threads user ID"),
+                ConnectorField("access_token", "Threads access token", secret=True),
+            ),
+            validate=_validate_threads,
+            build=lambda c: ThreadsAdapter(c["user_id"], c["access_token"]),
+            caveat="Text and public images are supported. Posts cannot be edited. Long-lived tokens expire; reconnect with a renewed token.",
+            setup_page=(
+                "Threads API setup",
+                "https://developers.facebook.com/documentation/threads/get-started",
+            ),
         ),
         ConnectorType(
             kind="telegram",
