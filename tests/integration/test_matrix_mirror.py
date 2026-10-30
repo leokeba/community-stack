@@ -189,7 +189,9 @@ def test_console_adds_and_removes_mirrored_rooms(tmp_path):
         "/admin/login",
         data={"csrf_token": token, "username": "olga", "password": "a-long-safe-test-password"},
     )
-    assert "Configure the Matrix announcements channel first" in client.get("/admin/mirroring").text
+    assert (
+        "Mirroring needs a Matrix announcements connection" in client.get("/admin/mirroring").text
+    )
 
     app.state.publisher.adapters.append(
         MatrixRoomAdapter(room_id=ANNOUNCEMENTS_ROOM, access_token="t", transport=Homeserver())

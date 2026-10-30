@@ -75,9 +75,6 @@ def get_required_secrets(config: dict[str, Any]) -> list[str]:
         if backups.get("target") == "s3":
             required.extend(["S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET_URL"])
 
-    if services.get("whatsapp_bridge", {}).get("enabled", False):
-        required.extend(["WHATSAPP_AS_TOKEN", "WHATSAPP_HS_TOKEN"])
-
     matrix_announcements = (
         services.get("announcements", {}).get("channels", {}).get("matrix_room", {})
     )

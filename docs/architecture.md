@@ -52,14 +52,12 @@ Services are packaged as independent Docker Compose modules coordinated by the C
                             | (matrix_internal network)
                             v
                        [PostgreSQL]
-                            ^
-                            | (bridge_net)
-                   [mautrix-whatsapp] (Optional)
+          [Synapse] <--- (bridge_net) ---> [mautrix-whatsapp] (Optional)
 ```
 
 - **`proxy_net` (Bridge):** Connects Caddy to the HTTP ports of Landing Page, Element Web, Announcements API, and Synapse client endpoints.
 - **`matrix_internal` (Internal Bridge, `internal: true`):** Connects Synapse to PostgreSQL. No external internet or host port mapping.
-- **`bridge_net` (Internal Bridge):** Connects Synapse Application Service (AS) API to mautrix-whatsapp.
+- **`bridge_net` (Dedicated Bridge):** Connects only Synapse and mautrix-whatsapp. It is not attached to public ingress; the bridge still needs outbound internet access.
 
 ---
 

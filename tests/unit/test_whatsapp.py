@@ -6,57 +6,46 @@ from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncement
 from community_stack.whatsapp.bridge_manager import BridgeError, WhatsAppBridgeManager
 
 
-def test_whatsapp_adapter_disabled():
-    adapter = WhatsAppAnnouncementAdapter(enabled=False)
-    ann = Announcement(title="Disabled Test", body="Body")
-    res = adapter.publish(ann)
-    assert res.success is False
-    assert "disabled" in (res.error or "")
-
-
-def test_whatsapp_adapter_enabled_mock_transport():
+def test_whatsapp_adapter_posts_to_matrix_portal():
     dispatched = []
 
     def mock_transport(method, path, payload):
         dispatched.append({"method": method, "path": path, "payload": payload})
-        return 200, {"message_id": "wa_msg_999"}
+        return 200, {"event_id": "$portal-event"}
 
     adapter = WhatsAppAnnouncementAdapter(
-        enabled=True,
-        target_jid="123456789-group@g.us",
+        homeserver_url="http://matrix.test",
+        room_id="!portal:matrix.test",
+        access_token="matrix-token-value",
+        transport=mock_transport,
+    )
+    announcement = Announcement(title="Public notice", body="The event starts at noon.")
+
+    result = adapter.publish(announcement)
+
+    assert result.success
+    assert result.external_id == "$portal-event"
+    assert dispatched[0]["method"] == "PUT"
+    assert "%21portal%3Amatrix.test" in dispatched[0]["path"]
+    assert dispatched[0]["payload"]["body"] == "📢 Public notice\n\nThe event starts at noon."
+
+
+def test_whatsapp_adapter_propagates_matrix_failures():
+    def mock_transport(method, path, payload):
+        return 503, {"error": "Homeserver restarting"}
+
+    adapter = WhatsAppAnnouncementAdapter(
+        homeserver_url="http://matrix.test",
+        room_id="!portal:matrix.test",
+        access_token="matrix-token-value",
         transport=mock_transport,
     )
 
-    ann = Announcement(
-        title="Public Rally Announcement",
-        body="Join the rally this Sunday.",
-        canonical_url="https://example.org/feed#ann1",
-        author="Coordination Hub",
-    )
+    result = adapter.publish(Announcement(title="Notice", body="Body"))
 
-    res = adapter.publish(ann)
-    assert res.success is True
-    assert res.external_id == "wa_msg_999"
-    assert len(dispatched) == 1
-    req = dispatched[0]
-    assert req["payload"]["recipient"] == "123456789-group@g.us"
-    assert "Public Rally Announcement" in req["payload"]["message"]
-    assert "Coordination Hub" in req["payload"]["message"]
-
-
-def test_whatsapp_adapter_error_masks_phone_numbers():
-    def mock_transport(method, path, payload):
-        return 500, {"error": "Failed sending to recipient +1234567890123: Timeout"}
-
-    adapter = WhatsAppAnnouncementAdapter(enabled=True, transport=mock_transport)
-    ann = Announcement(title="Fail Test", body="Body")
-    res = adapter.publish(ann)
-
-    assert res.success is False
-    assert res.retryable is True
-    # Verify phone number was redacted from error message
-    assert "1234567890123" not in (res.error or "")
-    assert "[PHONE_REDACTED]" in (res.error or "")
+    assert not result.success
+    assert result.retryable
+    assert "Homeserver restarting" in (result.error or "")
 
 
 def test_bridge_manager_allowlist(tmp_path):

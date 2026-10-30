@@ -46,7 +46,7 @@ from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
-from community_stack.announcements.connectors import CONNECTORS, merge_values
+from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
 from community_stack.announcements.fediverse import (
     ACTIVITY_JSON,
     CONTEXT,
@@ -127,14 +127,17 @@ def create_app(
         config_path=config_path,
         feed_dir=feed_dir,
     )
-    configured_channel_links = next(
-        (
-            adapter.channel_links.copy()
-            for adapter in publisher.adapters
-            if isinstance(adapter, WebFeedAdapter)
-        ),
-        {},
-    )
+
+    def configured_channel_links() -> dict[str, str]:
+        return next(
+            (
+                adapter.channel_links.copy()
+                for adapter in publisher.adapters
+                if isinstance(adapter, WebFeedAdapter)
+            ),
+            {},
+        )
+
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
     def mirror():
@@ -1256,7 +1259,7 @@ def create_app(
             storage.set_channel_enabled(adapter.name, adapter.name in enabled_names)
             if isinstance(adapter, WebFeedAdapter):
                 settings = storage.get_channel_settings()
-                adapter.channel_links = configured_channel_links.copy()
+                adapter.channel_links = configured_channel_links()
                 if not settings.get("matrix_room", True):
                     adapter.channel_links.pop("Matrix announcements", None)
                 if settings.get("web_feed", True):
@@ -1277,6 +1280,8 @@ def create_app(
                 "type": connector,
                 "connected": kind in saved,
                 "enabled": enabled.get(kind, True),
+                "available": kind != "whatsapp"
+                or (publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None),
                 "values": {
                     field.name: saved.get(kind, {}).get(field.name, "")
                     for field in connector.fields
@@ -1306,6 +1311,28 @@ def create_app(
     async def save_channel(request: Request, kind: str) -> Response:
         session, form = await checked_form(request, "settings")
         connector = connector_for(kind)
+        if kind == "whatsapp" and not publisher.whatsapp_bridge_enabled:
+            return channels_page(
+                request,
+                session,
+                {
+                    "kind": kind,
+                    "ok": False,
+                    "text": "Enable the WhatsApp bridge first on the Services page.",
+                },
+                409,
+            )
+        if kind == "whatsapp" and publisher.matrix_auth is None:
+            return channels_page(
+                request,
+                session,
+                {
+                    "kind": kind,
+                    "ok": False,
+                    "text": "Connect Matrix announcements first; WhatsApp forwarding uses that account.",
+                },
+                409,
+            )
         saved = storage.list_connections().get(kind, {})
         try:
             values = await run_in_threadpool(
@@ -1521,12 +1548,24 @@ def create_app(
     @app.post("/admin/channels/{kind}/test")
     async def test_channel(request: Request, kind: str) -> Response:
         session, _ = await checked_form(request, "settings")
-        connector = connector_for(kind)
+        connector_for(kind)
+        if kind == "whatsapp" and not (
+            publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Enable the WhatsApp bridge and connect Matrix announcements first.",
+            )
         values = storage.list_connections().get(kind)
         if values is None:
             raise HTTPException(status_code=409, detail="This channel is not connected.")
-        adapter = next((a for a in publisher.adapters if a.name == kind), None)
-        result = await run_in_threadpool((adapter or connector.build(values)).health_check)
+        try:
+            adapter = next((a for a in publisher.adapters if a.name == kind), None)
+            if adapter is None:
+                adapter = build_connector(kind, values, publisher.matrix_auth)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        result = await run_in_threadpool(adapter.health_check)
         audit(request, session["username"], "channel.tested", kind, ok=result.ok)
         return channels_page(
             request, session, {"kind": kind, "ok": result.ok, "text": result.details}
@@ -1545,6 +1584,25 @@ def create_app(
             "text": "Disconnected. Saved credentials were deleted.",
         }
         return channels_page(request, session, message)
+
+    @app.get("/admin/whatsapp")
+    async def whatsapp_setup(request: Request) -> Response:
+        session = require(request, "settings")
+        try:
+            config = load_config(config_path) if Path(config_path).is_file() else {}
+        except ConfigError:
+            config = {}
+        return render(
+            request,
+            "whatsapp.html",
+            page(
+                session,
+                bridge_enabled=publisher.whatsapp_bridge_enabled,
+                matrix_connected=publisher.matrix_auth is not None,
+                channel_connected="whatsapp" in storage.list_connections(),
+                matrix_domain=config.get("domain", {}).get("matrix", "your Matrix server"),
+            ),
+        )
 
     def accounts_page(
         request: Request, session: dict[str, Any], error: str | None = None, status_code=200
@@ -1917,6 +1975,7 @@ def create_app(
                 page(session, plan=None, changes=changes, result={"error": str(exc)}),
                 status_code=400,
             )
+        publisher.reload_connections()
         audit(
             request,
             session["username"],

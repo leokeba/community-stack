@@ -8,7 +8,7 @@ services:
     networks:
       - bridge_net
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:29318/healthz || exit 0"]
+      test: ["CMD-SHELL", "test -s /data/config.yaml && test -s /data/registration.yaml && kill -0 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -16,5 +16,4 @@ services:
 
 networks:
   bridge_net:
-    name: bridge_net
-    driver: bridge
+    external: true

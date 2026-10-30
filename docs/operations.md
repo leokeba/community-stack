@@ -122,6 +122,16 @@ Settings, Account. Resetting a password signs the account out everywhere and
 deactivating an account both ask for your own password. Temporary passwords are
 never written to either activity log.
 
+### Telegram private channels
+
+For a public channel, enter its `@username` on the Channels page. For a private
+channel, add the bot as an administrator with permission to post, then copy a
+message link from the channel. A link such as
+`https://t.me/c/4464970877/2` means the channel ID is `-1004464970877`: enter
+the `-100` prefix and the leading minus sign, not the message link or the
+positive number. Telegram's channel settings are usually under **Edit channel
+> Administrators > Add Admin**; wording can vary by client.
+
 ### Mirroring Matrix rooms
 
 The **Mirroring** page (owners and admins) turns chosen Matrix rooms into a
@@ -269,8 +279,9 @@ that will change. Applying it:
 4. restores the previous configuration and service state if it is not.
 
 Stopping Matrix stops all community chat, so it asks for the person's password.
-Domains, Matrix registration and federation, and the WhatsApp bridge are still
-configured from the command line. The **Get started** page lists the remaining
+Domains and Matrix federation remain operator-managed. Matrix announcement
+delivery, room mirroring, and the optional WhatsApp bridge can be configured
+from **Channels** and **Services** in the admin console. The **Get started** page lists the remaining
 setup steps, and the dashboard links to it until they are done.
 
 ### Software updates

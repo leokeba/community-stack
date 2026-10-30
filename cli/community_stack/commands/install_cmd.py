@@ -54,6 +54,10 @@ def run_install(
         print("[ERROR] Failed to create or inspect Docker network 'proxy_net'.")
         return 1
     print("      Network 'proxy_net' is ready.")
+    if not docker.ensure_network("bridge_net"):
+        print("[ERROR] Failed to create or inspect Docker network 'bridge_net'.")
+        return 1
+    print("      Network 'bridge_net' is ready.")
 
     services_root = get_services_dir()
     env_p = Path(env_path).resolve()
@@ -117,6 +121,16 @@ def run_install(
             print(f"[ERROR] Deployment of service '{svc}' failed (exit code {res.returncode}).")
             return 1
         print(f"  [SUCCESS] {svc} deployed successfully.")
+        if svc == "whatsapp_bridge" and prepared:
+            restarted = docker.run_compose(
+                services_root / "matrix",
+                ["restart", "synapse"],
+                env_file=env_p,
+                capture_output=True,
+            )
+            if restarted.returncode != 0:
+                print("[ERROR] Synapse could not reload the WhatsApp appservice registration.")
+                return 1
 
     print("\n[3/4] Deployment finished. Verifying container status...")
     from community_stack.commands.status_cmd import run_status

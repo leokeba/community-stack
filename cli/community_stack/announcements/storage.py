@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -214,6 +215,8 @@ class AnnouncementStorage:
                 WHERE attempts > 0;
             """)
             conn.commit()
+        if os.name == "posix":
+            self.db_path.chmod(0o600)
 
     def save_announcement(self, ann: Announcement) -> None:
         """Insert or update an announcement."""

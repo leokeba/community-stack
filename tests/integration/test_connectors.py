@@ -1,9 +1,12 @@
 """Wave-1 connectors (Mastodon, Bluesky, Telegram, Discord, Slack) and the Channels page."""
 
+import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
+import yaml
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
 from community_stack.announcements.adapters import http
@@ -236,6 +239,11 @@ def test_publisher_skips_unsupported_edits_and_passes_post_ids(tmp_path):
             "app password",
         ),
         ("telegram", {"chat_id": "ourcommunity", "bot_token": TELEGRAM_TOKEN}, "@channelname"),
+        (
+            "telegram",
+            {"chat_id": "1004464970877", "bot_token": TELEGRAM_TOKEN},
+            "leading minus sign",
+        ),
         ("discord", {"webhook_url": "https://evil.example/api/webhooks/1/x"}, "discord.com"),
         ("slack", {"webhook_url": "https://hooks.slack.com/other/x"}, "Slack webhook"),
     ],
@@ -244,6 +252,14 @@ def test_connector_validation_explains_mistakes(monkeypatch, kind, values, messa
     monkeypatch.setattr(http, "resolve", lambda host: ["93.184.216.34"])
     with pytest.raises(ValueError, match=message):
         CONNECTORS[kind].validate(values)
+
+
+def test_telegram_accepts_private_channel_id_with_minus_100_prefix():
+    values = CONNECTORS["telegram"].validate(
+        {"chat_id": "-1004464970877", "bot_token": TELEGRAM_TOKEN}
+    )
+
+    assert values["chat_id"] == "-1004464970877"
 
 
 @pytest.fixture
@@ -336,6 +352,65 @@ def test_invalid_settings_are_explained_and_disconnect_removes_credentials(conso
     client.post("/admin/channels/discord/disconnect", data={"csrf_token": csrf(page)})
     assert "discord" not in app.state.storage.list_connections()
     assert not any(a.name == "discord" for a in app.state.publisher.adapters)
+
+
+def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp_path):
+    app, client, _ = console
+    config = yaml.safe_load(Path("config/example.yaml").read_text(encoding="utf-8"))
+    config["domain"]["matrix"] = "community.test"
+    config["services"]["whatsapp_bridge"]["enabled"] = True
+    config_path = tmp_path / "missing.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    app.state.publisher.reload_connections()
+
+    page = client.get("/admin/channels")
+    saved = client.post(
+        "/admin/channels/matrix_room/save",
+        data={
+            "csrf_token": csrf(page),
+            "homeserver_url": "http://community_synapse:8008",
+            "room_id": "!announcements:community.test",
+            "access_token": "matrix-access-token",
+        },
+    )
+    assert saved.status_code == 200
+    assert "matrix-access-token" not in saved.text
+
+    mirror_page = client.get("/admin/mirroring")
+    assert "Mirror a room" in mirror_page.text
+    assert "not available in the admin UI yet" not in mirror_page.text
+
+    wa_page = client.get("/admin/whatsapp")
+    assert "login qr" in wa_page.text
+    assert "Linked devices" in wa_page.text
+    assert "@whatsappbot:community.test" in wa_page.text
+
+    saved_wa = client.post(
+        "/admin/channels/whatsapp/save",
+        data={"csrf_token": csrf(page), "room_id": "!portal:community.test"},
+    )
+    assert saved_wa.status_code == 200
+    assert any(adapter.name == "whatsapp" for adapter in app.state.publisher.adapters)
+
+
+def test_channel_credentials_database_is_private_on_posix(console):
+    app, _, _ = console
+
+    if os.name == "posix":
+        assert app.state.storage.db_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_whatsapp_channel_requires_bridge_and_matrix_prerequisites(console):
+    _, client, _ = console
+    page = client.get("/admin/channels")
+
+    response = client.post(
+        "/admin/channels/whatsapp/save",
+        data={"csrf_token": csrf(page), "room_id": "!portal:community.test"},
+    )
+
+    assert response.status_code == 409
+    assert "Enable the WhatsApp bridge first" in response.text
 
 
 def test_unknown_channel_types_are_rejected(console):

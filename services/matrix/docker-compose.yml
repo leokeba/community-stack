@@ -32,6 +32,7 @@ services:
     networks:
       - proxy_net
       - matrix_internal
+      - bridge_net
     healthcheck:
       test: ["CMD-SHELL", "curl -fSs http://localhost:8008/health || exit 1"]
       interval: 15s
@@ -46,3 +47,5 @@ networks:
     name: matrix_internal
     internal: true
     driver: bridge
+  bridge_net:
+    external: true

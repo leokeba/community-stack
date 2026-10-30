@@ -169,15 +169,44 @@ directories without root privileges. If the deployment account owns them under
 different IDs, set `COMMUNITY_STACK_UID` and `COMMUNITY_STACK_GID` in `.env`
 before deploying.
 
-For Matrix delivery, configure `services.announcements.channels.matrix_room`
-only after verifying that the target room is the public announcements room.
-Set `public_announcement_room: true`, set `access_token_env` to
-`COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN`, define that variable in `.env`,
-and keep the token out of YAML. The announcements container does not load
-`.env` wholesale; it receives only the setup token and
-`COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN`, so a different variable name must
-also be added to `services/announcements/docker-compose.yml`. Matrix delivery
-is disabled by default and has not been verified against a live server.
+### Matrix delivery
+
+Configure Matrix delivery and mirroring in the admin console at **Channels**.
+Use a dedicated Matrix announcements account, not an organizer's personal
+account. Invite it to a public, unencrypted announcements room and to each
+source room you want to mirror. On Channels, connect **Matrix announcements**
+with the homeserver URL, room ID, and access token. For the bundled Synapse
+service, use `http://community_synapse:8008`. The connection check verifies
+the token, room membership, public listing, and that the room is unencrypted.
+
+The access token is stored in the announcements database, which is restricted
+to the service account. It is not shown again after saving. YAML configuration
+continues to be supported as an operator-managed alternative:
+
+```yaml
+services:
+  announcements:
+    channels:
+      matrix_room:
+        enabled: true
+        homeserver_url: "http://community_synapse:8008"
+        room_id: "!announcements:example.org"
+        access_token_env: "COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN"
+        public_announcement_room: true
+```
+
+Put the account's access token in the server `.env`, using the same variable
+name:
+
+```dotenv
+COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN=<access-token>
+```
+
+Keep the token out of chat. The announcements container does not load `.env`
+wholesale; it receives only the setup token and
+`COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN`. If you choose a different
+variable name, add it to `services/announcements/docker-compose.yml` as well.
+Matrix delivery remains disabled by default.
 
 ---
 

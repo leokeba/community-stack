@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}WhatsApp setup{% endblock %}
+{% block content %}
+<h1>WhatsApp setup</h1>
+<p>Connect an optional, unofficial WhatsApp bridge to send published announcements into a WhatsApp group.</p>
+
+<section class="panel">
+  <h2>Before you start</h2>
+  <ul>
+    <li>Bridge enabled: <strong>{{ "Yes" if bridge_enabled else "No" }}</strong>{% if not bridge_enabled %} — enable WhatsApp on the <a href="/admin/services">Services page</a>. The server creates its private appservice credentials and registers the bridge with Matrix.{% endif %}</li>
+    <li>Matrix announcements account connected: <strong>{{ "Yes" if matrix_connected else "No" }}</strong>{% if not matrix_connected %} — connect one on the <a href="/admin/channels">Channels page</a>.{% endif %}</li>
+    <li>WhatsApp destination saved: <strong>{{ "Yes" if channel_connected else "No" }}</strong></li>
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Link WhatsApp</h2>
+  <ol>
+    <li>Sign in to <a href="/app/" rel="noopener noreferrer">Element</a> using an account on <code>{{ matrix_domain }}</code>.</li>
+    <li>Open a direct chat with <code>@whatsappbot:{{ matrix_domain }}</code>. If Element asks, start a chat with that user.</li>
+    <li>Send <code>login qr</code> to the bridge bot.</li>
+    <li>On your phone, open WhatsApp &rarr; Linked devices &rarr; Link a device, then scan the QR code shown in Element.</li>
+  </ol>
+  <p class="muted">The bridge stores a linked-device session on this server. Keep the server private and unlink the device from WhatsApp if you disable or retire the bridge.</p>
+</section>
+
+<section class="panel">
+  <h2>Choose the announcement group</h2>
+  <ol>
+    <li>In Element, use the bridge bot's help to bridge the intended WhatsApp group to a Matrix portal room.</li>
+    <li>Make the announcements account a member of that portal room. Keep encryption off: this connector cannot send encrypted Matrix events.</li>
+    <li>On the <a href="/admin/channels">Channels page</a>, open WhatsApp announcements and save the portal room's Matrix room ID (it begins with <code>!</code>).</li>
+    <li>Use <strong>Test connection</strong>. It checks that the announcements account can access the portal room; it cannot confirm the phone is still linked.</li>
+  </ol>
+  <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group may also appear in Matrix. Use a group intended for public announcements, and tell its members before bridging it. Publishing to this channel sends only canonical announcements, but does not make the bridge itself one-way.</p>
+</section>
+{% endblock %}

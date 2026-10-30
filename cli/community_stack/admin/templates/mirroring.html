@@ -6,7 +6,8 @@
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if not available %}
 <div class="panel">
-  <p>Mirroring uses the stack's Matrix announcements account. Configure the Matrix announcements channel first (see docs/deployment.md, "Matrix delivery").</p>
+  <p>Mirroring needs a Matrix announcements connection. Connect a dedicated Matrix account on the <a href="/admin/channels">Channels page</a>, then return here.</p>
+  <p>Invite that account to the public announcements room and each source room you want to mirror. The account token is stored on this server and is not shown again.</p>
 </div>
 {% else %}
 {% if rooms %}

@@ -19,7 +19,7 @@ from community_stack.announcements.adapters.base import (
 )
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
-from community_stack.announcements.connectors import CONNECTORS
+from community_stack.announcements.connectors import CONNECTORS, build_connector
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.sms import SmsGatewayAdapter
@@ -69,6 +69,8 @@ class AnnouncementPublisher:
         self.base_url = "https://community.example.org"
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
+        self.whatsapp_bridge_enabled = False
+        self.matrix_auth: dict[str, str] | None = None
 
         if adapters is not None:
             self.adapters = adapters
@@ -85,6 +87,8 @@ class AnnouncementPublisher:
         base_url = "https://community.example.org"
         community_name = "Community Communications"
         channels: dict[str, Any] = {}
+        self.whatsapp_bridge_enabled = False
+        self.matrix_auth = None
         if self.config_path.is_file():
             cfg = load_config(self.config_path)
             domain = cfg.get("domain", {}).get("web", "community.example.org")
@@ -95,6 +99,9 @@ class AnnouncementPublisher:
             if not announcement_config["enabled"]:
                 return adapters
             channels = announcement_config.get("channels", {})
+            self.whatsapp_bridge_enabled = (
+                cfg.get("services", {}).get("whatsapp_bridge", {}).get("enabled", False)
+            )
 
         web_config = channels.get("web_feed", {})
         if (
@@ -102,9 +109,11 @@ class AnnouncementPublisher:
             and "web_feed" not in self.storage.get_channel_settings()
         ):
             self.storage.set_channel_enabled("web_feed", False)
-        matrix_config = channels.get("matrix_room", {})
+        connections = self.storage.list_connections()
+        matrix_connection = connections.get("matrix_room")
+        matrix_config = matrix_connection or channels.get("matrix_room", {})
         channel_links = {}
-        if matrix_config.get("enabled", False):
+        if matrix_connection or matrix_config.get("enabled", False):
             room_id = quote(matrix_config["room_id"], safe="!:")
             channel_links["Matrix announcements"] = f"https://matrix.to/#/{room_id}"
         adapters.append(
@@ -117,7 +126,12 @@ class AnnouncementPublisher:
             )
         )
 
-        if matrix_config.get("enabled", False):
+        if matrix_connection:
+            self.matrix_auth = {
+                "homeserver_url": matrix_connection["homeserver_url"],
+                "access_token": matrix_connection["access_token"],
+            }
+        elif matrix_config.get("enabled", False):
             token_env = matrix_config["access_token_env"]
             env_path = self.config_path.parent / ".env"
             env_values = parse_env_file(env_path)
@@ -127,6 +141,10 @@ class AnnouncementPublisher:
                     "Matrix announcements are enabled, but the access token "
                     f"environment variable {token_env} is not set."
                 )
+            self.matrix_auth = {
+                "homeserver_url": matrix_config["homeserver_url"],
+                "access_token": access_token,
+            }
             adapters.append(
                 MatrixRoomAdapter(
                     homeserver_url=matrix_config["homeserver_url"],
@@ -139,9 +157,20 @@ class AnnouncementPublisher:
     def _connected_adapters(self) -> list[ChannelAdapter]:
         """Adapters for channels organizers connected in the console."""
         adapters = []
-        for kind, values in self.storage.list_connections().items():
+        connections = self.storage.list_connections()
+        for kind, values in connections.items():
             connector = CONNECTORS.get(kind)
             if connector is None:
+                continue
+            if kind == "whatsapp":
+                if not self.whatsapp_bridge_enabled or self.matrix_auth is None:
+                    continue
+                try:
+                    adapters.append(build_connector(kind, values, self.matrix_auth))
+                except (KeyError, ValueError):
+                    logger.warning(
+                        "Skipping the %s connection: its saved settings are invalid.", kind
+                    )
                 continue
             if kind == "sms":
                 adapters.append(
@@ -167,8 +196,7 @@ class AnnouncementPublisher:
 
     def reload_connections(self) -> None:
         """Pick up channels connected or disconnected since the publisher started."""
-        self.adapters = [a for a in self.adapters if a.name not in CONNECTORS]
-        self.adapters.extend(self._connected_adapters())
+        self.adapters = self._load_default_adapters()
 
     def create_draft(
         self,

@@ -8,6 +8,7 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from urllib.parse import quote
 
 from community_stack.announcements.adapters.base import (
     ChannelAdapter,
@@ -78,14 +79,16 @@ class MatrixRoomAdapter(ChannelAdapter):
             except Exception:
                 body = {"error": str(exc)}
             return exc.code, body
-        except Exception as exc:
+        except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as exc:
             return 503, {"error": str(exc)}
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
         """Post a new announcement event to the Matrix room with idempotency txnId."""
         # Use announcement ID in txnId for idempotency
         txn_id = f"pub_{announcement.id}"
-        path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
+        path = (
+            f"/_matrix/client/v3/rooms/{quote(self.room_id, safe='')}/send/m.room.message/{txn_id}"
+        )
 
         formatted_html = f"<h3>📢 {html.escape(announcement.title)}</h3>" + render_html(
             announcement.body
@@ -121,7 +124,9 @@ class MatrixRoomAdapter(ChannelAdapter):
             f"{announcement.title}\0{announcement.body}\0{announcement.author or ''}".encode()
         ).hexdigest()[:16]
         txn_id = f"upd_{announcement.id}_{revision}"
-        path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
+        path = (
+            f"/_matrix/client/v3/rooms/{quote(self.room_id, safe='')}/send/m.room.message/{txn_id}"
+        )
 
         formatted_html = f"<h3>📢 [UPDATED] {html.escape(announcement.title)}</h3>" + render_html(
             announcement.body
@@ -148,7 +153,9 @@ class MatrixRoomAdapter(ChannelAdapter):
     def withdraw(self, announcement_id: str) -> DeliveryResult:
         """Post a withdrawal notice to the room."""
         txn_id = f"withdraw_{announcement_id}"
-        path = f"/_matrix/client/v3/rooms/{self.room_id}/send/m.room.message/{txn_id}"
+        path = (
+            f"/_matrix/client/v3/rooms/{quote(self.room_id, safe='')}/send/m.room.message/{txn_id}"
+        )
 
         payload = {
             "msgtype": "m.notice",
@@ -167,13 +174,52 @@ class MatrixRoomAdapter(ChannelAdapter):
             idempotent=True,
         )
 
-    def health_check(self) -> HealthResult:
-        """Check Matrix homeserver readiness and room access."""
-        status_code, resp = self._http_request("GET", "/_matrix/client/versions")
-        if 200 <= status_code < 300:
+    def verify_access(self, require_public: bool = True) -> HealthResult:
+        """Check credentials, room membership and optionally public-room visibility."""
+        if not self.access_token:
+            return HealthResult(ok=False, details="A Matrix access token is required.")
+
+        status, account = self._http_request("GET", "/_matrix/client/v3/account/whoami")
+        if not 200 <= status < 300 or not account.get("user_id"):
+            return HealthResult(ok=False, details=f"Matrix login failed (HTTP {status}).")
+
+        status, joined = self._http_request("GET", "/_matrix/client/v3/joined_rooms")
+        if not 200 <= status < 300:
             return HealthResult(
-                ok=True, details=f"Matrix homeserver responsive: {resp.get('versions', [])}"
+                ok=False, details=f"Could not list joined Matrix rooms (HTTP {status})."
             )
-        return HealthResult(
-            ok=False, details=f"Homeserver unreachable (status {status_code}): {resp}"
+        if self.room_id not in joined.get("joined_rooms", []):
+            return HealthResult(
+                ok=False,
+                details=f"{account['user_id']} must join {self.room_id} before this channel can post.",
+            )
+
+        room_path = quote(self.room_id, safe="")
+        status, encryption = self._http_request(
+            "GET", f"/_matrix/client/v3/rooms/{room_path}/state/m.room.encryption"
         )
+        if status == 200 and encryption:
+            return HealthResult(
+                ok=False,
+                details="This sender cannot post to an end-to-end encrypted room. Use an unencrypted room.",
+            )
+        if status != 404:
+            return HealthResult(
+                ok=False,
+                details=f"Could not verify the Matrix room's encryption state (HTTP {status}).",
+            )
+
+        if require_public:
+            status, visibility = self._http_request(
+                "GET", f"/_matrix/client/v3/directory/list/room/{room_path}"
+            )
+            if status != 200 or visibility.get("visibility") != "public":
+                return HealthResult(
+                    ok=False,
+                    details="The announcements room must be published in the public Matrix room directory.",
+                )
+        return HealthResult(ok=True, details=f"Matrix access confirmed for {account['user_id']}.")
+
+    def health_check(self) -> HealthResult:
+        """Check Matrix credentials, membership and public announcement room visibility."""
+        return self.verify_access(require_public=True)

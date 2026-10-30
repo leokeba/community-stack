@@ -129,6 +129,16 @@ SETTINGS: dict[str, Setting] = {
             service="signal",
         ),
         Setting(
+            "services.whatsapp_bridge.enabled",
+            "WhatsApp bridge (unofficial)",
+            "Starts mautrix-whatsapp and registers it with Matrix. It links a phone to this "
+            "server and is bidirectional; only bridge a group intended for public announcements.",
+            "bool",
+            False,
+            service="whatsapp_bridge",
+            dangerous=True,
+        ),
+        Setting(
             "services.matrix.enabled",
             "Matrix chat server",
             "Turning it off stops all community chat, and Matrix announcements, until it is "
@@ -179,6 +189,21 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
         raise SettingsError(f"The new configuration would be invalid: {errors[0]}")
 
     warnings = []
+    if effective.get("services.whatsapp_bridge.enabled") is True:
+        if not get_value(yaml.safe_load(new_text), ("services", "matrix", "enabled"), True):
+            raise SettingsError("Enable the Matrix server before enabling the WhatsApp bridge.")
+        if get_value(
+            config, ("services", "whatsapp_bridge", "mode"), "none"
+        ) == "none" and "mode" in config.get("services", {}).get("whatsapp_bridge", {}):
+            new_text = set_value(
+                new_text,
+                ("services", "whatsapp_bridge", "mode"),
+                "announcements_only",
+            )
+        warnings.append(
+            "WhatsApp is an unofficial, bidirectional bridge. Link only a phone and group "
+            "that the community intends to bridge."
+        )
     if effective.get("operations.backups.encryption") == "restic":
         if shutil.which("restic") is None:
             raise SettingsError("Install restic on the server first (sudo apt install restic).")
@@ -270,12 +295,15 @@ def wait_for(context, service: str, running: bool) -> None:
 
 def set_service(context, service: str, running: bool) -> None:
     if running:
+        if not docker.ensure_network("proxy_net"):
+            raise SettingsError("Docker could not create the proxy network.")
+        if service in ("matrix", "whatsapp_bridge") and not docker.ensure_network("bridge_net"):
+            raise SettingsError("Docker could not create the isolated Matrix appservice network.")
         try:
             config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
             prepare_service(context.project_dir, service, config, context.env_path)
         except ProvisionError as exc:
             raise SettingsError(str(exc)) from exc
-        docker.ensure_network("proxy_net")
         args = ["up", "-d", "--remove-orphans"]
     else:
         args = ["down"]
@@ -288,6 +316,16 @@ def set_service(context, service: str, running: bool) -> None:
     if result.returncode != 0:
         raise SettingsError(f"Docker could not {'start' if running else 'stop'} {service}.")
     wait_for(context, service, running)
+    if service == "whatsapp_bridge" and running:
+        result = docker.run_compose(
+            context.services_dir / "matrix",
+            ["restart", "synapse"],
+            env_file=context.env_path,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise SettingsError("Synapse could not reload the WhatsApp appservice registration.")
+        wait_for(context, "matrix", True)
 
 
 def apply_changes(context, raw_changes: Any) -> dict[str, Any]:
@@ -316,7 +354,21 @@ def apply_changes(context, raw_changes: Any) -> dict[str, Any]:
 
     attempted: list[tuple[str, bool]] = []
     try:
-        for key, value in effective.items():
+        service_changes = [
+            (key, value) for key, value in effective.items() if SETTINGS[key].service
+        ]
+        service_changes.sort(
+            key=lambda item: (
+                0
+                if SETTINGS[item[0]].service == "matrix" and item[1]
+                else 1
+                if SETTINGS[item[0]].service == "whatsapp_bridge" and item[1]
+                else 0
+                if SETTINGS[item[0]].service == "whatsapp_bridge" and not item[1]
+                else 1
+            )
+        )
+        for key, value in service_changes:
             service = SETTINGS[key].service
             if service:
                 attempted.append((service, bool(value)))

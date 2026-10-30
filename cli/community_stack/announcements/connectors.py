@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.base import ChannelAdapter
 from community_stack.announcements.adapters.listmonk import ListmonkAdapter
+from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.messaging import (
     DiscordWebhookAdapter,
     SlackWebhookAdapter,
@@ -16,6 +17,7 @@ from community_stack.announcements.adapters.messaging import (
 )
 from community_stack.announcements.adapters.signal import SignalAdapter
 from community_stack.announcements.adapters.social import BlueskyAdapter, MastodonAdapter
+from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
 
 TOKEN = re.compile(r"^[^\s]{8,512}$")
 
@@ -69,12 +71,54 @@ def _validate_bluesky(values: dict[str, str]) -> dict[str, str]:
 
 def _validate_telegram(values: dict[str, str]) -> dict[str, str]:
     chat_id = values.get("chat_id", "").strip()
-    if not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}|-?\d{5,20}", chat_id):
-        raise ValueError("Enter the channel as @channelname or its numeric ID.")
+    if not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}|-100\d{5,20}", chat_id):
+        raise ValueError(
+            "Use @channelname for a public channel or its private ID like "
+            "-1001234567890, including the leading minus sign."
+        )
     token = values.get("bot_token", "").strip()
     if not re.fullmatch(r"\d{5,15}:[A-Za-z0-9_-]{30,64}", token):
         raise ValueError("The bot token from @BotFather looks like 123456789:AA...")
     return {"chat_id": chat_id, "bot_token": token}
+
+
+def _validate_matrix_room(values: dict[str, str]) -> dict[str, str]:
+    homeserver_url = values.get("homeserver_url", "").strip().rstrip("/")
+    if homeserver_url != "http://community_synapse:8008":
+        http.assert_public_https(homeserver_url)
+    room_id = values.get("room_id", "").strip()
+    if not re.fullmatch(r"![^: ]+:[^: ]+", room_id):
+        raise ValueError("Enter the room ID beginning with !, not its #alias.")
+    return {
+        "homeserver_url": homeserver_url,
+        "room_id": room_id,
+        "access_token": _token(values, "access_token", "The Matrix access token"),
+    }
+
+
+def _validate_whatsapp(values: dict[str, str]) -> dict[str, str]:
+    room_id = values.get("room_id", "").strip()
+    if not re.fullmatch(r"![^: ]+:[^: ]+", room_id):
+        raise ValueError("Enter the Matrix room ID of the WhatsApp portal, beginning with !.")
+    return {"room_id": room_id}
+
+
+def build_connector(
+    kind: str, values: dict[str, str], matrix_values: dict[str, str] | None = None
+) -> ChannelAdapter:
+    """Build a connector, supplying the shared Matrix account for WhatsApp forwarding."""
+    connector = CONNECTORS.get(kind)
+    if connector is None:
+        raise ValueError(f"Unknown channel type: {kind}.")
+    if kind == "whatsapp":
+        if matrix_values is None:
+            raise ValueError("Connect the Matrix announcements account before WhatsApp.")
+        values = {
+            **values,
+            "homeserver_url": matrix_values["homeserver_url"],
+            "access_token": matrix_values["access_token"],
+        }
+    return connector.build(values)
 
 
 def _validate_webhook(name: str, hosts: set[str], path_prefix: str):
@@ -200,16 +244,66 @@ CONNECTORS: dict[str, ConnectorType] = {
             steps=(
                 "In Telegram, message @BotFather, send /newbot and follow the steps.",
                 "Copy the bot token it gives you.",
-                "Add the bot to the channel as an administrator that can post, edit and delete.",
-                "Enter the channel's public @name, or its numeric ID for a private channel.",
+                "Open the channel settings, choose Administrators > Add Admin, select the bot, and allow it to post.",
+                "For a public channel, enter its @name. For a private channel, copy a message link: https://t.me/c/4464970877/2 becomes -1004464970877. Include the leading minus sign; do not paste the link.",
             ),
             fields=(
-                ConnectorField("chat_id", "Channel", placeholder="@ourcommunity"),
+                ConnectorField("chat_id", "Channel", placeholder="@ourcommunity or -1001234567890"),
                 ConnectorField("bot_token", "Bot token", secret=True),
             ),
             validate=_validate_telegram,
             build=lambda c: TelegramAdapter(c["bot_token"], c["chat_id"]),
             caveat="A failed Telegram post is not retried automatically, to avoid duplicates.",
+        ),
+        ConnectorType(
+            kind="matrix_room",
+            label="Matrix announcements",
+            steps=(
+                "Create a dedicated Matrix account for announcements and invite it to an unencrypted public announcements room.",
+                "Copy the account's access token. It is saved on this server and is not shown again.",
+                "For mirroring, invite the same account to each source room as well.",
+            ),
+            fields=(
+                ConnectorField(
+                    "homeserver_url",
+                    "Homeserver URL",
+                    placeholder="http://community_synapse:8008",
+                ),
+                ConnectorField(
+                    "room_id", "Public announcements room ID", placeholder="!room:example.org"
+                ),
+                ConnectorField("access_token", "Matrix access token", secret=True),
+            ),
+            validate=_validate_matrix_room,
+            build=lambda c: MatrixRoomAdapter(
+                homeserver_url=c["homeserver_url"],
+                room_id=c["room_id"],
+                access_token=c["access_token"],
+            ),
+            caveat="The room must be public and unencrypted. Matrix account tokens are stored in the private announcements database.",
+        ),
+        ConnectorType(
+            kind="whatsapp",
+            label="WhatsApp announcements",
+            steps=(
+                "Enable the WhatsApp bridge on the Services page and complete its safety confirmation.",
+                "Open the WhatsApp bridge bot in Element and send `login qr`; scan it from WhatsApp > Linked devices.",
+                "Bridge one chosen WhatsApp group to a Matrix portal room using the bridge bot's help. Bridging is bidirectional, so use a group intended for public announcements.",
+                "Enter that portal room's Matrix room ID below. Only announcements published to this channel are sent there.",
+            ),
+            fields=(
+                ConnectorField(
+                    "room_id", "WhatsApp portal room ID", placeholder="!portal:example.org"
+                ),
+            ),
+            validate=_validate_whatsapp,
+            build=lambda c: WhatsAppAnnouncementAdapter(
+                homeserver_url=c["homeserver_url"],
+                room_id=c["room_id"],
+                access_token=c["access_token"],
+            ),
+            caveat="Requires a linked mautrix-whatsapp account and a Matrix portal room. The connection test checks Matrix access, not WhatsApp account linkage.",
+            setup_page=("Open WhatsApp setup", "/admin/whatsapp"),
         ),
         ConnectorType(
             kind="discord",

@@ -130,6 +130,28 @@ def test_restic_encryption_needs_restic_on_the_server(project, monkeypatch):
         agent_settings.build_plan(context(root), {"operations.backups.encryption": "restic"})
 
 
+def test_whatsapp_enablement_is_confirmed_and_registers_safe_mode(project):
+    root, _ = project
+
+    plan = agent_settings.build_plan(context(root), {"services.whatsapp_bridge.enabled": "true"})
+
+    assert plan["needs_password"]
+    assert "bidirectional bridge" in plan["warnings"][0]
+    assert 'mode: "announcements_only"' in plan["diff"]
+    assert "WHATSAPP_AS_TOKEN" not in (root / ".env").read_text(encoding="utf-8")
+
+
+def test_whatsapp_cannot_be_enabled_without_matrix(project):
+    root, _ = project
+    config_path = root / "community-stack.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["services"]["matrix"]["enabled"] = False
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(agent_settings.SettingsError, match="Enable the Matrix server"):
+        agent_settings.build_plan(context(root), {"services.whatsapp_bridge.enabled": "true"})
+
+
 def test_apply_backs_up_saves_and_stops_the_service(project):
     root, fake = project
 

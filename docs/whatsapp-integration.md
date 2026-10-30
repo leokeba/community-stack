@@ -1,80 +1,39 @@
-# WhatsApp Integration & Bridging Guide
+# WhatsApp announcements
 
-## 1. Architectural Baseline & Disclaimer
+The optional WhatsApp integration uses the upstream
+[`mautrix-whatsapp`](https://github.com/mautrix/whatsapp) bridge. It is unofficial,
+uses a linked-device session, and may stop working or put the linked phone number
+at risk. WhatsApp must remain an auxiliary destination; the Matrix server and
+public announcement feed do not depend on it.
 
-The Community Communications Stack provides an **optional**, **disabled-by-default** integration with WhatsApp using the upstream [`mautrix-whatsapp`](https://github.com/mautrix/whatsapp) project.
+## Set it up in the admin console
 
-### Critical Operational Disclaimer
-- **Unofficial Integration:** `mautrix-whatsapp` connects via reverse-engineered WhatsApp Web protocols. It is not an official WhatsApp API or WhatsApp Business solution.
-- **Account Ban Risk:** WhatsApp actively monitors automated and non-official clients. Any phone number used for the bridge is subject to temporary or permanent bans without prior notice.
-- **Auxiliary Channel Only:** WhatsApp is treated as an auxiliary convenience channel. The core Matrix homeserver, public web portal, and RSS announcement feeds **must never** depend on WhatsApp availability.
+1. On **Services**, enable **WhatsApp bridge** and review the warning. The server
+   generates private appservice credentials, creates the bridge configuration,
+   registers the appservice with Synapse, and starts the bridge.
+2. On **Channels**, connect a dedicated **Matrix announcements** account. This
+   account is used to post announcements into the WhatsApp portal room.
+3. Open **WhatsApp setup** from Channels. In Element, start a direct chat with
+   `@whatsappbot:<your-matrix-domain>` and send `login qr`. Scan the QR code using
+   WhatsApp **Linked devices** on the phone you want to link.
+4. Use the bridge bot's help in Element to bridge the intended WhatsApp group.
+   Invite the Matrix announcements account to the resulting portal room.
+5. On Channels, save the portal room's Matrix room ID (starts with `!`) as the
+   WhatsApp destination and test the connection.
 
----
+Published announcements are posted to that Matrix portal room and forwarded by
+mautrix-whatsapp. The connection test verifies that the Matrix account can access
+the portal room; it cannot confirm that the WhatsApp phone is still linked.
 
-## 2. Integration Modes
+## Privacy and operations
 
-### Mode A: Public Announcement Forwarder (Recommended)
-In Mode A, canonical public announcements created with `community-stack announce` are forwarded unidirectionally to a designated WhatsApp broadcast list or group.
-- **Security & Privacy:** No private or two-way messages are bridged. Only public announcements are sent.
-- **Low Risk:** Does not expose community member identifiers or message metadata.
+Mautrix bridging is **bidirectional**: messages in the bridged WhatsApp group may
+also appear in Matrix. The announcements connector only sends canonical
+announcements, but that does not make the bridge itself one-way. Tell group
+members before bridging, and never bridge private coordination or administrator
+rooms.
 
-### Mode B: Selective Two-Way Room Bridging (Restricted)
-In Mode B, explicitly configured Matrix rooms are bridged to designated WhatsApp groups.
-- **Strict Allowlisting:** Only rooms listed in `services.whatsapp_bridge.mapped_rooms` are bridged. No automatic bridging of all rooms.
-- **No Sensitive Coordination:** Internal organizing rooms, security discussions, or administrator channels must **never** be bridged.
-- **Mandatory User Disclosure:** Room topics and welcome notices must clearly state:
-  > *"Notice: This room is bridged to a WhatsApp group. Messages sent here are unencrypted on WhatsApp and visible to WhatsApp Web."*
-
----
-
-## 3. Configuration Contract
-
-In `community-stack.yaml`:
-```yaml
-services:
-  whatsapp_bridge:
-    enabled: true
-    mode: "selective_bridge" # none | announcements_only | selective_bridge
-    mapped_rooms:
-      - matrix_room_id: "!public-announcements:example.org"
-        whatsapp_chat_jid: "123456789-group@g.us"
-        description: "Public Announcements Group"
-```
-
-In `.env`:
-```bash
-WHATSAPP_AS_TOKEN=generate_hex_32_token
-WHATSAPP_HS_TOKEN=generate_hex_32_token
-```
-
----
-
-## 4. Operational Runbook
-
-### Checking Bridge Health
-```bash
-uv run community-stack bridge status
-```
-
-### Listing Allowlisted Rooms
-```bash
-uv run community-stack bridge list-rooms
-```
-
-### Emergency Disconnect (Killswitch)
-If an unauthorized room is bridged, suspicious bridge activity is detected, or the linked phone is compromised:
-
-```bash
-uv run community-stack bridge disable --confirm
-```
-
-What the killswitch does:
-1. Immediately stops the `community_whatsapp_bridge` container.
-2. Halts outgoing and incoming bridge traffic.
-3. Preserves all Matrix homeserver data and internal rooms without disruption.
-
-### Unlinking and Re-authenticating
-To completely disconnect:
-1. Open WhatsApp on the linked smartphone: **Settings > Linked Devices**.
-2. Select the **mautrix-whatsapp / Chrome** session and tap **Log Out**.
-3. Clear the bridge data directory on the server: `rm -rf data/whatsapp_bridge/*`.
+To stop the bridge, turn it off on the Services page. To unlink the phone, also
+remove the bridge's linked device in WhatsApp **Settings → Linked devices**.
+Bridge data and credentials are kept when the service is stopped so it can be
+started again without pairing the phone again.

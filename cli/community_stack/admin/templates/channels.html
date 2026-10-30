@@ -7,15 +7,19 @@
 {% set connector = item.type %}
 <section class="panel" aria-labelledby="channel-{{ connector.kind }}">
   <h2 id="channel-{{ connector.kind }}">{{ connector.label }}</h2>
-  <p class="status">{% if item.connected %}Connected{% if not item.enabled %}, turned off{% endif %}{% else %}Not connected{% endif %}</p>
+  <p class="status">{% if item.connected %}Connected{% if not item.enabled %}, turned off{% endif %}{% else %}Not connected{% endif %}{% if connector.kind == "whatsapp" and not item.available %} · Needs setup{% endif %}</p>
   {% if message and message.kind == connector.kind %}
   <p class="{{ 'notice' if message.ok else 'error' }}" role="{{ 'status' if message.ok else 'alert' }}">{{ message.text }}</p>
   {% endif %}
   {% if connector.caveat %}<p class="muted">{{ connector.caveat }}</p>{% endif %}
+  {% if connector.kind == "whatsapp" and not item.available %}
+  <p class="notice">WhatsApp needs the bridge enabled and a Matrix announcements account connected. Start with <a href="/admin/services">Services</a> and <a href="/admin/channels">Matrix announcements</a>.</p>
+  {% endif %}
   <details {% if not item.connected %}open{% endif %}>
     <summary>{{ "Change settings" if item.connected else "How to connect" }}</summary>
     <ol>{% for step in connector.steps %}<li>{{ step }}</li>{% endfor %}</ol>
     {% if connector.setup_page %}<p><a href="{{ connector.setup_page[1] }}">{{ connector.setup_page[0] }}</a></p>{% endif %}
+    {% if item.available %}
     <form method="post" action="/admin/channels/{{ connector.kind }}/save">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% for field in connector.fields %}
@@ -28,8 +32,9 @@
       {% endfor %}
       <p><button type="submit">{{ "Save changes" if item.connected else "Connect" }}</button></p>
     </form>
+    {% endif %}
   </details>
-  {% if item.connected %}
+  {% if item.connected and item.available %}
   <div class="actions">
     <form method="post" action="/admin/channels/{{ connector.kind }}/test">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

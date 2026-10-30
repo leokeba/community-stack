@@ -67,9 +67,9 @@ The Community Communications Stack is designed for public movements and communit
 - **Threat:** The bridge container is exploited or acts maliciously.
 - **Impact:** Decryption of bridged room messages and exfiltration to unauthorized endpoints.
 - **Mitigation:**
-  - The bridge is isolated on a dedicated Docker bridge network (`bridge_net`).
-  - Strict room allowlisting: only explicitly configured public or semi-public rooms can be bridged.
-  - Sensitive internal coordination rooms are NEVER mapped to WhatsApp.
+  - The bridge is isolated from public ingress on a dedicated Docker bridge network (`bridge_net`) shared with Synapse; outbound internet access remains necessary.
+  - The admin console selects one portal room for canonical announcement delivery; this does not restrict which rooms the bridge bot can create or bridge.
+  - Sensitive internal coordination rooms must NEVER be mapped to WhatsApp.
   - Clear user disclosure in room topics indicating the room is bridged to WhatsApp.
   - Emergency disable command (`community-stack bridge disable`) immediately severs container networking and kills bridge processes.
 

@@ -166,7 +166,7 @@ def test_matrix_room_adapter_publish_success():
     assert len(sent_requests) == 1
     req = sent_requests[0]
     assert req["method"] == "PUT"
-    assert "!public:community.test" in req["path"]
+    assert "%21public%3Acommunity.test" in req["path"]
     assert req["headers"]["Authorization"] == "Bearer syt_secret_token"
     assert "Important Community Notice" in req["payload"]["body"]
 

@@ -6,6 +6,7 @@ Nothing here overwrites an existing file: operators' own configuration wins.
 from __future__ import annotations
 
 import json
+import re
 import string
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.secrets import parse_env_file
+from community_stack.secrets import generate_secret, parse_env_file
 
 SYNAPSE_UID = 991
 LOG_CONFIG = """version: 1
@@ -167,6 +168,170 @@ def prepare_element(project_dir: Path, config: dict) -> str | None:
     return f"Generated Element configuration for {_domain(config, 'matrix')}."
 
 
+def _whatsapp_secrets(env_path: Path, create_missing: bool) -> dict[str, str]:
+    values = parse_env_file(env_path)
+    missing = [key for key in ("WHATSAPP_AS_TOKEN", "WHATSAPP_HS_TOKEN") if not values.get(key)]
+    if missing and not create_missing:
+        raise ProvisionError(
+            "WhatsApp bridge credentials are missing from .env while bridge data already "
+            "exists. Restore the original values before starting the bridge."
+        )
+    if not missing:
+        return values
+
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.is_file() else []
+    for key in missing:
+        value = generate_secret()
+        replaced = False
+        for index, line in enumerate(lines):
+            if line.partition("=")[0].strip() == key:
+                lines[index] = f"{key}={value}"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"{key}={value}")
+        values[key] = value
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+    env_path.chmod(0o600)
+    return values
+
+
+def _add_appservice_registration(homeserver_path: Path, registration: str) -> bool:
+    text = homeserver_path.read_text(encoding="utf-8")
+    config = yaml.safe_load(text)
+    if not isinstance(config, dict):
+        raise ProvisionError("Synapse homeserver.yaml must contain a YAML mapping.")
+    registrations = config.get("app_service_config_files", [])
+    if registrations is None:
+        registrations = []
+    if not isinstance(registrations, list) or not all(
+        isinstance(path, str) for path in registrations
+    ):
+        raise ProvisionError("Synapse app_service_config_files must be a list of file paths.")
+    if registration in registrations:
+        return False
+
+    registrations.append(registration)
+    block = ["app_service_config_files:", *[f"  - {path}" for path in registrations]]
+    lines = text.splitlines()
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if re.match(r"^app_service_config_files\s*:", line)
+        ),
+        None,
+    )
+    if start is None:
+        updated = text.rstrip() + "\n\n" + "\n".join(block) + "\n"
+    else:
+        end = next(
+            (
+                index
+                for index in range(start + 1, len(lines))
+                if lines[index] and not lines[index][0].isspace()
+            ),
+            len(lines),
+        )
+        lines[start:end] = block
+        updated = "\n".join(lines) + "\n"
+    yaml.safe_load(updated)
+    homeserver_path.write_text(updated, encoding="utf-8")
+    homeserver_path.chmod(0o640)
+    return True
+
+
+def prepare_whatsapp(
+    project_dir: Path, config: dict, env_path: Path, services_dir: Path
+) -> str | None:
+    """Prepare bridge config, its registration, and Synapse's appservice entry."""
+    services = config.get("services", {})
+    if not services.get("matrix", {}).get("enabled", False):
+        raise ProvisionError("Enable the Matrix server before enabling the WhatsApp bridge.")
+
+    matrix_dir = project_dir / "data" / "matrix"
+    homeserver_path = matrix_dir / "homeserver.yaml"
+    if not homeserver_path.is_file():
+        raise ProvisionError(
+            "Matrix has not been provisioned yet. Start the Matrix server before the bridge."
+        )
+
+    data_dir = project_dir / "data" / "whatsapp_bridge"
+    bridge_config = data_dir / "config.yaml"
+    registration_file = data_dir / "registration.yaml"
+    if registration_file.is_file() and not bridge_config.is_file():
+        raise ProvisionError(
+            "WhatsApp bridge data is incomplete: config.yaml is missing while registration.yaml "
+            "exists. Restore the bridge config before starting the service."
+        )
+    data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    data_dir.chmod(0o700)
+
+    secrets = _whatsapp_secrets(env_path, create_missing=not bridge_config.exists())
+    if not bridge_config.exists():
+        template_path = services_dir / "whatsapp_bridge" / "config.template.yaml"
+        template = template_path.read_text(encoding="utf-8")
+        rendered = string.Template(template).substitute(
+            MATRIX_DOMAIN=_domain(config, "matrix"),
+            WHATSAPP_AS_TOKEN=secrets["WHATSAPP_AS_TOKEN"],
+            WHATSAPP_HS_TOKEN=secrets["WHATSAPP_HS_TOKEN"],
+        )
+        yaml.safe_load(rendered)
+        bridge_config.write_text(rendered, encoding="utf-8")
+        bridge_config.chmod(0o600)
+
+    if not registration_file.is_file():
+        compose = yaml.safe_load(
+            (services_dir / "whatsapp_bridge" / "docker-compose.yml").read_text(encoding="utf-8")
+        )
+        image = compose["services"]["whatsapp_bridge"]["image"]
+        result = docker.run_container(
+            [
+                "--rm",
+                "--network",
+                "none",
+                "-v",
+                f"{data_dir.resolve()}:/data",
+                image,
+            ]
+        )
+        if result.returncode != 0 or not registration_file.is_file():
+            raise ProvisionError(
+                "The WhatsApp bridge could not generate its appservice registration. "
+                "Check Docker and the bridge image."
+            )
+        registration_file.chmod(0o600)
+
+    appservices_dir = matrix_dir / "appservices"
+    appservices_dir.mkdir(mode=0o750, parents=True, exist_ok=True)
+    appservice_path = appservices_dir / "whatsapp.yaml"
+    appservice_path.write_text(registration_file.read_text(encoding="utf-8"), encoding="utf-8")
+    appservice_path.chmod(0o640)
+
+    synapse_image_name = synapse_image(services_dir)
+    ownership = docker.run_container(
+        [
+            "--rm",
+            "-v",
+            f"{matrix_dir.resolve()}:/data",
+            "--entrypoint",
+            "chown",
+            synapse_image_name,
+            "-R",
+            f"{SYNAPSE_UID}:{SYNAPSE_UID}",
+            "/data/appservices",
+        ]
+    )
+    if ownership.returncode != 0:
+        raise ProvisionError("Synapse could not read the WhatsApp appservice registration.")
+
+    registered = _add_appservice_registration(homeserver_path, "/data/appservices/whatsapp.yaml")
+    if registered:
+        return "Generated WhatsApp bridge configuration and registered it with Synapse."
+    return None
+
+
 def prepare_service(
     project_dir: Path,
     service: str,
@@ -181,4 +346,8 @@ def prepare_service(
         )
     if service == "element":
         return prepare_element(project_dir, config)
+    if service == "whatsapp_bridge":
+        return prepare_whatsapp(
+            project_dir, config, env_path, services_dir or project_dir / "services"
+        )
     return None

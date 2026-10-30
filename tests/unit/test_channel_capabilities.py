@@ -48,7 +48,11 @@ def test_adapters_declare_how_edits_and_withdrawals_behave(tmp_path):
         MatrixRoomAdapter(),
         ActivityPubAdapter(),
         EmailNewsletterAdapter(subscriber_manager=SubscriberManager(tmp_path / "subs.db")),
-        WhatsAppAnnouncementAdapter(),
+        WhatsAppAnnouncementAdapter(
+            homeserver_url="http://matrix.test",
+            room_id="!whatsapp:matrix.test",
+            access_token="matrix-token-value",
+        ),
     ]
     modes = {a.name: (a.capabilities.update_mode, a.capabilities.withdraw_mode) for a in adapters}
     assert modes == {

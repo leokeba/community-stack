@@ -26,7 +26,7 @@ bridge:
   federate_rooms: false
   encryption:
     allow: true
-    default: true
+    default: false
     require: false
   permissions:
     "*": "relay"

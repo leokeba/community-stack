@@ -31,6 +31,15 @@ def test_get_required_secrets():
     assert "WHATSAPP_AS_TOKEN" not in reqs
 
 
+def test_whatsapp_appservice_tokens_are_provisioned_automatically():
+    config = {"services": {"whatsapp_bridge": {"enabled": True}}}
+
+    required = get_required_secrets(config)
+
+    assert "WHATSAPP_AS_TOKEN" not in required
+    assert "WHATSAPP_HS_TOKEN" not in required
+
+
 def test_get_required_secrets_includes_configured_matrix_announcement_token():
     config = {
         "services": {
