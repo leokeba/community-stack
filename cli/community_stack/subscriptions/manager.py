@@ -10,6 +10,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+# One list for the CLI, the publisher and the public sign-up pages.
+DEFAULT_DB_PATH = "data/announcements/subscribers.db"
+# Where the CLI kept its list before CR2.1. Rows are imported on first use.
+LEGACY_DB_PATH = "data/subscriptions/subscribers.db"
+
 
 @dataclass
 class Subscriber:
@@ -37,10 +42,38 @@ class Subscriber:
 class SubscriberManager:
     """Manages newsletter and SMS subscriber lists with guaranteed opt-out."""
 
-    def __init__(self, db_path: Path | str = "data/subscriptions/subscribers.db") -> None:
+    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
         self.db_path = Path(db_path).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        if Path(db_path) == Path(DEFAULT_DB_PATH):
+            self._import_legacy_rows()
+
+    def _import_legacy_rows(self) -> None:
+        """Copy subscribers from the old CLI database. Existing rows are never overwritten."""
+        legacy = Path(LEGACY_DB_PATH)
+        if not legacy.is_file() or legacy.resolve() == self.db_path:
+            return
+        source = sqlite3.connect(str(legacy))
+        try:
+            rows = source.execute(
+                "SELECT id, channel, destination, status, topics_json, created_at, unsubscribed_at "
+                "FROM subscribers"
+            ).fetchall()
+        except sqlite3.Error:
+            return
+        finally:
+            source.close()
+        with self._get_conn() as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO subscribers (
+                    id, channel, destination, status, topics_json, created_at, unsubscribed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))

@@ -67,3 +67,125 @@ def test_topic_filtering(tmp_path):
     assert "emergency_only@example.org" in emergency_recipients
     assert "all_topics@example.org" in emergency_recipients
     assert "general_only@example.org" not in emergency_recipients
+
+
+# CR2.1: one subscriber list for the CLI, publisher and sign-up pages.
+
+
+def _legacy_db(path, rows):
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """CREATE TABLE subscribers (
+            id TEXT PRIMARY KEY, channel TEXT NOT NULL, destination TEXT NOT NULL,
+            status TEXT NOT NULL, topics_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            unsubscribed_at TEXT, UNIQUE(channel, destination))"""
+    )
+    conn.executemany("INSERT INTO subscribers VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+
+def test_default_path_is_the_announcements_list(tmp_path, monkeypatch):
+    from community_stack.subscriptions.manager import DEFAULT_DB_PATH
+
+    monkeypatch.chdir(tmp_path)
+    assert DEFAULT_DB_PATH == "data/announcements/subscribers.db"
+    SubscriberManager()
+    assert (tmp_path / "data/announcements/subscribers.db").is_file()
+
+
+def test_legacy_cli_rows_are_imported_once(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _legacy_db(
+        tmp_path / "data/subscriptions/subscribers.db",
+        [
+            (
+                "sub_old_1",
+                "email",
+                "ann@example.org",
+                "active",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                None,
+            ),
+            ("sub_old_2", "sms", "+33612345678", "active", "[]", "2026-01-02T00:00:00+00:00", None),
+        ],
+    )
+    first = SubscriberManager()
+    assert {s.destination for s in first.list_subscribers()} == {"ann@example.org", "+33612345678"}
+
+    # A second start imports nothing new, and nothing is duplicated.
+    again = SubscriberManager()
+    assert len(again.list_subscribers()) == 2
+
+
+def test_existing_rows_win_over_legacy_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    current = SubscriberManager()
+    current.add_subscriber("email", "ann@example.org", topics=["events"])
+    current.unsubscribe("email", "ann@example.org")
+    _legacy_db(
+        tmp_path / "data/subscriptions/subscribers.db",
+        [
+            (
+                "sub_old_1",
+                "email",
+                "ann@example.org",
+                "active",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                None,
+            )
+        ],
+    )
+
+    merged = SubscriberManager()
+    row = next(
+        s for s in merged.list_subscribers(active_only=False) if s.destination == "ann@example.org"
+    )
+    assert row.status == "unsubscribed"
+    assert row.topics == ["events"]
+
+
+def test_custom_paths_never_import_legacy_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _legacy_db(
+        tmp_path / "data/subscriptions/subscribers.db",
+        [
+            (
+                "sub_old_1",
+                "email",
+                "ann@example.org",
+                "active",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                None,
+            )
+        ],
+    )
+    isolated = SubscriberManager(db_path=tmp_path / "isolated.db")
+    assert isolated.list_subscribers() == []
+
+
+def test_legacy_file_is_left_in_place(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    legacy = tmp_path / "data/subscriptions/subscribers.db"
+    _legacy_db(
+        legacy,
+        [
+            (
+                "sub_old_1",
+                "email",
+                "ann@example.org",
+                "active",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                None,
+            )
+        ],
+    )
+    SubscriberManager()
+    assert legacy.is_file()
