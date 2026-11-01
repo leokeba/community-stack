@@ -17,6 +17,7 @@ from community_stack.announcements.adapters.base import (
 )
 from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement
+from community_stack.subscriptions.email_signup import make_unsubscribe_token
 from community_stack.subscriptions.email_transport import (
     EmailTransport,
     TransportError,
@@ -32,7 +33,8 @@ class EmailNewsletterAdapter(ChannelAdapter):
         self,
         subscriber_manager: SubscriberManager | None = None,
         from_address: str = "announcements@community.example.org",
-        unsubscribe_base_url: str = "https://community.example.org/subscribe/stop",
+        public_base_url: str = "https://community.example.org",
+        unsubscribe_secret: bytes | None = None,
         transport: EmailTransport | None = None,
         enabled: bool = True,
         time_budget_seconds: float = 200,
@@ -40,9 +42,17 @@ class EmailNewsletterAdapter(ChannelAdapter):
         self.subscriber_manager = subscriber_manager or SubscriberManager()
         self.time_budget_seconds = time_budget_seconds
         self.from_address = from_address
-        self.unsubscribe_base_url = unsubscribe_base_url
+        self.public_base_url = public_base_url.rstrip("/")
+        # Signs the per-person unsubscribe links. Without it nothing can be sent safely.
+        self.unsubscribe_secret = unsubscribe_secret
         self.enabled = enabled
         self.transport = transport or UnconfiguredTransport()
+
+    def unsubscribe_url(self, address: str) -> str | None:
+        if self.unsubscribe_secret is None:
+            return None
+        token = make_unsubscribe_token(self.unsubscribe_secret, address)
+        return f"{self.public_base_url}/subscribe/email/unsubscribe?t={token}"
 
     @property
     def name(self) -> str:
@@ -68,20 +78,22 @@ class EmailNewsletterAdapter(ChannelAdapter):
             f'width="{min(image.width, 600)}" style="max-width:100%;height:auto"></p>'
         )
 
-    def build_email_message(self, announcement: Announcement) -> EmailMessage:
+    def build_email_message(
+        self, announcement: Announcement, unsubscribe_url: str | None = None
+    ) -> EmailMessage:
+        if unsubscribe_url is None:
+            raise ValueError("Every announcement email needs its own unsubscribe link.")
         msg = EmailMessage()
         msg["Subject"] = f"📢 {announcement.title}"
         msg["From"] = self.from_address
-        msg["List-Unsubscribe"] = f"<{self.unsubscribe_base_url}>"
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
         # Plain text version
         plain_body = f"{announcement.title}\n\n{to_plain_text(announcement.body)}"
         if announcement.author:
             plain_body += f"\n\n— {announcement.author}"
-        plain_body += (
-            f"\n\nTo unsubscribe from this community broadcast: {self.unsubscribe_base_url}"
-        )
+        plain_body += f"\n\nTo stop receiving these emails: {unsubscribe_url}"
         msg.set_content(plain_body)
 
         # HTML version
@@ -95,7 +107,7 @@ class EmailNewsletterAdapter(ChannelAdapter):
   <hr>
   <p style="font-size: 0.85em; color: #666;">
     You received this email because you opted into community announcements.
-    <a href="{self.unsubscribe_base_url}">Click here to unsubscribe</a>.
+    <a href="{html.escape(unsubscribe_url, quote=True)}">Click here to unsubscribe</a>.
   </p>
 </body>
 </html>"""
@@ -111,6 +123,12 @@ class EmailNewsletterAdapter(ChannelAdapter):
             return DeliveryResult(
                 success=False,
                 error="Email newsletter adapter is disabled.",
+                retryable=False,
+            )
+        if self.unsubscribe_secret is None:
+            return DeliveryResult(
+                success=False,
+                error="Email is missing its unsubscribe signing secret.",
                 retryable=False,
             )
 
@@ -136,7 +154,7 @@ class EmailNewsletterAdapter(ChannelAdapter):
                     retryable=True,
                     idempotent=True,
                 )
-            message = self.build_email_message(announcement)
+            message = self.build_email_message(announcement, self.unsubscribe_url(address))
             message["To"] = address
             try:
                 self.transport.send(message)

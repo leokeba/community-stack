@@ -31,6 +31,7 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.continuity.connect_page import build_site, load_identity, write_files
 from community_stack.secrets import parse_env_file
+from community_stack.subscriptions.email_signup import new_secret
 from community_stack.subscriptions.manager import SubscriberManager
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,7 @@ class AnnouncementPublisher:
                         build_email_adapter(
                             values,
                             SubscriberManager(self.storage.db_path.parent / "subscribers.db"),
+                            self._unsubscribe_secret(),
                         )
                     )
                 except (KeyError, ValueError):
@@ -209,6 +211,14 @@ class AnnouncementPublisher:
             except (KeyError, ValueError):
                 logger.warning("Skipping the %s connection: its saved settings are invalid.", kind)
         return adapters
+
+    def _unsubscribe_secret(self) -> bytes:
+        """The key that signs unsubscribe links, created once and kept in the announcements database."""
+        secret = self.storage.get_setting("subscriber_token_secret", "")
+        if not secret:
+            secret = new_secret()
+            self.storage.set_setting("subscriber_token_secret", secret)
+        return secret.encode()
 
     def reload_connections(self) -> None:
         """Pick up channels connected or disconnected since the publisher started."""

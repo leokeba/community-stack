@@ -138,10 +138,16 @@ def test_website_and_feeds_are_always_shown_by_default(example):
     assert result.shown[0].url.endswith("/feed/announcements.html")
 
 
-def test_email_is_never_shown_before_sign_up_exists(with_community):
+def test_email_is_hidden_until_a_mail_server_is_connected(with_community):
     result = _resolve(with_community)
     assert "email" not in [c.key for c in result.shown]
-    assert ("email", "Email sign-up is not available yet.") in result.hidden
+    assert ("email", "No email server is connected.") in result.hidden
+
+
+def test_email_is_shown_with_its_sign_up_link_when_connected(with_community):
+    result = _resolve(with_community, connections={"email": {"host": "smtp.example.org"}})
+    email = next(c for c in result.shown if c.key == "email")
+    assert email.url == "https://community.example.org/subscribe/email"
 
 
 def test_switched_off_channel_is_hidden_with_reason(with_community):

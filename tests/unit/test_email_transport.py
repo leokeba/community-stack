@@ -7,7 +7,10 @@ from unittest import mock
 import pytest
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
-from community_stack.announcements.connectors import CONNECTORS, build_connector
+from community_stack.announcements.connectors import (
+    CONNECTORS,
+    build_email_adapter,
+)
 from community_stack.announcements.models import Announcement
 from community_stack.subscriptions.email_transport import (
     SmtpTransport,
@@ -15,6 +18,8 @@ from community_stack.subscriptions.email_transport import (
     UnconfiguredTransport,
 )
 from community_stack.subscriptions.manager import SubscriberManager
+
+SECRET = b"unit-test-unsubscribe-secret-0123456789"
 
 
 def _message(to: str = "ann@example.org") -> EmailMessage:
@@ -146,7 +151,9 @@ def _ann() -> Announcement:
 
 
 def test_adapter_refuses_to_report_success_without_a_mail_server(subscribers):
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers).publish(_ann())
+    result = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET, subscriber_manager=subscribers
+    ).publish(_ann())
     assert result.success is False
     assert result.retryable is False
     assert "No email server" in result.error
@@ -154,24 +161,37 @@ def test_adapter_refuses_to_report_success_without_a_mail_server(subscribers):
 
 def test_each_person_gets_their_own_message(subscribers):
     mail = ScriptedMail(accept=10, error=TransportError("unused", retryable=False))
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+    result = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET, subscriber_manager=subscribers, transport=mail
+    ).publish(_ann())
     assert result.success is True
     assert sorted(mail.accepted) == ["a@example.org", "b@example.org"]
 
 
-def test_messages_include_an_unsubscribe_header(subscribers):
+def test_messages_include_a_personal_unsubscribe_link(subscribers):
     adapter = EmailNewsletterAdapter(
         subscriber_manager=subscribers,
-        unsubscribe_base_url="https://community.example.org/subscribe/stop",
+        public_base_url="https://community.example.org",
+        unsubscribe_secret=SECRET,
     )
-    message = adapter.build_email_message(_ann())
-    assert message["List-Unsubscribe"] == "<https://community.example.org/subscribe/stop>"
+    link = adapter.unsubscribe_url("a@example.org")
+    assert link.startswith("https://community.example.org/subscribe/email/unsubscribe?t=")
+    message = adapter.build_email_message(_ann(), link)
+    assert message["List-Unsubscribe"] == f"<{link}>"
     assert message["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    assert link in message.get_body(preferencelist=("plain",)).get_content()
+
+
+def test_each_person_gets_a_different_unsubscribe_link(subscribers):
+    adapter = EmailNewsletterAdapter(subscriber_manager=subscribers, unsubscribe_secret=SECRET)
+    assert adapter.unsubscribe_url("a@example.org") != adapter.unsubscribe_url("b@example.org")
 
 
 def test_temporary_failure_before_any_send_is_retryable(subscribers):
     mail = ScriptedMail(accept=0, error=TransportError("busy", retryable=True))
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+    result = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET, subscriber_manager=subscribers, transport=mail
+    ).publish(_ann())
     assert result.success is False
     assert result.retryable is True
 
@@ -179,15 +199,17 @@ def test_temporary_failure_before_any_send_is_retryable(subscribers):
 def test_retry_after_partial_send_mails_only_the_rest(subscribers):
     """People already reached are not mailed again when the job is retried."""
     first = ScriptedMail(accept=1, error=TransportError("busy", retryable=True))
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=first).publish(_ann())
+    result = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET, subscriber_manager=subscribers, transport=first
+    ).publish(_ann())
     assert result.success is False
     assert result.retryable is True
     assert "after 1 of 2" in result.error
 
     second = ScriptedMail(accept=10, error=TransportError("unused", retryable=False))
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=second).publish(
-        _ann()
-    )
+    result = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET, subscriber_manager=subscribers, transport=second
+    ).publish(_ann())
     assert result.success is True
     assert len(second.accepted) == 1
     assert sorted(first.accepted + second.accepted) == ["a@example.org", "b@example.org"]
@@ -216,12 +238,12 @@ def test_email_connector_is_registered_with_its_fields():
 PUBLIC = ["93.184.216.34"]
 
 
-def test_email_connector_builds_an_adapter_with_unsubscribe_link():
+def test_email_connector_builds_an_adapter_with_a_public_base(tmp_path):
     with mock.patch.object(http, "resolve", return_value=PUBLIC):
         values = CONNECTORS["email"].validate(dict(GOOD_EMAIL))
-    adapter = build_connector("email", values)
+    adapter = build_email_adapter(values, SubscriberManager(tmp_path / "subs.db"), SECRET)
     assert isinstance(adapter, EmailNewsletterAdapter)
-    assert adapter.unsubscribe_base_url == "https://community.example.org/subscribe/stop"
+    assert adapter.public_base_url == "https://community.example.org"
 
 
 @pytest.mark.parametrize(

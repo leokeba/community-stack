@@ -48,6 +48,7 @@ from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavail
 from community_stack.agent.health import LOG_LINES, LOG_SERVICES
 from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters import http
+from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
@@ -79,6 +80,15 @@ from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
 from community_stack.continuity.connect_page import offline_connect_files
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
+from community_stack.subscriptions.email_signup import (
+    EMAIL_CONSENT_TEXT,
+    EMAIL_CONSENT_VERSION,
+    SIGNUP_SOURCE,
+    confirmation_message,
+    read_unsubscribe_token,
+)
+from community_stack.subscriptions.email_transport import TransportError
+from community_stack.subscriptions.manager import Subscriber, SubscriberManager
 
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
 
@@ -553,6 +563,154 @@ def create_app(
         else:
             adapter.subscribers.unsubscribe("sms", number)
         return subscribe_page(request, "joined" if purpose == "join" else "left")
+
+    # Email sign-up (CR2.6, CR2.7). Confirmation and unsubscribe links are safe to open:
+    # only a button press changes anything, so mail scanners cannot sign people up or out.
+
+    def email_adapter() -> EmailNewsletterAdapter | None:
+        return next((a for a in publisher.adapters if isinstance(a, EmailNewsletterAdapter)), None)
+
+    def email_signup_page(
+        request: Request, step: str, status_code: int = 200, **context
+    ) -> Response:
+        adapter = email_adapter()
+        csrf_token = preauth_csrf_token(request)
+        response = render(
+            request,
+            "subscribe_email.html",
+            {
+                "csrf_token": csrf_token,
+                "step": step,
+                "available": adapter is not None and adapter.unsubscribe_secret is not None,
+                "community": community_name(),
+                "consent_text": EMAIL_CONSENT_TEXT,
+                "error": None,
+                "email": "",
+                "token": "",
+                "masked": "",
+                **context,
+            },
+            status_code=status_code,
+        )
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
+        return response
+
+    def unsubscribe_secret_bytes() -> bytes | None:
+        secret = storage.get_setting("subscriber_token_secret", "")
+        return secret.encode() if secret else None
+
+    @app.get("/subscribe/email")
+    async def email_signup_form(request: Request) -> Response:
+        return email_signup_page(request, "form")
+
+    @app.post("/subscribe/email")
+    async def email_signup_submit(request: Request) -> Response:
+        form = await submitted_form(request)
+        preauth_csrf_or_forbidden(request, form)
+        adapter = email_adapter()
+        if adapter is None or adapter.unsubscribe_secret is None:
+            raise HTTPException(status_code=404)
+        # Bots fill in every field, including this invisible one. They get the same answer as people.
+        if form.get("website"):
+            return email_signup_page(request, "check")
+        address = form.get("email", "").strip()
+        if form.get("consent") != "yes":
+            return email_signup_page(
+                request, "form", 400, email=address, error="Please tick the consent box."
+            )
+        subscribers: SubscriberManager = adapter.subscriber_manager
+        try:
+            subscribers.validate_destination("email", address)
+        except ValueError:
+            return email_signup_page(
+                request, "form", 400, email=address, error="Enter a valid email address."
+            )
+        client_key = hashlib.sha256(
+            (client_host(request) + (unsubscribe_secret_bytes() or b"").decode()).encode()
+        ).hexdigest()
+        if not subscribers.allow_signup(client_key, address):
+            return email_signup_page(
+                request,
+                "form",
+                429,
+                email=address,
+                error="Too many sign-up requests. Please try again later.",
+            )
+        subscribers.register_consent_text(EMAIL_CONSENT_VERSION, EMAIL_CONSENT_TEXT)
+        _subscriber, token = subscribers.request_subscription(
+            "email",
+            address,
+            consent_version=EMAIL_CONSENT_VERSION,
+            consent_source=SIGNUP_SOURCE,
+        )
+        if token is not None:
+            message = confirmation_message(
+                adapter.from_address,
+                address,
+                community_name(),
+                f"{adapter.public_base_url}/subscribe/email/confirm?t={token}",
+            )
+            try:
+                await run_in_threadpool(adapter.transport.send, message)
+            except TransportError:
+                logger.warning("Could not send an email sign-up confirmation.")
+                return email_signup_page(
+                    request,
+                    "form",
+                    503,
+                    email=address,
+                    error="We could not send the confirmation email. Please try again later.",
+                )
+        # The same answer whether or not the address is already subscribed.
+        return email_signup_page(request, "check")
+
+    @app.get("/subscribe/email/confirm")
+    async def email_confirm_form(request: Request) -> Response:
+        token = request.query_params.get("t", "")
+        if not token or email_adapter() is None:
+            return email_signup_page(request, "invalid", 400)
+        return email_signup_page(request, "confirm", token=token)
+
+    # Not /confirm: the SMS route POST /subscribe/{purpose}/confirm is declared first and would match.
+    @app.post("/subscribe/email/activate")
+    async def email_confirm_submit(request: Request) -> Response:
+        form = await submitted_form(request)
+        preauth_csrf_or_forbidden(request, form)
+        adapter = email_adapter()
+        if adapter is None:
+            raise HTTPException(status_code=404)
+        confirmed = adapter.subscriber_manager.confirm_subscription(form.get("t", ""))
+        if confirmed is None:
+            return email_signup_page(
+                request,
+                "invalid",
+                400,
+                error="This link has expired or was already used. Sign up again for a new one.",
+            )
+        return email_signup_page(request, "subscribed")
+
+    @app.get("/subscribe/email/unsubscribe")
+    async def email_unsubscribe_form(request: Request) -> Response:
+        token = request.query_params.get("t", "")
+        secret = unsubscribe_secret_bytes()
+        address = read_unsubscribe_token(secret, token) if secret and token else None
+        if address is None or email_adapter() is None:
+            return email_signup_page(request, "invalid", 400)
+        masked = Subscriber(channel="email", destination=address).mask_destination()
+        return email_signup_page(request, "unsubscribe", token=token, masked=masked)
+
+    @app.post("/subscribe/email/unsubscribe")
+    async def email_unsubscribe_submit(request: Request) -> Response:
+        # No CSRF cookie here: mail clients send one-click unsubscribes without it (RFC 8058).
+        # The signed token in the link is the proof of authority.
+        token = request.query_params.get("t", "")
+        secret = unsubscribe_secret_bytes()
+        address = read_unsubscribe_token(secret, token) if secret and token else None
+        adapter = email_adapter()
+        if address is None or adapter is None:
+            return email_signup_page(request, "invalid", 400)
+        adapter.subscriber_manager.unsubscribe("email", address)
+        return email_signup_page(request, "unsubscribed")
 
     @app.get("/.well-known/webfinger")
     async def webfinger(request: Request) -> Response:

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email updates · {{ community }}</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; line-height: 1.5; color: #17212b; background: #f5f7f8; }
+    main { max-width: 32rem; margin: 2rem auto; padding: 1rem; background: #fff; border: 1px solid #d5dde2; border-radius: .4rem; }
+    label { display: block; font-weight: 650; margin: .75rem 0 .25rem; }
+    input[type=email], input[type=text] { width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; border: 1px solid #77858f; border-radius: .25rem; }
+    button { padding: .55rem .9rem; border: 0; border-radius: .25rem; background: #174f71; color: #fff; font: inherit; cursor: pointer; }
+    .error { padding: .75rem; background: #fff1f0; border-left: .3rem solid #b42318; }
+    .notice { padding: .75rem; background: #eef8f0; border-left: .3rem solid #1f7a3a; }
+    .hidden-field { position: absolute; left: -10000px; }
+    .muted { color: #4a5963; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>{{ community }} email updates</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if not available %}
+  <p>Email updates are not available yet.</p>
+  {% elif step == "form" %}
+  <p>Get public announcements in your inbox. We send a confirmation link to your address first, so nobody can sign you up without access to it.</p>
+  <form method="post" action="/subscribe/email">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="email">Email address</label>
+    <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.org" value="{{ email }}" required>
+    <div class="hidden-field" aria-hidden="true"><label for="website">Leave this empty</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+    <p><label><input type="checkbox" name="consent" value="yes" required> {{ consent_text }}</label></p>
+    <p><button type="submit">Send me a confirmation link</button></p>
+  </form>
+  <p class="muted">Your address is used only for these announcements and is never shared. <a href="/subscribe">Text alerts instead</a></p>
+  {% elif step == "check" %}
+  <p class="notice" role="status">If that address can receive email, we have sent it a confirmation link. The link works once and expires in three days. Check your spam folder if it does not arrive.</p>
+  {% elif step == "confirm" %}
+  <p>Confirm that you want to receive announcements from {{ community }} at this address.</p>
+  <form method="post" action="/subscribe/email/activate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="t" value="{{ token }}">
+    <p><button type="submit">Yes, confirm my subscription</button></p>
+  </form>
+  {% elif step == "subscribed" %}
+  <p class="notice" role="status">You are subscribed. Every announcement email includes a link to stop receiving them.</p>
+  {% elif step == "unsubscribe" %}
+  <p>Stop receiving announcements from {{ community }} at {{ masked }}?</p>
+  <form method="post" action="/subscribe/email/unsubscribe?t={{ token }}">
+    <p><button type="submit">Yes, unsubscribe me</button></p>
+  </form>
+  {% elif step == "unsubscribed" %}
+  <p class="notice" role="status">You will not receive any more announcements from {{ community }}.</p>
+  {% elif step == "invalid" %}
+  <p class="error" role="alert">This link is not valid. Use the newest email from us, or ask the community to help.</p>
+  {% endif %}
+</main>
+</body>
+</html>

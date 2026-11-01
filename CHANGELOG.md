@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `community-stack connect show | render | generate-qr | export`, with SVG and PNG QR codes.
   - Identity files included in offline archives; the archive footer no longer claims cryptographic verification.
 - Design roadmap in `docs/COMMUNICATION_RESILIENCE_ROADMAP.md`.
+- **Email updates (CR2):** one subscriber list, consent records, a double opt-in sign-up at `/subscribe/email`, a native email connector with per-person delivery tracking, and signed one-click unsubscribe links in every email.
 - **Milestone 0: Reconnaissance and Architecture Decisions:**
   - Initial threat model (`docs/threat-model.md`).
   - Architecture documentation (`docs/architecture.md`).

@@ -9,6 +9,8 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.subscriptions.email_transport import EmailTransport
 from community_stack.subscriptions.manager import SubscriberManager
 
+SECRET = b"unit-test-unsubscribe-secret-0123456789"
+
 
 class RecordingMail(EmailTransport):
     """Records the To address of every message it is asked to send."""
@@ -42,6 +44,7 @@ def test_multi_channel_accessible_broadcast(tmp_path):
     )
     ap_adapter = ActivityPubAdapter(transport=mock_ap_transport)
     email_adapter = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET,
         subscriber_manager=sub_mgr,
         transport=mail,
     )
@@ -100,6 +103,7 @@ def test_activitypub_failure_does_not_block_email_or_web(tmp_path):
     web_adapter = WebFeedAdapter(output_dir=tmp_path / "web_feed")
     ap_adapter = ActivityPubAdapter(transport=failing_ap_transport)
     email_adapter = EmailNewsletterAdapter(
+        unsubscribe_secret=SECRET,
         subscriber_manager=sub_mgr,
         transport=mail,
     )

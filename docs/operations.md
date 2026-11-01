@@ -259,6 +259,26 @@ Before the first `connect render` on a new server, create the folder that the
 landing page serves, owned by the announcements container's user:
 `data/landing/connect` (UID/GID 1000 by default).
 
+### Email updates
+
+Email is sent through your own mail server. Connect it on the Channels page
+with the server name, port, sending address and the public website address
+(https). Once connected:
+
+- `/connect` lists email, and `/subscribe/email` takes sign-ups.
+- A sign-up is not active until the person opens the confirmation link in an
+  email sent to that address. The link works once and expires after three days.
+- Opening an unsubscribe link changes nothing; the person presses a button.
+  Every announcement email carries its own signed unsubscribe link, and mail
+  clients can unsubscribe with one click.
+- A sign-up is limited to five requests an hour from one client and three a day
+  for one address. Unconfirmed sign-ups are removed after a week.
+
+The signing key is created on first use and kept in the announcements database.
+Back it up with the database; without it, existing unsubscribe links stop working.
+
+Consent wording is provisional until legal review is complete (decision D3).
+
 ### Delivery retries
 
 Drafts can be scheduled from the announcement page or with `announce

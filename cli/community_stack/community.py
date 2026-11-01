@@ -33,10 +33,6 @@ SOCIAL_PLATFORMS: dict[str, str] = {
 
 INDEPENDENT_KEYS = ("website", "email", "matrix", "activitypub", "rss")
 
-# Email sign-up is built in CR2. Until the public form exists, email is never shown
-# as available, whatever the configuration says.
-EMAIL_SIGNUP_AVAILABLE = False
-
 
 class ProfileError(ValueError):
     """Raised when the community profile cannot be used as configured."""
@@ -182,14 +178,16 @@ def resolve_independent(
         description="Let a feed reader or app tell you when something new is published.",
         url=f"{base}/feed/rss.xml",
     )
-    if EMAIL_SIGNUP_AVAILABLE:
-        candidates["email"] = IndependentChannel(
+    candidates["email"] = (
+        IndependentChannel(
             key="email",
             label="Email",
             description="Get announcements in your inbox. You confirm before anything is sent.",
+            url=f"{base}/subscribe/email",
         )
-    else:
-        candidates["email"] = "Email sign-up is not available yet."
+        if "email" in connections
+        else "No email server is connected."
+    )
 
     matrix = matrix_room_url(connections, config)
     candidates["matrix"] = (

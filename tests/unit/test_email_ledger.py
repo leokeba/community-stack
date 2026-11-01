@@ -6,6 +6,8 @@ from community_stack.announcements.models import Announcement
 from community_stack.subscriptions.email_transport import EmailTransport, TransportError
 from community_stack.subscriptions.manager import SubscriberManager
 
+SECRET = b"unit-test-unsubscribe-secret-0123456789"
+
 
 class Mail(EmailTransport):
     def __init__(self, fail_after: int | None = None, retryable: bool = True) -> None:
@@ -37,7 +39,10 @@ def _ann(title="Notice", body="Water is off.") -> Announcement:
 
 def _adapter(subs, mail, budget=200):
     return EmailNewsletterAdapter(
-        subscriber_manager=subs, transport=mail, time_budget_seconds=budget
+        unsubscribe_secret=SECRET,
+        subscriber_manager=subs,
+        transport=mail,
+        time_budget_seconds=budget,
     )
 
 

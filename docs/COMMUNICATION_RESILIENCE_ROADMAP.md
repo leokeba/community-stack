@@ -315,7 +315,7 @@ announcements in under a minute, without creating an account.
   an SMTP implementation built on `smtplib`, and add an `email` connector with its
   credentials stored as a channel connection. Remove the silent success: with no
   transport, delivery must fail.
-- [ ] **CR2.5 Send per recipient.** Give each message a signed unsubscribe link and
+- [x] **CR2.5 Send per recipient.** Give each message a signed unsubscribe link and
   RFC 8058 headers. Add a send ledger keyed by announcement, operation and subscriber
   so a retry skips people already mailed. Send in batches that fit the 5-minute job
   lease, or renew the lease.
@@ -324,7 +324,7 @@ announcements in under a minute, without creating an account.
   box and privacy notice. Reuse the existing CSRF, honeypot and hashed rate-limit
   approach, limited per address and per client. Give the same response whether or
   not an address is known. It must work without JavaScript.
-- [ ] **CR2.7 Make links safe.** Confirmation GETs show a button and only a POST
+- [x] **CR2.7 Make links safe.** Confirmation GETs show a button and only a POST
   confirms, because mail scanners follow links. Tokens are hashed and expire. One-click
   unsubscribe accepts a token POST with no CSRF cookie, because mail clients send
   none.

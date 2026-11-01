@@ -211,13 +211,14 @@ def _validate_email(values: dict[str, str]) -> dict[str, str]:
 
 
 def build_email_adapter(
-    values: dict[str, str], subscribers: SubscriberManager
+    values: dict[str, str], subscribers: SubscriberManager, unsubscribe_secret: bytes | None
 ) -> EmailNewsletterAdapter:
     """Email to confirmed subscribers, sent through the organizer's own mail server."""
     return EmailNewsletterAdapter(
         subscriber_manager=subscribers,
         from_address=values["from_address"],
-        unsubscribe_base_url=f"{values['public_url']}/subscribe/stop",
+        public_base_url=values["public_url"],
+        unsubscribe_secret=unsubscribe_secret,
         transport=SmtpTransport(
             host=values["host"],
             port=int(values["port"]),
@@ -479,7 +480,7 @@ CONNECTORS: dict[str, ConnectorType] = {
                 ),
             ),
             validate=_validate_email,
-            build=lambda c: build_email_adapter(c, SubscriberManager()),
+            build=lambda c: build_email_adapter(c, SubscriberManager(), None),
             caveat="Each person gets their own message. If sending is interrupted, a retry "
             "continues with the people who have not yet received it.",
         ),

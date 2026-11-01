@@ -118,6 +118,13 @@ class SubscriberManager:
                 conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_hash TEXT")
                 conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_expires_at TEXT")
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS signup_requests (
+                    client_key TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS email_sends (
                     announcement_id TEXT NOT NULL,
                     operation TEXT NOT NULL,
@@ -445,6 +452,37 @@ class SubscriberManager:
                 }
             )
         return records
+
+    # Sign-up abuse limits (CR2.6). Only hashed client keys are stored.
+
+    def allow_signup(self, client_key: str, destination: str) -> bool:
+        """Record a sign-up request if it is within limits, so bots and mail-bombing stop early.
+
+        Limits: five requests an hour from one client, and three requests a day for one address.
+        """
+        now = datetime.now(timezone.utc)
+        hour_ago = (now - timedelta(hours=1)).isoformat()
+        day_ago = (now - timedelta(days=1)).isoformat()
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM signup_requests WHERE created_at < ?", (day_ago,))
+            from_client = conn.execute(
+                "SELECT COUNT(*) FROM signup_requests WHERE client_key = ? AND created_at >= ?",
+                (client_key, hour_ago),
+            ).fetchone()[0]
+            for_address = conn.execute(
+                "SELECT COUNT(*) FROM signup_requests WHERE destination = ?",
+                (destination.strip().lower(),),
+            ).fetchone()[0]
+            if from_client >= 5 or for_address >= 3:
+                conn.rollback()
+                return False
+            conn.execute(
+                "INSERT INTO signup_requests (client_key, destination, created_at) VALUES (?, ?, ?)",
+                (client_key, destination.strip().lower(), now.isoformat()),
+            )
+            conn.commit()
+        return True
 
     # Per-person send ledger (CR2.5). A retry mails only people who have not received it yet.
 

@@ -103,7 +103,7 @@ def test_cli_show_lists_channels_and_reasons(site, capsys):
     assert "Stable page:  https://community.example.org/connect/" in out
     assert "Our website" in out
     not_shown = out.split("not shown:")[1]
-    assert "email: Email sign-up is not available yet." in not_shown
+    assert "email: No email server is connected." in not_shown
     assert "matrix: No public Matrix room is connected." in not_shown
 
 
