@@ -308,3 +308,155 @@ def test_legacy_cli_import_is_marked_legacy(tmp_path, monkeypatch):
     )
     mgr = SubscriberManager()
     assert mgr.list_subscribers()[0].consent_source == "legacy"
+
+
+# CR2.3: sign-up lifecycle
+
+
+@pytest.fixture
+def mgr(tmp_path):
+    manager = SubscriberManager(db_path=tmp_path / "subs.db")
+    manager.register_consent_text("2026-11", "I agree to receive announcements by email.")
+    return manager
+
+
+def _signup(mgr, address="ann@example.org", topics=None):
+    return mgr.request_subscription(
+        "email", address, consent_version="2026-11", consent_source="web_form", topics=topics
+    )
+
+
+def test_signup_is_pending_and_gets_no_mail(mgr):
+    sub, token = _signup(mgr)
+    assert sub.status == "pending"
+    assert token
+    assert mgr.get_active_recipients("email") == []
+
+
+def test_confirmation_activates_and_records_the_time(mgr):
+    _sub, token = _signup(mgr)
+    confirmed = mgr.confirm_subscription(token)
+    assert confirmed.status == "active"
+    assert confirmed.confirmed_at is not None
+    assert mgr.get_active_recipients("email") == ["ann@example.org"]
+
+
+def test_token_works_once(mgr):
+    _sub, token = _signup(mgr)
+    assert mgr.confirm_subscription(token) is not None
+    assert mgr.confirm_subscription(token) is None
+
+
+def test_wrong_or_empty_token_does_nothing(mgr):
+    _signup(mgr)
+    assert mgr.confirm_subscription("guess") is None
+    assert mgr.confirm_subscription("") is None
+    assert mgr.get_active_recipients("email") == []
+
+
+def test_expired_token_is_refused(mgr, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    import community_stack.subscriptions.manager as manager_module
+
+    _sub, token = _signup(mgr)
+    later = datetime.now(timezone.utc) + manager_module.CONFIRMATION_TTL + timedelta(minutes=1)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return later
+
+    monkeypatch.setattr(manager_module, "datetime", FrozenDatetime)
+    assert mgr.confirm_subscription(token) is None
+
+
+def test_a_new_request_replaces_the_old_token(mgr):
+    _sub, first = _signup(mgr)
+    _sub, second = _signup(mgr)
+    assert mgr.confirm_subscription(first) is None
+    assert mgr.confirm_subscription(second) is not None
+
+
+def test_active_address_gets_no_new_token(mgr):
+    _sub, token = _signup(mgr)
+    mgr.confirm_subscription(token)
+    again, new_token = _signup(mgr)
+    assert again.status == "active"
+    assert new_token is None
+
+
+def test_unsubscribed_address_must_confirm_again(mgr):
+    _sub, token = _signup(mgr)
+    mgr.confirm_subscription(token)
+    mgr.unsubscribe("email", "ann@example.org")
+    assert mgr.get_active_recipients("email") == []
+
+    resub, new_token = _signup(mgr)
+    assert resub.status == "pending"
+    assert mgr.get_active_recipients("email") == []
+    assert mgr.confirm_subscription(new_token).status == "active"
+
+
+def test_preferences_change_for_active_subscriber(mgr):
+    _sub, token = _signup(mgr, topics=["events"])
+    mgr.confirm_subscription(token)
+    changed = mgr.change_preferences("email", "ann@example.org", ["important"])
+    assert changed.topics == ["important"]
+    assert mgr.get_active_recipients("email", topic="events") == []
+    assert mgr.get_active_recipients("email", topic="important") == ["ann@example.org"]
+
+
+def test_preferences_refused_for_unknown_or_unsubscribed(mgr):
+    with pytest.raises(ValueError):
+        mgr.change_preferences("email", "nobody@example.org", ["events"])
+    _sub, token = _signup(mgr)
+    mgr.confirm_subscription(token)
+    mgr.unsubscribe("email", "ann@example.org")
+    with pytest.raises(ValueError):
+        mgr.change_preferences("email", "ann@example.org", ["events"])
+
+
+def test_export_has_data_but_no_secrets(mgr):
+    _sub, token = _signup(mgr)
+    mgr.confirm_subscription(token)
+    records = mgr.export_records()
+    assert len(records) == 1
+    assert records[0]["consent_version"] == "2026-11"
+    assert records[0]["consent_source"] == "web_form"
+    assert records[0]["confirmed_at"] is not None
+    assert not any("hash" in key or "token" in key for key in records[0])
+
+
+def test_delete_erases_the_record(mgr):
+    _sub, token = _signup(mgr)
+    mgr.confirm_subscription(token)
+    assert mgr.delete_subscriber("email", "ann@example.org") is True
+    assert mgr.export_records() == []
+    assert mgr.delete_subscriber("email", "ann@example.org") is False
+
+
+def test_unconfirmed_signups_are_purged_after_retention(mgr):
+    from datetime import datetime, timedelta, timezone
+
+    import community_stack.subscriptions.manager as manager_module
+
+    _signup(mgr, "stale@example.org")
+    _sub, token = _signup(mgr, "kept@example.org")
+    mgr.confirm_subscription(token)
+
+    later = datetime.now(timezone.utc) + manager_module.PENDING_RETENTION + timedelta(days=1)
+    assert mgr.purge_stale_pending(now=later) == 1
+    assert [r["destination"] for r in mgr.export_records()] == ["kept@example.org"]
+
+
+def test_migration_adds_confirmation_columns(tmp_path):
+    db = tmp_path / "subs.db"
+    _old_schema_db(db)
+    mgr = SubscriberManager(db_path=db)
+    mgr.register_consent_text("2026-11", "I agree.")
+    sub, token = mgr.request_subscription(
+        "email", "new@example.org", consent_version="2026-11", consent_source="web_form"
+    )
+    assert sub.status == "pending"
+    assert mgr.confirm_subscription(token).status == "active"

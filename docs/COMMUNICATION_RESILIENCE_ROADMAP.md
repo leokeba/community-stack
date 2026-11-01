@@ -306,7 +306,7 @@ announcements in under a minute, without creating an account.
   timestamp, consent version and source, and confirmation timestamp. Store the full
   text of each consent version. Mark existing rows `legacy` and do not invent
   timestamps for them.
-- [ ] **CR2.3 Complete the lifecycle.** Implement subscribe, confirm, unsubscribe,
+- [x] **CR2.3 Complete the lifecycle.** Implement subscribe, confirm, unsubscribe,
   resubscribe, change preferences, export and delete in `SubscriberManager`.
   Resubscribing needs fresh confirmation. `subscribers add` for email must send a
   confirmation request or require a stated consent source. Purge unconfirmed entries

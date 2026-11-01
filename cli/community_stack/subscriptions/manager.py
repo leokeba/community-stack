@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # One list for the CLI, the publisher and the public sign-up pages.
@@ -17,6 +18,9 @@ LEGACY_DB_PATH = "data/subscriptions/subscribers.db"
 
 
 CONSENT_COLUMNS = ("consent_at", "consent_version", "consent_source", "confirmed_at")
+# A confirmation link is valid for three days; unconfirmed sign-ups are purged after a week.
+CONFIRMATION_TTL = timedelta(days=3)
+PENDING_RETENTION = timedelta(days=7)
 
 
 @dataclass
@@ -109,6 +113,10 @@ class SubscriberManager:
                     conn.execute(f"ALTER TABLE subscribers ADD COLUMN {column} TEXT")
                 # Rows that existed before consent was recorded are marked, never dated.
                 conn.execute("UPDATE subscribers SET consent_source = 'legacy'")
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(subscribers)")}
+            if "confirmation_hash" not in columns:
+                conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_hash TEXT")
+                conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_expires_at TEXT")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS consent_texts (
                     version TEXT PRIMARY KEY,
@@ -265,6 +273,169 @@ class SubscriberManager:
                     )
                 )
         return results
+
+    # Lifecycle (CR2.3). Sign-ups stay pending until the person confirms by link.
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def request_subscription(
+        self,
+        channel: str,
+        destination: str,
+        consent_version: str,
+        consent_source: str,
+        topics: list[str] | None = None,
+    ) -> tuple[Subscriber, str | None]:
+        """Start a sign-up. Returns the subscriber and a one-time confirmation token.
+
+        Nothing is sent to the address until the token is used. An address that is already
+        active gets no new token, and an unsubscribed address must confirm again.
+        """
+        clean_dest = destination.strip().lower()
+        self.validate_destination(channel, clean_dest)
+        if self.consent_text(consent_version) is None:
+            raise ValueError(f"Consent version '{consent_version}' has no stored text.")
+        if not consent_source or len(consent_source) > 40:
+            raise ValueError("The consent source must be 1 to 40 characters.")
+
+        existing = self.get_subscriber(channel, clean_dest)
+        if existing is not None and existing.status == "active":
+            return existing, None
+
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        expires = (now + CONFIRMATION_TTL).isoformat()
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO subscribers (
+                    id, channel, destination, status, topics_json, created_at, unsubscribed_at,
+                    consent_at, consent_version, consent_source,
+                    confirmation_hash, confirmation_expires_at
+                ) VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, destination) DO UPDATE SET
+                    status='pending',
+                    topics_json=excluded.topics_json,
+                    unsubscribed_at=NULL,
+                    consent_at=excluded.consent_at,
+                    consent_version=excluded.consent_version,
+                    consent_source=excluded.consent_source,
+                    confirmed_at=NULL,
+                    confirmation_hash=excluded.confirmation_hash,
+                    confirmation_expires_at=excluded.confirmation_expires_at
+                ;
+                """,
+                (
+                    f"sub_{secrets.token_hex(6)}",
+                    channel,
+                    clean_dest,
+                    json.dumps(topics or []),
+                    now.isoformat(),
+                    now.isoformat(),
+                    consent_version,
+                    consent_source,
+                    self._token_hash(token),
+                    expires,
+                ),
+            )
+            conn.commit()
+        subscriber = self.get_subscriber(channel, clean_dest)
+        assert subscriber is not None
+        return subscriber, token
+
+    def confirm_subscription(self, token: str) -> Subscriber | None:
+        """Activate the sign-up behind a token. A token works once and only before it expires."""
+        if not token:
+            return None
+        now = datetime.now(timezone.utc)
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT channel, destination, confirmation_expires_at FROM subscribers "
+                "WHERE confirmation_hash = ? AND status = 'pending'",
+                (self._token_hash(token),),
+            ).fetchone()
+            if row is None or datetime.fromisoformat(row["confirmation_expires_at"]) < now:
+                conn.rollback()
+                return None
+            conn.execute(
+                """
+                UPDATE subscribers SET
+                    status='active', confirmed_at=?, unsubscribed_at=NULL,
+                    confirmation_hash=NULL, confirmation_expires_at=NULL
+                WHERE channel = ? AND destination = ?
+                """,
+                (now.isoformat(), row["channel"], row["destination"]),
+            )
+            conn.commit()
+        return self.get_subscriber(row["channel"], row["destination"])
+
+    def get_subscriber(self, channel: str, destination: str) -> Subscriber | None:
+        clean_dest = destination.strip().lower()
+        match = [
+            s
+            for s in self.list_subscribers(channel=channel, active_only=False)
+            if s.destination == clean_dest
+        ]
+        return match[0] if match else None
+
+    def change_preferences(self, channel: str, destination: str, topics: list[str]) -> Subscriber:
+        """Change which topics an active or pending subscriber receives."""
+        sub = self.get_subscriber(channel, destination)
+        if sub is None or sub.status == "unsubscribed":
+            raise ValueError("No active subscription was found for that address.")
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE subscribers SET topics_json = ? WHERE channel = ? AND destination = ?",
+                (json.dumps(topics), channel, sub.destination),
+            )
+            conn.commit()
+        updated = self.get_subscriber(channel, destination)
+        assert updated is not None
+        return updated
+
+    def delete_subscriber(self, channel: str, destination: str) -> bool:
+        """Erase a subscriber's record entirely. Returns False when nothing matched."""
+        clean_dest = destination.strip().lower()
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM subscribers WHERE channel = ? AND destination = ?",
+                (channel, clean_dest),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def purge_stale_pending(self, now: datetime | None = None) -> int:
+        """Delete sign-ups that were never confirmed within the retention period."""
+        cutoff = ((now or datetime.now(timezone.utc)) - PENDING_RETENTION).isoformat()
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM subscribers WHERE status = 'pending' AND created_at < ?", (cutoff,)
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def export_records(self) -> list[dict]:
+        """Everything held about each subscriber, except secrets. For the person concerned."""
+        records = []
+        for sub in self.list_subscribers(active_only=False):
+            records.append(
+                {
+                    "channel": sub.channel,
+                    "destination": sub.destination,
+                    "status": sub.status,
+                    "topics": sub.topics,
+                    "created_at": sub.created_at,
+                    "unsubscribed_at": sub.unsubscribed_at,
+                    "consent_at": sub.consent_at,
+                    "consent_version": sub.consent_version,
+                    "consent_source": sub.consent_source,
+                    "confirmed_at": sub.confirmed_at,
+                }
+            )
+        return records
 
     def get_active_recipients(self, channel: str, topic: str | None = None) -> list[str]:
         """Get verified active destination addresses eligible for a topic."""
