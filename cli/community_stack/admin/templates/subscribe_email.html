@@ -29,10 +29,15 @@
     <label for="email">Email address</label>
     <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.org" value="{{ email }}" required>
     <div class="hidden-field" aria-hidden="true"><label for="website">Leave this empty</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+    <fieldset>
+      <legend>What would you like to receive?</legend>
+      <p><label><input type="radio" name="preference" value="all" checked> Every public announcement</label></p>
+      <p><label><input type="radio" name="preference" value="important"> Only announcements marked important</label></p>
+    </fieldset>
     <p><label><input type="checkbox" name="consent" value="yes" required> {{ consent_text }}</label></p>
     <p><button type="submit">Send me a confirmation link</button></p>
   </form>
-  <p class="muted">Your address is used only for these announcements and is never shared. <a href="/subscribe">Text alerts instead</a></p>
+  <p class="muted">Your address is used only for these announcements and is never shared. Prefer no email? <a href="/feed/rss.xml">Follow the RSS feed</a>, or <a href="/subscribe">get text alerts</a>.</p>
   {% elif step == "check" %}
   <p class="notice" role="status">If that address can receive email, we have sent it a confirmation link. The link works once and expires in three days. Check your spam folder if it does not arrive.</p>
   {% elif step == "confirm" %}

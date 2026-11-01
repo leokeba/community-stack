@@ -90,6 +90,9 @@ from community_stack.subscriptions.email_signup import (
 from community_stack.subscriptions.email_transport import TransportError
 from community_stack.subscriptions.manager import Subscriber, SubscriberManager
 
+# What each sign-up choice receives. Announcements tagged 'important' reach the second group.
+PREFERENCE_TOPICS: dict[str, list[str]] = {"all": [], "important": ["important"]}
+
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
 
 SESSION_COOKIE = "community_admin_session"
@@ -636,12 +639,18 @@ def create_app(
                 email=address,
                 error="Too many sign-up requests. Please try again later.",
             )
+        preference = form.get("preference", "all")
+        if preference not in PREFERENCE_TOPICS:
+            return email_signup_page(
+                request, "form", 400, email=address, error="Choose what to receive."
+            )
         subscribers.register_consent_text(EMAIL_CONSENT_VERSION, EMAIL_CONSENT_TEXT)
         _subscriber, token = subscribers.request_subscription(
             "email",
             address,
             consent_version=EMAIL_CONSENT_VERSION,
             consent_source=SIGNUP_SOURCE,
+            topics=PREFERENCE_TOPICS[preference],
         )
         if token is not None:
             message = confirmation_message(

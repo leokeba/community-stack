@@ -328,7 +328,7 @@ announcements in under a minute, without creating an account.
   confirms, because mail scanners follow links. Tokens are hashed and expire. One-click
   unsubscribe accepts a token POST with no CSRF cookie, because mail clients send
   none.
-- [ ] **CR2.8 Add preferences.** Offer all public announcements, important only, and
+- [x] **CR2.8 Add preferences.** Offer all public announcements, important only, and
   events. Map these to reserved `important` and `events` announcement tags, and add
   matching controls to the editor. Add a token-based page for managing preferences.
 - [ ] **CR2.9 Explain the channels.** On `/connect` and `/subscribe`, describe email,

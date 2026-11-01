@@ -117,7 +117,12 @@ class EmailNewsletterAdapter(ChannelAdapter):
     def publish(self, announcement: Announcement) -> DeliveryResult:
         return self._deliver(announcement, "publish")
 
-    def _deliver(self, announcement: Announcement, operation: str) -> DeliveryResult:
+    def _deliver(
+        self,
+        announcement: Announcement,
+        operation: str,
+        audience: list[str] | None = None,
+    ) -> DeliveryResult:
         """Send one message per person still owed one, within this run's time budget."""
         if not self.enabled:
             return DeliveryResult(
@@ -132,8 +137,11 @@ class EmailNewsletterAdapter(ChannelAdapter):
                 retryable=False,
             )
 
+        if audience is None:
+            audience = self.subscriber_manager.email_recipients(announcement.tags)
         active = set(self.subscriber_manager.get_active_recipients(channel="email"))
-        self.subscriber_manager.queue_email_send(announcement.id, operation, sorted(active))
+        audience = [address for address in audience if address in active]
+        self.subscriber_manager.queue_email_send(announcement.id, operation, sorted(audience))
         total, already = self.subscriber_manager.email_send_progress(announcement.id, operation)
         if total == 0:
             return DeliveryResult(success=True, external_id="email_no_subscribers", idempotent=True)
@@ -187,7 +195,10 @@ class EmailNewsletterAdapter(ChannelAdapter):
             title="Notice: Announcement Retracted",
             body=f"The previous announcement (ID: {announcement_id}) has been retracted by organizers.",
         )
-        return self.publish(notice)
+        # Only people who were sent the announcement get the retraction, so nobody is told
+        # about a post they never received.
+        reached = self.subscriber_manager.email_destinations_reached(announcement_id)
+        return self._deliver(notice, "publish", audience=reached)
 
     def health_check(self) -> HealthResult:
         if not self.enabled:

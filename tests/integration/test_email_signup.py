@@ -256,3 +256,23 @@ def test_a_failed_confirmation_email_is_reported_and_not_retried_silently(site, 
     assert response.status_code == 503
     assert "could not send the confirmation" in response.text
     assert subscriber_manager(db).get_active_recipients("email") == []
+
+
+def test_important_only_sign_up_stores_the_preference(site):
+    _app, client, mail, db = site
+    response = sign_up(client, "vip@example.org", preference="important")
+    assert "we have sent it a confirmation link" in response.text
+    token = re.search(r"t=([^\s&]+)", link_in(mail[-1])).group(1)
+    page = client.get("/subscribe/email")
+    client.post("/subscribe/email/activate", data={"csrf_token": csrf(page), "t": token})
+    record = next(
+        r for r in subscriber_manager(db).export_records() if r["destination"] == "vip@example.org"
+    )
+    assert record["topics"] == ["important"]
+
+
+def test_unknown_preference_is_refused(site):
+    _app, client, mail, _db = site
+    response = sign_up(client, "x@example.org", preference="everything-and-more")
+    assert response.status_code == 400
+    assert mail == []

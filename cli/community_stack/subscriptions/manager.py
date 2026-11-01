@@ -487,6 +487,19 @@ class SubscriberManager:
             conn.commit()
         return True
 
+    def email_recipients(self, tags: list[str]) -> list[str]:
+        """Active email addresses that want an announcement with these tags.
+
+        A subscriber with no preference gets everything. One who chose topics gets only
+        announcements that carry at least one of them.
+        """
+        wanted = {tag.strip().lower() for tag in tags if tag.strip()}
+        recipients = []
+        for sub in self.list_subscribers(channel="email"):
+            if not sub.topics or wanted.intersection(sub.topics):
+                recipients.append(sub.destination)
+        return recipients
+
     # Per-person send ledger (CR2.5). A retry mails only people who have not received it yet.
 
     def queue_email_send(
@@ -505,6 +518,17 @@ class SubscriberManager:
                     [(announcement_id, operation, d) for d in destinations],
                 )
                 conn.commit()
+
+    def email_destinations_reached(self, announcement_id: str) -> list[str]:
+        """Everyone who was sent this announcement, or a revision of it, and is still subscribed."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT destination FROM email_sends WHERE announcement_id = ? "
+                "AND sent_at IS NOT NULL",
+                (announcement_id,),
+            ).fetchall()
+        active = {s.destination for s in self.list_subscribers(channel="email")}
+        return sorted(row["destination"] for row in rows if row["destination"] in active)
 
     def pending_email_sends(self, announcement_id: str, operation: str) -> list[str]:
         with self._get_conn() as conn:
