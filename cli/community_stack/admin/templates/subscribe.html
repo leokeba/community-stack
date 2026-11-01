@@ -34,7 +34,7 @@
     {% endif %}
     <p><button type="submit">Send me a code</button></p>
   </form>
-  <p class="muted">Your number is used only to send these alerts and is never shared.{% if step == "join" %} <a href="/subscribe/stop">Stop alerts</a>{% else %} <a href="/subscribe">Sign up instead</a>{% endif %}</p>
+  <p class="muted">Your number is used only to send these alerts and is never shared.{% if step == "join" %} <a href="/subscribe/stop">Stop alerts</a> · <a href="/subscribe/email">Get email updates instead</a>{% else %} <a href="/subscribe">Sign up instead</a>{% endif %}</p>
   {% elif step == "code" %}
   <p>We sent a 6-digit code to {{ number or "your phone" }}. It is valid for 15 minutes.</p>
   <form method="post" action="/subscribe/{{ purpose }}/confirm">

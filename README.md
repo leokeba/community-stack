@@ -118,7 +118,8 @@ Backup & Recovery:
 
 Broadcast & Channels:
   announce      Draft, preview, publish, list, update, and retract announcements
-  subscribers   Manage opt-in email and SMS broadcast lists with instant opt-out
+  subscribers   Manage opt-in email and SMS lists: export, erase, test-send, instant opt-out
+  connect       Show the stable /connect contact page, QR codes and identity package
   bridge        Inspect WhatsApp bridge health or trigger the emergency killswitch
   archive       Export and verify zero-dependency offline HTML archives
 ```

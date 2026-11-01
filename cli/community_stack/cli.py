@@ -279,6 +279,14 @@ def create_parser() -> argparse.ArgumentParser:
         "-o", "--output", help="Target JSON file (default: backups/subscribers-export.json)"
     )
 
+    p_s_test = subs_subparsers.add_parser(
+        "test-email", help="Send one test email to an address you choose, to check delivery"
+    )
+    p_s_test.add_argument("--to", required=True, help="Address to send the test to")
+    p_s_test.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
     p_s_delete = subs_subparsers.add_parser(
         "delete", help="Erase everything held about one address (permanent)"
     )

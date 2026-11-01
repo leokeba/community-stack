@@ -164,6 +164,8 @@ web domain but requires authentication for all publishing pages. The public
 announcement archive remains unauthenticated at `/feed/announcements.html`.
 The app's SQLite database is mounted from `data/announcements`; generated public
 files are shared read-only with the landing service from `data/landing/feed`.
+
+The contact page (`/connect`) is shared the same way from `data/landing/connect`. Create that folder on the server before the first render, owned by UID 1000 (the announcements container user), for example `sudo install -d -o 1000 -g 1000 data/landing/connect`. Then run `community-stack connect render`; the page is also rebuilt after each announcement is delivered.
 The app runs as UID/GID `1000:1000` by default so it can write those host
 directories without root privileges. If the deployment account owns them under
 different IDs, set `COMMUNITY_STACK_UID` and `COMMUNITY_STACK_GID` in `.env`

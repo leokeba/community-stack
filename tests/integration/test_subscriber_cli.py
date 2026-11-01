@@ -110,3 +110,53 @@ def test_delete_erases_the_address_from_every_table(workdir):
             "SELECT COUNT(*) FROM signup_requests WHERE destination = ?", ("ann@example.org",)
         ).fetchone()[0]
     assert remaining == 0
+
+
+def test_test_email_sends_one_message_and_subscribes_nobody(workdir, monkeypatch, capsys):
+    import shutil
+    from pathlib import Path
+
+    from community_stack.announcements.storage import AnnouncementStorage
+    from community_stack.subscriptions.email_transport import SmtpTransport
+
+    sent = []
+    monkeypatch.setattr(SmtpTransport, "send", lambda self, message: sent.append(message))
+    shutil.copy(
+        Path(__file__).resolve().parents[2] / "config/example.yaml",
+        workdir / "community-stack.yaml",
+    )
+    AnnouncementStorage(workdir / "data/announcements/announcements.db").save_connection(
+        "email",
+        {
+            "host": "smtp.example.org",
+            "port": "587",
+            "from_address": "announcements@ourtown.org",
+            "public_url": "https://ourtown.org",
+        },
+        None,
+    )
+
+    rc = main(["subscribers", "test-email", "--to", "me@example.org"])
+    assert rc == 0, capsys.readouterr().out
+    assert len(sent) == 1
+    assert sent[0]["To"] == "me@example.org"
+    assert "List-Unsubscribe" in sent[0]
+    assert manager(workdir).export_records() == []
+
+
+def test_test_email_without_a_mail_server_says_so(workdir, capsys):
+    import shutil
+    from pathlib import Path
+
+    shutil.copy(
+        Path(__file__).resolve().parents[2] / "config/example.yaml",
+        workdir / "community-stack.yaml",
+    )
+    rc = main(["subscribers", "test-email", "--to", "me@example.org"])
+    assert rc == 1
+    assert "No email server is connected" in capsys.readouterr().out
+
+
+def test_test_email_rejects_a_bad_address(workdir, capsys):
+    rc = main(["subscribers", "test-email", "--to", "not-an-address"])
+    assert rc == 1

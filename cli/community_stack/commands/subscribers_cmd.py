@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+from email.message import EmailMessage
 from pathlib import Path
 
 from community_stack.subscriptions.email_signup import EMAIL_CONSENT_TEXT, EMAIL_CONSENT_VERSION
-from community_stack.subscriptions.manager import SubscriberManager
+from community_stack.subscriptions.manager import (
+    Subscriber,
+    SubscriberManager,
+    validate_destination,
+)
 
 
 def run_subscribers(args: argparse.Namespace) -> int:
@@ -90,6 +95,9 @@ def run_subscribers(args: argparse.Namespace) -> int:
             print(f"[WARN] No active subscription found for destination in channel '{channel}'.")
             return 0
 
+    elif action == "test-email":
+        return _test_email(args)
+
     elif action == "export":
         output = Path(getattr(args, "output", None) or "backups/subscribers-export.json")
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -120,3 +128,57 @@ def run_subscribers(args: argparse.Namespace) -> int:
     else:
         print(f"Unknown subscribers action: {action}")
         return 2
+
+
+def _test_email(args: argparse.Namespace) -> int:
+    """Send one test message through the connected mail server. Nobody is subscribed by this."""
+    from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
+    from community_stack.announcements.publisher import AnnouncementPublisher
+    from community_stack.announcements.storage import AnnouncementStorage
+    from community_stack.config import ConfigError
+    from community_stack.continuity.connect_page import load_identity
+    from community_stack.subscriptions.email_transport import TransportError
+
+    address = (getattr(args, "to", "") or "").strip()
+    try:
+        validate_destination("email", address)
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+
+    config_path = getattr(args, "config", "community-stack.yaml")
+    try:
+        publisher = AnnouncementPublisher(storage=AnnouncementStorage(), config_path=config_path)
+        profile, _res, _anns, _logo = load_identity(config_path, publisher.storage)
+    except ConfigError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+    adapter = next((a for a in publisher.adapters if isinstance(a, EmailNewsletterAdapter)), None)
+    if adapter is None or adapter.unsubscribe_secret is None:
+        print("[ERROR] No email server is connected. Connect one on the Channels page first.")
+        return 1
+
+    message = EmailMessage()
+    message["Subject"] = f"Test message from {profile.name}"
+    message["From"] = adapter.from_address
+    message["To"] = address
+    message["List-Unsubscribe"] = f"<{adapter.unsubscribe_url(address)}>"
+    message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    message.set_content(
+        f"This is a test from {profile.name}. Nothing else was sent, and you have not been "
+        "subscribed.\n\n"
+        "If you can read this, email delivery is working. Check that it did not land in spam.\n\n"
+        f"To stop any future emails: {adapter.unsubscribe_url(address)}\n"
+    )
+    try:
+        adapter.transport.send(message)
+    except TransportError as exc:
+        print(f"[FAIL] The test was not sent: {exc}")
+        return 1
+    print(
+        f"  [SUCCESS] Test email sent to {Subscriber(channel='email', destination=address).mask_destination()}."
+    )
+    print(
+        "            Check the inbox and spam folder. Then check the message headers for SPF, DKIM and DMARC results."
+    )
+    return 0

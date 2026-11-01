@@ -23,6 +23,19 @@ CONFIRMATION_TTL = timedelta(days=3)
 PENDING_RETENTION = timedelta(days=7)
 
 
+def validate_destination(channel: str, destination: str) -> None:
+    """Raise ValueError unless the destination is a well-formed address for the channel."""
+    dest = destination.strip()
+    if channel == "email":
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$", dest):
+            raise ValueError(f"Invalid email address: '{destination}'")
+    elif channel == "sms":
+        if not re.match(r"^\+?[0-9]{8,15}$", dest):
+            raise ValueError(f"Invalid phone number format for SMS: '{destination}'")
+    else:
+        raise ValueError(f"Unsupported subscription channel: '{channel}'")
+
+
 @dataclass
 class Subscriber:
     channel: str  # 'email' or 'sms'
@@ -169,15 +182,7 @@ class SubscriberManager:
         return row["text"] if row else None
 
     def validate_destination(self, channel: str, destination: str) -> None:
-        dest = destination.strip()
-        if channel == "email":
-            if not re.match(r"^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$", dest):
-                raise ValueError(f"Invalid email address: '{destination}'")
-        elif channel == "sms":
-            if not re.match(r"^\+?[0-9]{8,15}$", dest):
-                raise ValueError(f"Invalid phone number format for SMS: '{destination}'")
-        else:
-            raise ValueError(f"Unsupported subscription channel: '{channel}'")
+        validate_destination(channel, destination)
 
     def add_subscriber(
         self,

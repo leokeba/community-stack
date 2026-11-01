@@ -23,6 +23,8 @@ Every snapshot created by `community-stack backup` captures:
    - Caddy certificates and ACME state (`data/caddy`).
    - Landing page assets and custom announcements (`data/landing`).
    - Canonical announcements, delivery history, admin accounts, sessions, and publishing settings (`data/announcements/announcements.db`).
+   - Subscriber records, consent history and the email send ledger (`data/announcements/subscribers.db`). Both databases are copied through SQLite's backup API, so a backup taken during a write is consistent. The unsubscribe signing key lives in `announcements.db`; a restore that lacks it breaks existing unsubscribe links.
+   - The `/connect` page is rebuilt from configuration and announcements, so it is not backed up separately (`data/landing/connect`).
    - Element Web branding and client configuration (`data/element`).
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
 4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).

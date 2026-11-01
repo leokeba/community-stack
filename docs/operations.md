@@ -279,6 +279,25 @@ Back it up with the database; without it, existing unsubscribe links stop workin
 
 Consent wording is provisional until legal review is complete (decision D3).
 
+Before inviting people, send a test message to an address you own:
+
+```bash
+uv run community-stack subscribers test-email --to you@example.org
+```
+
+Nothing is subscribed by this. Then check the message headers for SPF, DKIM
+and DMARC results. Your domain should have:
+
+- **SPF:** a TXT record that lists your mail provider, for example
+  `v=spf1 include:mail.example.net -all`.
+- **DKIM:** the signing key your mail provider gives you, published as a TXT
+  record under the selector they name.
+- **DMARC:** start with `v=DMARC1; p=none; rua=mailto:dmarc@example.org` to
+  collect reports, then tighten to `quarantine` once mail passes.
+
+Messages that fail these checks are often filtered as spam, whatever the content.
+A test to a second provider catches most of these problems early.
+
 ### Delivery retries
 
 Drafts can be scheduled from the announcement page or with `announce
