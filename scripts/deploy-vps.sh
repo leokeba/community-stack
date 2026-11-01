@@ -123,11 +123,16 @@ else
     sudo -n -u community "$project_dir/.venv/bin/pip" install --quiet -e "$project_dir"
 fi
 sudo -n -u community "$project_dir/.venv/bin/community-stack" --help >/dev/null
+# The contact page (/connect) is served from this folder, and the announcements
+# container (UID 1000) writes it. Create it with that owner before Docker can
+# create it as root.
+sudo -n install -d -m 0755 -o 1000 -g 1000 "$project_dir/data/landing/connect"
 
 docker_cmd=(sudo -n docker)
 compose_shell='cd "$1" && shift && exec "$@"'
 compose_app=(sudo -n sh -c "$compose_shell" sh "$project_dir" docker compose --env-file .env -f services/announcements/docker-compose.yml)
 compose_proxy=(sudo -n sh -c "$compose_shell" sh "$project_dir" docker compose --env-file .env -f services/proxy/docker-compose.yml)
+compose_landing=(sudo -n sh -c "$compose_shell" sh "$project_dir" docker compose -f services/landing/docker-compose.yml)
 rollback_tag="community-stack-announcements:rollback-$deploy_id"
 old_image="$("${docker_cmd[@]}" image inspect community-stack-announcements:0.1.0 --format '{{.Id}}' 2>/dev/null || true)"
 if [ -n "$old_image" ]; then
@@ -163,6 +168,12 @@ if [ "$healthy" != true ]; then
     echo "Announcements health check failed; the prior image was restored when available." >&2
     exit 1
 fi
+
+# Render the contact page now, from inside the container that owns the data. If this
+# fails the page is rebuilt after the next delivery, so it is not fatal.
+"${docker_cmd[@]}" exec -u 1000 community_announcements \
+    community-stack connect render --output-dir /app/data/landing/connect \
+    || printf 'Warning: the contact page was not rendered; it updates after the next delivery.\n' >&2
 
 sudo -n -u community python3 - "$project_dir" "$deploy_id" <<'PY'
 from pathlib import Path
@@ -203,6 +214,9 @@ if ! "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy; then
     "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy || true
     exit 1
 fi
+
+# The landing service gained a read-only mount for the contact page; recreate it to attach it.
+"${compose_landing[@]}" up -d --force-recreate landing
 
 "${docker_cmd[@]}" inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
 "${docker_cmd[@]}" inspect community_proxy --format '{{.State.Status}}' | grep -qx running

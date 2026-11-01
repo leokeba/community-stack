@@ -240,15 +240,15 @@ def test_offline_archive_includes_identity_files_and_verifies(site):
     assert 'href="connect/index.html"' in index
 
 
-def test_bad_logo_leaves_contacts_out_but_still_exports(site):
+def test_missing_logo_still_exports_the_contact_page_without_it(site):
     cfg = yaml.safe_load((site / "community-stack.yaml").read_text())
     cfg["community"]["logo"] = "missing.png"
     (site / "community-stack.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
 
     storage = _storage(site)
     files, warning = offline_connect_files(site / "community-stack.yaml", storage)
-    assert files is None
-    assert "left out of the archive" in warning
+    assert warning is None
+    assert "index.html" in files and "logo.jpg" not in files and "logo.png" not in files
 
     target = site / "archive/offline.zip"
     OfflineArchiveExporter(storage=storage).export_archive(target, connect_files=files)
@@ -283,3 +283,11 @@ def test_example_config_still_produces_a_page_without_community_block(tmp_path, 
     assert main(["connect", "render"]) == 0
     page = (tmp_path / "data/landing/connect/index.html").read_text(encoding="utf-8")
     assert "<h1>community</h1>" in page
+
+
+def test_deploy_script_prepares_the_contact_page_folder_and_landing():
+    script = (REPO / "scripts/deploy-vps.sh").read_text(encoding="utf-8")
+    assert "install -d -m 0755 -o 1000 -g 1000" in script
+    assert "data/landing/connect" in script
+    assert "connect render" in script
+    assert "up -d --force-recreate landing" in script

@@ -245,9 +245,11 @@ community:
 - [x] **CR1.6 Add rebuild triggers.** Rebuild after publish, update and withdraw,
   after a profile save, and at worker start. Trigger from the publisher so the page
   does not depend on the `web_feed` channel being enabled.
-- [x] **CR1.7 Handle images.** Process logo and cover uploads through
+- [ ] **CR1.7 Handle images.** Process logo and cover uploads through
   `announcements/media.py`, which strips metadata. Accept raster formats only until
   SVG sanitising exists, because the page shares an origin with `/admin`.
+  Open: the logo is re-encoded, but the announcements container cannot read it
+  from the host, so it is left out of pages the container rebuilds (see deployment.md).
 - [x] **CR1.8 Add console editing.** Add a Community profile page and a structured
   agent operation that validates against the schema, backs up, rewrites only the
   `community:` block, and writes an audit event. Require the `settings` permission.

@@ -280,9 +280,16 @@ def build_bundle(
 
 
 def load_identity(
-    config_path: Path | str, storage: AnnouncementStorage
+    config_path: Path | str,
+    storage: AnnouncementStorage,
+    require_logo: bool = False,
 ) -> tuple[CommunityProfile, ChannelResolution, list[Announcement], tuple[str, bytes] | None]:
-    """Everything the page needs, read from the configuration and the canonical store."""
+    """Everything the page needs, read from the configuration and the canonical store.
+
+    A logo that cannot be read (for example, the announcements container cannot see a file on
+    the host) is left out, so the page still updates. The command-line tools pass
+    ``require_logo=True`` so the operator is told.
+    """
     profile, config = load_community(config_path)
     connections = storage.list_connections()
     resolution = resolve_independent(profile, connections, config)
@@ -290,7 +297,11 @@ def load_identity(
     logo = None
     path = logo_path(config_path, profile)
     if path is not None:
-        logo = prepare_logo(path)
+        try:
+            logo = prepare_logo(path)
+        except ConnectError:
+            if require_logo:
+                raise
     return profile, resolution, announcements, logo
 
 

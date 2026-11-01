@@ -47,7 +47,9 @@ def run_connect(args: argparse.Namespace) -> int:
 
 
 def _show(config_path: Path | str, storage: AnnouncementStorage) -> int:
-    profile, resolution, announcements, _logo = load_identity(config_path, storage)
+    profile, resolution, announcements, _logo = load_identity(
+        config_path, storage, require_logo=True
+    )
     print(f"Community:    {profile.name}")
     print(f"Address:      {profile.url}")
     print(f"Stable page:  {profile.connect_url}")
@@ -77,7 +79,9 @@ def _show(config_path: Path | str, storage: AnnouncementStorage) -> int:
 
 
 def _generate_qr(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, _resolution, _announcements, _logo = load_identity(config_path, storage)
+    profile, _resolution, _announcements, _logo = load_identity(
+        config_path, storage, require_logo=True
+    )
     destination = (getattr(args, "destination", None) or profile.connect_url).rstrip("/")
     if not destination.startswith("https://"):
         print("[ERROR] The QR destination must start with https://")
@@ -102,7 +106,9 @@ def _generate_qr(args: argparse.Namespace, config_path: Path | str, storage) -> 
 
 
 def _export(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, resolution, announcements, logo = load_identity(config_path, storage)
+    profile, resolution, announcements, logo = load_identity(
+        config_path, storage, require_logo=True
+    )
     now = datetime.now(timezone.utc).isoformat()
     files = build_bundle(profile, resolution, announcements, logo, now)
     target = Path(getattr(args, "output", None) or DEFAULT_EXPORT)
@@ -118,7 +124,9 @@ def _export(args: argparse.Namespace, config_path: Path | str, storage) -> int:
 
 
 def _render(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, resolution, announcements, logo = load_identity(config_path, storage)
+    profile, resolution, announcements, logo = load_identity(
+        config_path, storage, require_logo=True
+    )
     output_dir = Path(getattr(args, "output_dir", None) or DEFAULT_SITE_DIR)
     write_files(output_dir, build_site(profile, resolution, announcements, logo))
     print(f"Wrote the public /connect page to {output_dir.resolve()}")
