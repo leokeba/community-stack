@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from community_stack.announcements.storage import AnnouncementStorage
-from community_stack.community import address_warnings
+from community_stack.community import address_warnings, connection_warnings
 from community_stack.config import ConfigError
 from community_stack.continuity.connect_page import (
     ConnectError,
@@ -70,6 +70,8 @@ def _show(config_path: Path | str, storage: AnnouncementStorage) -> int:
         print("  (none listed)")
 
     for warning in address_warnings(profile.url, profile):
+        print(f"\n[WARN] {warning}")
+    for warning in connection_warnings(storage.list_connections()):
         print(f"\n[WARN] {warning}")
     return 0
 

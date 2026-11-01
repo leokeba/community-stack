@@ -224,3 +224,15 @@ def resolve_independent(
         else:
             shown.append(candidate)
     return ChannelResolution(shown=shown, hidden=hidden)
+
+
+def connection_warnings(connections: dict[str, Any]) -> list[str]:
+    """Warn about setups that would send the same email twice."""
+    if "email" in connections and "listmonk" in connections:
+        message = (
+            "Both your own email server and listmonk are connected. A person on a listmonk "
+            "list can also be subscribed here, so they may receive each announcement twice. "
+            "Keep one of them."
+        )
+        return [message]
+    return []

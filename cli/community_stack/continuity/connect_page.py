@@ -186,6 +186,16 @@ def render_page(
       <p>These belong to the community. They keep working if a social network becomes unavailable.</p>
       {independent_html}
     </section>
+    <section aria-labelledby="choose">
+      <h2 id="choose">Which should I choose?</h2>
+      <ul>
+        <li><strong>Email</strong>: announcements arrive in your inbox. You confirm once, and you can stop with one click.</li>
+        <li><strong>Feeds</strong>: no sign-up at all. A feed reader app shows new announcements for you.</li>
+        <li><strong>Chat</strong>: follow announcements in a Matrix app such as Element, if you already use one.</li>
+        <li><strong>Fediverse</strong>: follow us from Mastodon or a similar app, like any other account.</li>
+      </ul>
+      <p class="muted">Pick whichever you already use. You can change your mind at any time.</p>
+    </section>
     <section aria-labelledby="social">
       <h2 id="social">Find us on social networks</h2>
       <p>Social networks are good for news and conversation. Use the channels above to make sure you do not miss anything.</p>

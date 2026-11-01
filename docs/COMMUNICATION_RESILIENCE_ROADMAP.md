@@ -331,7 +331,7 @@ announcements in under a minute, without creating an account.
 - [x] **CR2.8 Add preferences.** Offer all public announcements, important only, and
   events. Map these to reserved `important` and `events` announcement tags, and add
   matching controls to the editor. Add a token-based page for managing preferences.
-- [ ] **CR2.9 Explain the channels.** On `/connect` and `/subscribe`, describe email,
+- [x] **CR2.9 Explain the channels.** On `/connect` and `/subscribe`, describe email,
   SMS, RSS and Atom, JSON Feed, Matrix and ActivityPub in plain language for
   non-technical readers.
 - [x] **CR2.10 Add administration.** Add a console Subscribers page with masked
@@ -339,7 +339,7 @@ announcements in under a minute, without creating an account.
   `subscribers export` and `subscribers delete` to the CLI.
 - [x] **CR2.11 Fix backups.** Snapshot `subscribers.db` consistently, as
   `announcements.db` already is, and add a restore test.
-- [ ] **CR2.12 Handle listmonk overlap.** Warn when native email and listmonk are
+- [x] **CR2.12 Handle listmonk overlap.** Warn when native email and listmonk are
   both connected, since members could be mailed twice.
 - [ ] **CR2.13 Help with deliverability.** Add a test-send button and SPF, DKIM and
   DMARC guidance. Send no tracking pixels.
