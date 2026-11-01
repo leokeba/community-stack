@@ -302,7 +302,7 @@ announcements in under a minute, without creating an account.
 - [x] **CR2.1 Unify the subscriber database.** Point the CLI at
   `data/announcements/subscribers.db` and merge any rows from the old path without
   overwriting existing records. This is a bug fix and can ship ahead of the phase.
-- [ ] **CR2.2 Record consent.** Add a `pending` status and columns for consent
+- [x] **CR2.2 Record consent.** Add a `pending` status and columns for consent
   timestamp, consent version and source, and confirmation timestamp. Store the full
   text of each consent version. Mark existing rows `legacy` and do not invent
   timestamps for them.

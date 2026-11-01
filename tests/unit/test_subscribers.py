@@ -189,3 +189,122 @@ def test_legacy_file_is_left_in_place(tmp_path, monkeypatch):
     )
     SubscriberManager()
     assert legacy.is_file()
+
+
+# CR2.2: consent records
+
+
+def _old_schema_db(path):
+    """A subscriber table as it was before consent was recorded."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """CREATE TABLE subscribers (
+            id TEXT PRIMARY KEY, channel TEXT NOT NULL, destination TEXT NOT NULL,
+            status TEXT NOT NULL, topics_json TEXT NOT NULL, created_at TEXT NOT NULL,
+            unsubscribed_at TEXT, UNIQUE(channel, destination))"""
+    )
+    conn.execute(
+        "INSERT INTO subscribers VALUES ('sub_old', 'email', 'old@example.org', 'active', '[]', "
+        "'2026-01-01T00:00:00+00:00', NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_migration_adds_consent_columns_and_marks_old_rows_legacy(tmp_path):
+    db = tmp_path / "subs.db"
+    _old_schema_db(db)
+    mgr = SubscriberManager(db_path=db)
+
+    row = mgr.list_subscribers()[0]
+    assert row.consent_source == "legacy"
+    assert row.consent_at is None  # never invent a consent time
+    assert row.consent_version is None
+    assert row.created_at == "2026-01-01T00:00:00+00:00"
+
+
+def test_migration_is_idempotent(tmp_path):
+    db = tmp_path / "subs.db"
+    _old_schema_db(db)
+    SubscriberManager(db_path=db)
+    mgr = SubscriberManager(db_path=db)
+    assert [s.consent_source for s in mgr.list_subscribers()] == ["legacy"]
+
+
+def test_new_rows_without_consent_are_not_relabelled_on_restart(tmp_path):
+    db = tmp_path / "subs.db"
+    mgr = SubscriberManager(db_path=db)
+    mgr.add_subscriber("email", "ann@example.org")
+    SubscriberManager(db_path=db)  # restart
+    row = mgr.list_subscribers()[0]
+    assert row.consent_source is None
+
+
+def test_consent_text_is_stored_once_and_never_changes(tmp_path):
+    mgr = SubscriberManager(db_path=tmp_path / "subs.db")
+    mgr.register_consent_text("2026-11", "I agree to receive announcements by email.")
+    mgr.register_consent_text("2026-11", "I agree to receive announcements by email.")
+    assert mgr.consent_text("2026-11") == "I agree to receive announcements by email."
+    with pytest.raises(ValueError, match="different text"):
+        mgr.register_consent_text("2026-11", "Changed after people agreed.")
+
+
+def test_add_records_version_source_and_time(tmp_path):
+    mgr = SubscriberManager(db_path=tmp_path / "subs.db")
+    mgr.register_consent_text("2026-11", "I agree.")
+    sub = mgr.add_subscriber(
+        "email", "ann@example.org", consent_version="2026-11", consent_source="web_form"
+    )
+    stored = mgr.list_subscribers()[0]
+    assert stored.consent_version == "2026-11"
+    assert stored.consent_source == "web_form"
+    assert stored.consent_at is not None
+    assert sub.consent_version == "2026-11"
+
+
+def test_consent_needs_a_known_version_and_a_source(tmp_path):
+    mgr = SubscriberManager(db_path=tmp_path / "subs.db")
+    with pytest.raises(ValueError, match="no stored text"):
+        mgr.add_subscriber("email", "a@example.org", consent_version="2099", consent_source="x")
+    mgr.register_consent_text("2026-11", "I agree.")
+    with pytest.raises(ValueError, match="both a version and a source"):
+        mgr.add_subscriber("email", "a@example.org", consent_version="2026-11")
+    with pytest.raises(ValueError, match="1 to 40"):
+        mgr.add_subscriber("email", "a@example.org", consent_version="2026-11", consent_source="")
+    assert mgr.list_subscribers() == []
+
+
+def test_resubscribing_keeps_the_original_consent_when_none_is_given(tmp_path):
+    mgr = SubscriberManager(db_path=tmp_path / "subs.db")
+    mgr.register_consent_text("2026-11", "I agree.")
+    mgr.add_subscriber(
+        "email", "ann@example.org", consent_version="2026-11", consent_source="web_form"
+    )
+    first = mgr.list_subscribers()[0]
+    mgr.add_subscriber("email", "ann@example.org")
+    kept = mgr.list_subscribers()[0]
+    assert kept.consent_at == first.consent_at
+    assert kept.consent_version == "2026-11"
+
+
+def test_legacy_cli_import_is_marked_legacy(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _legacy_db(
+        tmp_path / "data/subscriptions/subscribers.db",
+        [
+            (
+                "sub_old_1",
+                "email",
+                "ann@example.org",
+                "active",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                None,
+            )
+        ],
+    )
+    mgr = SubscriberManager()
+    assert mgr.list_subscribers()[0].consent_source == "legacy"

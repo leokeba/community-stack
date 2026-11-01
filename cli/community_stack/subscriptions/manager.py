@@ -16,6 +16,9 @@ DEFAULT_DB_PATH = "data/announcements/subscribers.db"
 LEGACY_DB_PATH = "data/subscriptions/subscribers.db"
 
 
+CONSENT_COLUMNS = ("consent_at", "consent_version", "consent_source", "confirmed_at")
+
+
 @dataclass
 class Subscriber:
     channel: str  # 'email' or 'sms'
@@ -25,6 +28,11 @@ class Subscriber:
     id: str = field(default_factory=lambda: f"sub_{secrets.token_hex(6)}")
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     unsubscribed_at: str | None = None
+    # Consent record (CR2.2). Legacy rows have a source of "legacy" and no invented times.
+    consent_at: str | None = None
+    consent_version: str | None = None
+    consent_source: str | None = None
+    confirmed_at: str | None = None
 
     def mask_destination(self) -> str:
         """Mask destination for privacy-preserving display."""
@@ -57,8 +65,8 @@ class SubscriberManager:
         source = sqlite3.connect(str(legacy))
         try:
             rows = source.execute(
-                "SELECT id, channel, destination, status, topics_json, created_at, unsubscribed_at "
-                "FROM subscribers"
+                "SELECT id, channel, destination, status, topics_json, created_at, unsubscribed_at, "
+                "'legacy' FROM subscribers"
             ).fetchall()
         except sqlite3.Error:
             return
@@ -68,8 +76,9 @@ class SubscriberManager:
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO subscribers (
-                    id, channel, destination, status, topics_json, created_at, unsubscribed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    id, channel, destination, status, topics_json, created_at, unsubscribed_at,
+                    consent_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -94,7 +103,46 @@ class SubscriberManager:
                     UNIQUE(channel, destination)
                 );
             """)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(subscribers)")}
+            if "consent_source" not in columns:
+                for column in CONSENT_COLUMNS:
+                    conn.execute(f"ALTER TABLE subscribers ADD COLUMN {column} TEXT")
+                # Rows that existed before consent was recorded are marked, never dated.
+                conn.execute("UPDATE subscribers SET consent_source = 'legacy'")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS consent_texts (
+                    version TEXT PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+            """)
             conn.commit()
+
+    def register_consent_text(self, version: str, text: str) -> None:
+        """Store the exact words people agreed to. A version's text can never change."""
+        if not version or not text.strip():
+            raise ValueError("A consent version and its text are required.")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_conn() as conn:
+            existing = conn.execute(
+                "SELECT text FROM consent_texts WHERE version = ?", (version,)
+            ).fetchone()
+            if existing is not None:
+                if existing["text"] != text:
+                    raise ValueError(f"Consent version '{version}' already has different text.")
+                return
+            conn.execute(
+                "INSERT INTO consent_texts (version, text, created_at) VALUES (?, ?, ?)",
+                (version, text, now),
+            )
+            conn.commit()
+
+    def consent_text(self, version: str) -> str | None:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT text FROM consent_texts WHERE version = ?", (version,)
+            ).fetchone()
+        return row["text"] if row else None
 
     def validate_destination(self, channel: str, destination: str) -> None:
         dest = destination.strip()
@@ -112,26 +160,52 @@ class SubscriberManager:
         channel: str,
         destination: str,
         topics: list[str] | None = None,
+        consent_version: str | None = None,
+        consent_source: str | None = None,
     ) -> Subscriber:
-        """Add or reactivate a subscriber with explicit opt-in."""
+        """Add or reactivate a subscriber, recording the consent they gave."""
         clean_dest = destination.strip().lower()
         self.validate_destination(channel, clean_dest)
+        if (consent_version is None) != (consent_source is None):
+            raise ValueError("Consent needs both a version and a source.")
+        if consent_version is not None:
+            if self.consent_text(consent_version) is None:
+                raise ValueError(f"Consent version '{consent_version}' has no stored text.")
+            if not consent_source or len(consent_source) > 40:
+                raise ValueError("The consent source must be 1 to 40 characters.")
         sub = Subscriber(channel=channel, destination=clean_dest, topics=topics or [])
 
         now = datetime.now(timezone.utc).isoformat()
+        consent_at = now if consent_version else None
+        sub.consent_at = consent_at
+        sub.consent_version = consent_version
+        sub.consent_source = consent_source
         with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO subscribers (
-                    id, channel, destination, status, topics_json, created_at, unsubscribed_at
-                ) VALUES (?, ?, ?, 'active', ?, ?, NULL)
+                    id, channel, destination, status, topics_json, created_at, unsubscribed_at,
+                    consent_at, consent_version, consent_source
+                ) VALUES (?, ?, ?, 'active', ?, ?, NULL, ?, ?, ?)
                 ON CONFLICT(channel, destination) DO UPDATE SET
                     status='active',
                     topics_json=excluded.topics_json,
-                    unsubscribed_at=NULL
+                    unsubscribed_at=NULL,
+                    consent_at=COALESCE(excluded.consent_at, consent_at),
+                    consent_version=COALESCE(excluded.consent_version, consent_version),
+                    consent_source=COALESCE(excluded.consent_source, consent_source)
                 ;
                 """,
-                (sub.id, sub.channel, sub.destination, json.dumps(sub.topics), now),
+                (
+                    sub.id,
+                    sub.channel,
+                    sub.destination,
+                    json.dumps(sub.topics),
+                    now,
+                    consent_at,
+                    consent_version,
+                    consent_source,
+                ),
             )
             conn.commit()
         return sub
@@ -184,6 +258,10 @@ class SubscriberManager:
                         topics=json.loads(row["topics_json"]),
                         created_at=row["created_at"],
                         unsubscribed_at=row["unsubscribed_at"],
+                        consent_at=row["consent_at"],
+                        consent_version=row["consent_version"],
+                        consent_source=row["consent_source"],
+                        confirmed_at=row["confirmed_at"],
                     )
                 )
         return results
