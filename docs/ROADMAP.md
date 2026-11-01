@@ -11,6 +11,10 @@ each phase ending in a release that a non-technical operator can use on its own.
 
 Decisions already taken:
 
+- **Communication resilience track.** Independent channels, the contact page,
+  consented subscriptions and continuity mode are planned in
+  [COMMUNICATION_RESILIENCE_ROADMAP.md](COMMUNICATION_RESILIENCE_ROADMAP.md),
+  with [ADR 0008](decisions/0008-communication-resilience.md).
 - **Two operating models.** Communities self-host their own instance, and
   hosting partners (tech collectives, NGOs) can run many instances. Self-hosting
   ships first; partner tooling builds on it.
@@ -165,7 +169,7 @@ retries and per-channel delivery.
 | B5 | Review workflow | Draft → In review → Approved → Scheduled → Published, using the roles from A5. Optional two-person rule. An "urgent alert" fast path for safety notices | 2 |
 | B6 | Templates | Reusable templates for recurring formats such as meeting notices or alerts | 2 |
 | B7 | Lifecycle sync | Edits and withdrawals reach every channel that supports them; where a channel can't edit (for example Bluesky), the UI says so before publishing | 2 |
-| B8 | Public subscription page | Double opt-in sign-up for email and SMS with topic preferences and one-click unsubscribe, replacing the CLI subscriber list | 2 |
+| B8 | Public subscription page | Double opt-in sign-up for email and SMS with topic preferences and one-click unsubscribe, replacing the CLI subscriber list. Email sign-up is native, not listmonk-driven (ADR 0008) | 2 |
 | B9 | Delivery insights | Per-channel delivery status (exists today) plus reach counts where the platform API offers them; no tracking pixels by default | 3 |
 | B10 | Multilingual announcements | Language variants of one announcement, routed to channels per language. Content translation is separate from the English-only interface | 3 |
 
@@ -185,7 +189,7 @@ matter. Open protocols ship first, then platforms behind app review.
 | Mastodon and compatible servers | [Statuses API](https://docs.joinmastodon.org/methods/statuses/): OAuth `write:statuses`, `Idempotency-Key`, native scheduling | Create an app on the community's account; no review | Edit and delete | 1 |
 | Bluesky | [AT Protocol](https://bsky.network/docs/bluesky-api) `createRecord` with an app password, or OAuth | App password from account settings; no review | Delete only, no edit | 1 |
 | Telegram channel | [Bot API](https://core.telegram.org/bots/api): bot added to the channel as an administrator | Create a bot with BotFather; no review | Edit and delete | 1 |
-| Email newsletter | [listmonk](https://listmonk.app/) as an optional service, driven through its API; double opt-in lists | An SMTP provider and deliverability setup (SPF, DKIM) | Corrections sent as a follow-up email | 1 |
+| Email newsletter | Native double opt-in and SMTP sending (ADR 0008). [listmonk](https://listmonk.app/) remains an optional connector for communities that already run it | An SMTP provider and deliverability setup (SPF, DKIM) | Corrections sent as a follow-up email | 1 |
 | Discord and Slack | Incoming webhooks | Paste a webhook URL | Discord: edit and delete; Slack: none | 1 (quick win) |
 | Native ActivityPub actor | Finish the prototype: WebFinger, HTTP Signatures, followers inbox, so `@announcements@community` is followable from any fediverse server. Possibly via [Fedify](https://fedify.dev/) or an embedded server | None, but real implementation work | Update and Delete activities | 2 |
 | Facebook Page | [Pages API](https://developers.facebook.com/docs/pages-api/manage-pages) with `pages_manage_posts` | Meta developer app; see the Meta note below | Edit and delete | 2 |

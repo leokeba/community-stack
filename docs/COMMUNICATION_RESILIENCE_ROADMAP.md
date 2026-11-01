@@ -174,7 +174,7 @@ CR2 and CR3 can run in parallel once CR1 is reviewed.
   models and configuration, phase dependencies, and security and privacy.
 - [x] **CR0.4 Write `docs/decisions/0008-communication-resilience.md`.** Record
   section 4 and the resolved open decisions from section 16.
-- [ ] **CR0.5 Reconcile with `docs/ROADMAP.md`.** Link this track from it, and
+- [x] **CR0.5 Reconcile with `docs/ROADMAP.md`.** Link this track from it, and
   update B8 and the email connector row to match decision D1.
 
 **Exit criteria**
