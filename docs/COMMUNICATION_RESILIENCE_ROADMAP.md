@@ -311,7 +311,7 @@ announcements in under a minute, without creating an account.
   Resubscribing needs fresh confirmation. `subscribers add` for email must send a
   confirmation request or require a stated consent source. Purge unconfirmed entries
   after a short period.
-- [ ] **CR2.4 Add a pluggable email transport.** Define a transport interface with
+- [x] **CR2.4 Add a pluggable email transport.** Define a transport interface with
   an SMTP implementation built on `smtplib`, and add an `email` connector with its
   credentials stored as a channel connection. Remove the silent success: with no
   transport, delivery must fail.

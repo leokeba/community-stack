@@ -6,7 +6,18 @@ from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.subscriptions.email_transport import EmailTransport
 from community_stack.subscriptions.manager import SubscriberManager
+
+
+class RecordingMail(EmailTransport):
+    """Records the To address of every message it is asked to send."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    def send(self, message) -> None:
+        self.sent.append(message["To"])
 
 
 def test_multi_channel_accessible_broadcast(tmp_path):
@@ -17,11 +28,7 @@ def test_multi_channel_accessible_broadcast(tmp_path):
     sub_mgr.add_subscriber("email", "resident1@example.org")
     sub_mgr.add_subscriber("email", "resident2@example.org")
 
-    email_dispatched = []
-
-    def mock_email_transport(msg, recipients):
-        email_dispatched.append({"subject": msg["Subject"], "recipients": list(recipients)})
-        return True, None
+    mail = RecordingMail()
 
     activitypub_dispatched = []
 
@@ -36,7 +43,7 @@ def test_multi_channel_accessible_broadcast(tmp_path):
     ap_adapter = ActivityPubAdapter(transport=mock_ap_transport)
     email_adapter = EmailNewsletterAdapter(
         subscriber_manager=sub_mgr,
-        transport=mock_email_transport,
+        transport=mail,
     )
 
     publisher = AnnouncementPublisher(
@@ -59,9 +66,8 @@ def test_multi_channel_accessible_broadcast(tmp_path):
     assert results["email"].success is True
 
     # Verify Email recipients
-    assert len(email_dispatched) == 1
-    assert "resident1@example.org" in email_dispatched[0]["recipients"]
-    assert "resident2@example.org" in email_dispatched[0]["recipients"]
+    assert sorted(mail.sent) == ["resident1@example.org", "resident2@example.org"]
+    first_round = len(mail.sent)
 
     # Verify ActivityPub
     assert len(activitypub_dispatched) == 1
@@ -76,9 +82,7 @@ def test_multi_channel_accessible_broadcast(tmp_path):
         body="Main Street has reopened to public traffic.",
     )
     assert results2["email"].success is True
-    assert len(email_dispatched) == 2
-    assert "resident1@example.org" not in email_dispatched[1]["recipients"]
-    assert "resident2@example.org" in email_dispatched[1]["recipients"]
+    assert mail.sent[first_round:] == ["resident2@example.org"]
 
 
 def test_activitypub_failure_does_not_block_email_or_web(tmp_path):
@@ -87,11 +91,7 @@ def test_activitypub_failure_does_not_block_email_or_web(tmp_path):
     sub_mgr = SubscriberManager(db_path=tmp_path / "subscribers.db")
     sub_mgr.add_subscriber("email", "alert_subscriber@example.org")
 
-    email_sent = []
-
-    def mock_email_transport(msg, recipients):
-        email_sent.append(list(recipients))
-        return True, None
+    mail = RecordingMail()
 
     # ActivityPub fails
     def failing_ap_transport(method, url, headers, data):
@@ -101,7 +101,7 @@ def test_activitypub_failure_does_not_block_email_or_web(tmp_path):
     ap_adapter = ActivityPubAdapter(transport=failing_ap_transport)
     email_adapter = EmailNewsletterAdapter(
         subscriber_manager=sub_mgr,
-        transport=mock_email_transport,
+        transport=mail,
     )
 
     publisher = AnnouncementPublisher(
@@ -118,4 +118,4 @@ def test_activitypub_failure_does_not_block_email_or_web(tmp_path):
     assert results["web_feed"].success is True
     assert results["email"].success is True
     assert results["activitypub"].success is False
-    assert len(email_sent) == 1
+    assert mail.sent == ["alert_subscriber@example.org"]

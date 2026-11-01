@@ -19,7 +19,11 @@ from community_stack.announcements.adapters.base import (
 )
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
-from community_stack.announcements.connectors import CONNECTORS, build_connector
+from community_stack.announcements.connectors import (
+    CONNECTORS,
+    build_connector,
+    build_email_adapter,
+)
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.sms import SmsGatewayAdapter
@@ -172,6 +176,17 @@ class AnnouncementPublisher:
                     logger.warning(
                         "Skipping the %s connection: its saved settings are invalid.", kind
                     )
+                continue
+            if kind == "email":
+                try:
+                    adapters.append(
+                        build_email_adapter(
+                            values,
+                            SubscriberManager(self.storage.db_path.parent / "subscribers.db"),
+                        )
+                    )
+                except (KeyError, ValueError):
+                    logger.warning("Skipping the email connection: its saved settings are invalid.")
                 continue
             if kind == "sms":
                 adapters.append(

@@ -87,6 +87,13 @@ def assert_public_https(url: str, allowed_hosts: set[str] | None = None) -> str:
     host = parts.hostname.lower()
     if allowed_hosts is not None and host not in allowed_hosts:
         raise UnsafeURLError(f"Use an address on {', '.join(sorted(allowed_hosts))}.")
+    assert_public_host(host)
+    return url
+
+
+def assert_public_host(host: str) -> None:
+    """Raise UnsafeURLError unless every address the host resolves to is public."""
+    host = host.lower()
     try:
         addresses = resolve(host)
     except OSError as exc:
@@ -95,7 +102,6 @@ def assert_public_https(url: str, allowed_hosts: set[str] | None = None) -> str:
         ip = ipaddress.ip_address(address.split("%", 1)[0])
         if not ip.is_global:
             raise UnsafeURLError(f"{host} points to a private network address.")
-    return url
 
 
 def send(method: str, url: str, headers: dict[str, str], payload: Any) -> tuple[int, Any]:

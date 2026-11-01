@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.base import ChannelAdapter
+from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
 from community_stack.announcements.adapters.listmonk import ListmonkAdapter
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.messaging import (
@@ -22,6 +23,8 @@ from community_stack.announcements.adapters.meta import (
 )
 from community_stack.announcements.adapters.signal import SignalAdapter
 from community_stack.announcements.adapters.social import BlueskyAdapter, MastodonAdapter
+from community_stack.subscriptions.email_transport import SmtpTransport
+from community_stack.subscriptions.manager import SubscriberManager
 from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
 
 TOKEN = re.compile(r"^[^\s]{8,512}$")
@@ -176,6 +179,52 @@ def _validate_listmonk(values: dict[str, str]) -> dict[str, str]:
         "api_token": _token(values, "api_token", "The API token"),
         "list_ids": ", ".join(lists),
     }
+
+
+def _validate_email(values: dict[str, str]) -> dict[str, str]:
+    host = values.get("host", "").strip().lower()
+    if not re.fullmatch(
+        r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+", host
+    ):
+        raise ValueError("Enter the mail server's name, such as smtp.example.org.")
+    http.assert_public_host(host)
+    try:
+        port = int(values.get("port", "").strip() or "587")
+    except ValueError as exc:
+        raise ValueError("The port must be a number, usually 587 or 465.") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("The port must be between 1 and 65535.")
+    from_address = values.get("from_address", "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}", from_address):
+        raise ValueError("Enter the address announcements are sent from.")
+    public_url = http.assert_public_https(values.get("public_url", "").strip().rstrip("/"))
+    username = values.get("username", "").strip()
+    password = values.get("password", "")
+    return {
+        "host": host,
+        "port": str(port),
+        "username": username,
+        "password": password,
+        "from_address": from_address,
+        "public_url": public_url,
+    }
+
+
+def build_email_adapter(
+    values: dict[str, str], subscribers: SubscriberManager
+) -> EmailNewsletterAdapter:
+    """Email to confirmed subscribers, sent through the organizer's own mail server."""
+    return EmailNewsletterAdapter(
+        subscriber_manager=subscribers,
+        from_address=values["from_address"],
+        unsubscribe_base_url=f"{values['public_url']}/subscribe/stop",
+        transport=SmtpTransport(
+            host=values["host"],
+            port=int(values["port"]),
+            username=values.get("username") or None,
+            password=values.get("password") or None,
+        ),
+    )
 
 
 def _validate_sms(values: dict[str, str]) -> dict[str, str]:
@@ -408,6 +457,31 @@ CONNECTORS: dict[str, ConnectorType] = {
                 "/api/webhooks/",
             ),
             build=lambda c: DiscordWebhookAdapter(c["webhook_url"]),
+        ),
+        ConnectorType(
+            kind="email",
+            label="Email (your own mail server)",
+            steps=(
+                "Use an SMTP account from your email provider, for example the one that sends your organisation's mail.",
+                "Create or copy a sending address for announcements and its password.",
+                "Enter the address your public website uses, so unsubscribe links point there.",
+            ),
+            fields=(
+                ConnectorField("host", "Mail server", placeholder="smtp.example.org"),
+                ConnectorField("port", "Port", required=False, placeholder="587"),
+                ConnectorField("username", "User name", required=False),
+                ConnectorField("password", "Password", secret=True, required=False),
+                ConnectorField(
+                    "from_address", "Sent from", placeholder="announcements@example.org"
+                ),
+                ConnectorField(
+                    "public_url", "Website address", placeholder="https://community.example.org"
+                ),
+            ),
+            validate=_validate_email,
+            build=lambda c: build_email_adapter(c, SubscriberManager()),
+            caveat="Each person gets their own message. Sending is not retried after some "
+            "messages have gone out, until delivery tracking per person is in place.",
         ),
         ConnectorType(
             kind="listmonk",

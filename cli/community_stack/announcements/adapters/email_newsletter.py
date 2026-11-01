@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-from collections.abc import Callable
 from email.message import EmailMessage
 
 from community_stack.announcements.adapters.base import (
@@ -16,6 +15,11 @@ from community_stack.announcements.adapters.base import (
 )
 from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement
+from community_stack.subscriptions.email_transport import (
+    EmailTransport,
+    TransportError,
+    UnconfiguredTransport,
+)
 from community_stack.subscriptions.manager import SubscriberManager
 
 
@@ -26,19 +30,15 @@ class EmailNewsletterAdapter(ChannelAdapter):
         self,
         subscriber_manager: SubscriberManager | None = None,
         from_address: str = "announcements@community.example.org",
-        unsubscribe_base_url: str = "https://community.example.org/unsubscribe",
-        smtp_host: str = "localhost",
-        smtp_port: int = 587,
-        transport: Callable[[EmailMessage, list[str]], tuple[bool, str | None]] | None = None,
+        unsubscribe_base_url: str = "https://community.example.org/subscribe/stop",
+        transport: EmailTransport | None = None,
         enabled: bool = True,
     ) -> None:
         self.subscriber_manager = subscriber_manager or SubscriberManager()
         self.from_address = from_address
         self.unsubscribe_base_url = unsubscribe_base_url
-        self.smtp_host = smtp_host
-        self.smtp_port = smtp_port
         self.enabled = enabled
-        self._custom_transport = transport
+        self.transport = transport or UnconfiguredTransport()
 
     @property
     def name(self) -> str:
@@ -108,26 +108,25 @@ class EmailNewsletterAdapter(ChannelAdapter):
 
         recipients = self.subscriber_manager.get_active_recipients(channel="email")
         if not recipients:
-            return DeliveryResult(
-                success=True,
-                external_id="email_no_subscribers",
-            )
+            return DeliveryResult(success=True, external_id="email_no_subscribers")
 
-        msg = self.build_email_message(announcement)
-
-        if self._custom_transport:
-            success, err = self._custom_transport(msg, recipients)
-            if not success:
+        # One message per person, so no one sees another's address. Until the per-recipient
+        # ledger exists (CR2.5), a failure after some messages were sent is not retried,
+        # because retrying would mail the people already reached a second time.
+        sent = 0
+        for address in recipients:
+            message = self.build_email_message(announcement)
+            message["To"] = address
+            try:
+                self.transport.send(message)
+            except TransportError as exc:
                 return DeliveryResult(
                     success=False,
-                    error=f"Email delivery error: {err}",
-                    retryable=True,
+                    error=f"Email delivery stopped after {sent} of {len(recipients)}: {exc}",
+                    retryable=exc.retryable and sent == 0,
                 )
-        # Default mock / local success
-        return DeliveryResult(
-            success=True,
-            external_id=f"email_sent_{len(recipients)}_recipients",
-        )
+            sent += 1
+        return DeliveryResult(success=True, external_id=f"email_sent_{sent}_recipients")
 
     def update(self, announcement: Announcement) -> DeliveryResult:
         return self.publish(announcement)

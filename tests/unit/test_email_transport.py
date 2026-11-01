@@ -1,0 +1,248 @@
+"""Unit tests for email delivery: the SMTP transport, the adapter's failure rules, and the connector."""
+
+import smtplib
+from email.message import EmailMessage
+from unittest import mock
+
+import pytest
+from community_stack.announcements.adapters import http
+from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
+from community_stack.announcements.connectors import CONNECTORS, build_connector
+from community_stack.announcements.models import Announcement
+from community_stack.subscriptions.email_transport import (
+    SmtpTransport,
+    TransportError,
+    UnconfiguredTransport,
+)
+from community_stack.subscriptions.manager import SubscriberManager
+
+
+def _message(to: str = "ann@example.org") -> EmailMessage:
+    msg = EmailMessage()
+    msg["To"] = to
+    msg["Subject"] = "Hello"
+    msg.set_content("Body")
+    return msg
+
+
+class FakeSMTP:
+    """Stands in for smtplib.SMTP and records what was called."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[str] = []
+        self.sent: list[EmailMessage] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.calls.append("close")
+        return False
+
+    def starttls(self, context=None) -> None:
+        self.calls.append("starttls")
+
+    def login(self, user: str, password: str) -> None:
+        self.calls.append(f"login:{user}")
+
+    def send_message(self, message: EmailMessage) -> None:
+        if self.error:
+            raise self.error
+        self.sent.append(message)
+
+
+def _factory(fake: FakeSMTP):
+    return lambda host, port, timeout: fake
+
+
+# SMTP transport
+
+
+def test_smtp_sends_with_starttls_and_login():
+    fake = FakeSMTP()
+    SmtpTransport("smtp.example.org", 587, "sender", "secret", smtp_factory=_factory(fake)).send(
+        _message()
+    )
+    assert fake.calls == ["starttls", "login:sender", "close"]
+    assert fake.sent[0]["To"] == "ann@example.org"
+
+
+def test_smtp_skips_login_without_a_user_name():
+    fake = FakeSMTP()
+    SmtpTransport("smtp.example.org", 587, smtp_factory=_factory(fake)).send(_message())
+    assert "login:" not in " ".join(fake.calls)
+
+
+def test_port_465_is_implicit_tls_so_no_starttls():
+    fake = FakeSMTP()
+    SmtpTransport("smtp.example.org", 465, smtp_factory=_factory(fake)).send(_message())
+    assert "starttls" not in fake.calls
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable"),
+    [
+        (smtplib.SMTPResponseException(451, b"try later"), True),
+        (smtplib.SMTPResponseException(421, b"busy"), True),
+        (smtplib.SMTPResponseException(550, b"no such user"), False),
+        (smtplib.SMTPAuthenticationError(535, b"bad login"), False),
+        (smtplib.SMTPServerDisconnected("gone"), True),
+        (OSError("network unreachable"), True),
+    ],
+)
+def test_smtp_errors_say_whether_to_retry(error, retryable):
+    transport = SmtpTransport("smtp.example.org", smtp_factory=_factory(FakeSMTP(error)))
+    with pytest.raises(TransportError) as info:
+        transport.send(_message())
+    assert info.value.retryable is retryable
+
+
+def test_error_text_never_contains_the_password():
+    transport = SmtpTransport(
+        "smtp.example.org",
+        username="u",
+        password="hunter2-secret",
+        smtp_factory=_factory(FakeSMTP(OSError("x"))),
+    )
+    with pytest.raises(TransportError) as info:
+        transport.send(_message())
+    assert "hunter2" not in str(info.value)
+
+
+def test_unconfigured_transport_refuses_without_retry():
+    with pytest.raises(TransportError) as info:
+        UnconfiguredTransport().send(_message())
+    assert info.value.retryable is False
+
+
+# Adapter failure rules
+
+
+class ScriptedMail(SmtpTransport):
+    """Accepts a set number of messages, then fails. Recipient order is not fixed, so count instead."""
+
+    def __init__(self, accept: int, error: TransportError) -> None:
+        self.accept = accept
+        self.error = error
+        self.accepted: list[str] = []
+
+    def send(self, message) -> None:
+        if len(self.accepted) >= self.accept:
+            raise self.error
+        self.accepted.append(message["To"])
+
+
+@pytest.fixture
+def subscribers(tmp_path):
+    manager = SubscriberManager(db_path=tmp_path / "subs.db")
+    for address in ("a@example.org", "b@example.org"):
+        manager.add_subscriber("email", address)
+    return manager
+
+
+def _ann() -> Announcement:
+    return Announcement(title="Notice", body="Water is off.", id="ann_test_0001")
+
+
+def test_adapter_refuses_to_report_success_without_a_mail_server(subscribers):
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers).publish(_ann())
+    assert result.success is False
+    assert result.retryable is False
+    assert "No email server" in result.error
+
+
+def test_each_person_gets_their_own_message(subscribers):
+    mail = ScriptedMail(accept=10, error=TransportError("unused", retryable=False))
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+    assert result.success is True
+    assert sorted(mail.accepted) == ["a@example.org", "b@example.org"]
+
+
+def test_messages_include_an_unsubscribe_header(subscribers):
+    adapter = EmailNewsletterAdapter(
+        subscriber_manager=subscribers,
+        unsubscribe_base_url="https://community.example.org/subscribe/stop",
+    )
+    message = adapter.build_email_message(_ann())
+    assert message["List-Unsubscribe"] == "<https://community.example.org/subscribe/stop>"
+    assert message["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+def test_temporary_failure_before_any_send_is_retryable(subscribers):
+    mail = ScriptedMail(accept=0, error=TransportError("busy", retryable=True))
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+    assert result.success is False
+    assert result.retryable is True
+
+
+def test_failure_after_some_sends_is_not_retried(subscribers):
+    """Retrying would mail people who already received it, so the job stops instead."""
+    mail = ScriptedMail(accept=1, error=TransportError("busy", retryable=True))
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+    assert result.success is False
+    assert result.retryable is False
+    assert "after 1 of 2" in result.error
+
+
+# Connector
+
+
+GOOD_EMAIL = {
+    "host": "smtp.example.org",
+    "port": "587",
+    "username": "announcements",
+    "password": "a-long-password",
+    "from_address": "announcements@example.org",
+    "public_url": "https://community.example.org",
+}
+
+
+def test_email_connector_is_registered_with_its_fields():
+    connector = CONNECTORS["email"]
+    names = [f.name for f in connector.fields]
+    assert names == ["host", "port", "username", "password", "from_address", "public_url"]
+    assert next(f for f in connector.fields if f.name == "password").secret is True
+
+
+PUBLIC = ["93.184.216.34"]
+
+
+def test_email_connector_builds_an_adapter_with_unsubscribe_link():
+    with mock.patch.object(http, "resolve", return_value=PUBLIC):
+        values = CONNECTORS["email"].validate(dict(GOOD_EMAIL))
+    adapter = build_connector("email", values)
+    assert isinstance(adapter, EmailNewsletterAdapter)
+    assert adapter.unsubscribe_base_url == "https://community.example.org/subscribe/stop"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("host", "localhost"),
+        ("host", "not a host"),
+        ("port", "70000"),
+        ("port", "smtp"),
+        ("from_address", "nobody"),
+        ("public_url", "http://community.example.org"),
+    ],
+)
+def test_email_connector_rejects_bad_values(field, value):
+    values = {**GOOD_EMAIL, field: value}
+    with mock.patch.object(http, "resolve", return_value=PUBLIC), pytest.raises(ValueError):
+        CONNECTORS["email"].validate(values)
+
+
+def test_email_host_must_be_public():
+    values = {**GOOD_EMAIL, "host": "mail.internal.example"}
+    with (
+        mock.patch.object(http, "resolve", return_value=["10.0.0.5"]),
+        pytest.raises(http.UnsafeURLError, match="private network"),
+    ):
+        CONNECTORS["email"].validate(values)
+
+
+def test_email_port_defaults_to_submission_port():
+    with mock.patch.object(http, "resolve", return_value=PUBLIC):
+        values = CONNECTORS["email"].validate({**GOOD_EMAIL, "port": ""})
+    assert values["port"] == "587"
