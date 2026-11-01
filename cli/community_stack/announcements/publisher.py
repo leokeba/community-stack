@@ -25,6 +25,7 @@ from community_stack.announcements.models import UNPUBLISHED, Announcement, Anno
 from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
+from community_stack.continuity.connect_page import build_site, load_identity, write_files
 from community_stack.secrets import parse_env_file
 from community_stack.subscriptions.manager import SubscriberManager
 
@@ -342,6 +343,8 @@ class AnnouncementPublisher:
                 ann.id, adapter.name, operation, self.max_attempts, claim_for=JOB_LEASE
             )
             results[adapter.name] = self._run_job(job)
+        # The /connect page follows canonical state, so refresh it even if no channel took the job.
+        self.refresh_connect_page()
         return results
 
     def process_due_jobs(self, limit: int = 20) -> int:
@@ -407,6 +410,15 @@ class AnnouncementPublisher:
         else:
             self.storage.finish_job(job_id, "failed", res.error)
         return res
+
+    def refresh_connect_page(self) -> None:
+        """Rebuild the public /connect page. A failure here must never block delivery."""
+        try:
+            profile, resolution, announcements, logo = load_identity(self.config_path, self.storage)
+            files = build_site(profile, resolution, announcements, logo)
+            write_files(self.feed_dir.parent / "connect", files)
+        except Exception:
+            logger.warning("Could not refresh the /connect page.", exc_info=True)
 
     def publish(
         self,

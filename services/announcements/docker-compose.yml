@@ -21,6 +21,7 @@ services:
     volumes:
       - ../../data/announcements:/app/data/announcements
       - ../../data/landing/feed:/app/data/landing/feed
+      - ../../data/landing/connect:/app/data/landing/connect
       - ../../community-stack.yaml:/app/community-stack.yaml:ro
       # Only the agent's socket directory; the agent's audit log and state stay out of reach.
       - ../../data/agent/run:/run/community-stack-agent

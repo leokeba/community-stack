@@ -33,6 +33,27 @@ h1 { margin: 0 0 0.5rem 0; color: #0056b3; font-size: 1.8rem; }
 """
 
 
+def write_checksummed_zip(
+    target: Path,
+    files: dict[str, bytes],
+    community_name: str,
+    exported_at: str,
+    announcements_count: int,
+) -> Path:
+    """Write files and a manifest of SHA-256 checksums into one zip, as ``verify_archive`` expects."""
+    manifest = {
+        "community_name": community_name,
+        "exported_at": exported_at,
+        "announcements_count": announcements_count,
+        "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()},
+    }
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, content in files.items():
+            zf.writestr(name, content)
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+    return target
+
+
 class OfflineArchiveExporter:
     """Exports self-contained offline HTML archives for USB or local Wi-Fi distribution."""
 
@@ -44,7 +65,9 @@ class OfflineArchiveExporter:
         self.storage = storage or AnnouncementStorage()
         self.community_name = community_name
 
-    def generate_html(self, announcements: list[Announcement], export_time: str) -> str:
+    def generate_html(
+        self, announcements: list[Announcement], export_time: str, has_connect: bool = False
+    ) -> str:
         """Render self-contained HTML page requiring zero external fonts, scripts, or assets."""
         items_html = ""
         for a in announcements:
@@ -79,18 +102,24 @@ class OfflineArchiveExporter:
     <strong>📦 OFFLINE CONTINUITY COPY</strong><br>
     Exported at: {html.escape(export_time)} UTC. No internet connection required.
   </div>
+  {'<p><a href="connect/index.html">Community contacts and channels</a></p>' if has_connect else ""}
   <main>
     {items_html if items_html else "<p>No active announcements in this archive.</p>"}
   </main>
   <footer>
-    <p><small>Exported by Community Communications Stack &bull; Cryptographically Verified</small></p>
+    <p><small>Exported by Community Communications Stack &bull; File checksums are listed in manifest.json</small></p>
   </footer>
 </body>
 </html>
 """
 
-    def export_archive(self, output_path: Path | str) -> Path:
-        """Export complete offline bundle as a standalone .zip archive."""
+    def export_archive(
+        self, output_path: Path | str, connect_files: dict[str, bytes] | None = None
+    ) -> Path:
+        """Export complete offline bundle as a standalone .zip archive.
+
+        ``connect_files`` (from ``connect_page.build_bundle``) are stored under ``connect/``.
+        """
         target = Path(output_path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -106,30 +135,19 @@ class OfflineArchiveExporter:
         ]
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Build contents
-        html_content = self.generate_html(active, now_iso)
+        html_content = self.generate_html(active, now_iso, has_connect=bool(connect_files))
         json_data = [a.to_dict() for a in active]
         json_content = json.dumps(json_data, indent=2)
 
-        # Calculate checksums
-        manifest = {
-            "community_name": self.community_name,
-            "exported_at": now_iso,
-            "announcements_count": len(active),
-            "files": {
-                "index.html": hashlib.sha256(html_content.encode("utf-8")).hexdigest(),
-                "announcements.json": hashlib.sha256(json_content.encode("utf-8")).hexdigest(),
-            },
+        files: dict[str, bytes] = {
+            "index.html": html_content.encode("utf-8"),
+            "announcements.json": json_content.encode("utf-8"),
         }
-        manifest_content = json.dumps(manifest, indent=2)
-
-        # Write into ZIP archive
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("index.html", html_content)
-            zf.writestr("announcements.json", json_content)
-            zf.writestr("manifest.json", manifest_content)
-
-        return target
+        for name, content in (connect_files or {}).items():
+            files[f"connect/{name}"] = content
+        return write_checksummed_zip(
+            target, files, self.community_name, now_iso, announcements_count=len(active)
+        )
 
     @staticmethod
     def verify_archive(archive_path: Path | str) -> tuple[bool, list[str]]:

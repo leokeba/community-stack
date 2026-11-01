@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.continuity.connect_page import offline_connect_files
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 
 
@@ -20,9 +22,13 @@ def run_archive(
         raw_out = getattr(args, "output", None) or default_out
         output_path = Path(raw_out)
 
-        exporter = OfflineArchiveExporter()
+        storage = AnnouncementStorage()
+        exporter = OfflineArchiveExporter(storage=storage)
         print("Exporting self-contained offline announcement archive...\n")
-        final_path = exporter.export_archive(output_path)
+        connect_files, warning = offline_connect_files(config_path, storage)
+        if warning:
+            print(f"  [WARN] {warning}\n")
+        final_path = exporter.export_archive(output_path, connect_files=connect_files)
 
         size_kb = final_path.stat().st_size / 1024
         print("  [SUCCESS] Offline archive exported successfully!")

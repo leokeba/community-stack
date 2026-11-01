@@ -169,10 +169,10 @@ CR2 and CR3 can run in parallel once CR1 is reviewed.
 - [ ] **CR0.2 List documentation discrepancies.** Note where the README and docs
   differ from the code, and correct anything that misleads operators, starting
   with `docs/accessible-channels.md`.
-- [ ] **CR0.3 Write `docs/COMMUNICATION_RESILIENCE.md`.** Keep it short. Cover the
+- [x] **CR0.3 Write `docs/COMMUNICATION_RESILIENCE.md`.** Keep it short. Cover the
   proposed architecture, data ownership and canonical content flow, new data
   models and configuration, phase dependencies, and security and privacy.
-- [ ] **CR0.4 Write `docs/decisions/0008-communication-resilience.md`.** Record
+- [x] **CR0.4 Write `docs/decisions/0008-communication-resilience.md`.** Record
   section 4 and the resolved open decisions from section 16.
 - [ ] **CR0.5 Reconcile with `docs/ROADMAP.md`.** Link this track from it, and
   update B8 and the email connector row to match decision D1.
@@ -220,47 +220,47 @@ community:
 
 ### Tasks
 
-- [ ] **CR1.1 Extend the schema.** Add `community` to `config/schema.json` (the
+- [x] **CR1.1 Extend the schema.** Add `community` to `config/schema.json` (the
   root sets `additionalProperties: false`) and `config/example.yaml`. Validate URLs
   and supported platform and channel types. Keep the block optional, so existing
   configs stay valid and fall back to `project.name` and `domain.web`.
-- [ ] **CR1.2 Add a profile loader.** Create `cli/community_stack/community.py`
+- [x] **CR1.2 Add a profile loader.** Create `cli/community_stack/community.py`
   and use it in place of the `project.name` lookups in `publisher.py` and
   `admin/app.py`. Pass it to `OfflineArchiveExporter` too, which `archive export`
   currently runs with a placeholder name.
-- [ ] **CR1.3 Resolve independent channels.** Build the list from what is really
+- [x] **CR1.3 Resolve independent channels.** Build the list from what is really
   available: website, RSS, Atom, JSON Feed, `/subscribe`, Matrix, ActivityPub.
   Apply the `independent` show/hide overrides. List Matrix only when people can
   actually join it, given federation and registration settings.
-- [ ] **CR1.4 Render the page.** Add `continuity/connect_page.py` with a Jinja2
+- [x] **CR1.4 Render the page.** Add `continuity/connect_page.py` with a Jinja2
   template that writes `data/landing/connect/index.html`. The page introduces the
   community, separates social networks from independent channels, gives subscription
   links, shows recent public announcements, and explains where to find the community
   if a platform becomes unavailable.
-- [ ] **CR1.5 Serve it.** Mount `data/landing/connect` read-only in the landing
+- [x] **CR1.5 Serve it.** Mount `data/landing/connect` read-only in the landing
   compose file and writable in the announcements compose file. Create the directory
   with the right owner during provisioning and deployment, because Docker would
   otherwise create it as root. Check that `/connect` and `/connect/` both end on
   the HTTPS page.
-- [ ] **CR1.6 Add rebuild triggers.** Rebuild after publish, update and withdraw,
+- [x] **CR1.6 Add rebuild triggers.** Rebuild after publish, update and withdraw,
   after a profile save, and at worker start. Trigger from the publisher so the page
   does not depend on the `web_feed` channel being enabled.
-- [ ] **CR1.7 Handle images.** Process logo and cover uploads through
+- [x] **CR1.7 Handle images.** Process logo and cover uploads through
   `announcements/media.py`, which strips metadata. Accept raster formats only until
   SVG sanitising exists, because the page shares an origin with `/admin`.
 - [ ] **CR1.8 Add console editing.** Add a Community profile page and a structured
   agent operation that validates against the schema, backs up, rewrites only the
   `community:` block, and writes an audit event. Require the `settings` permission.
-- [ ] **CR1.9 Add QR codes.** Generate SVG and PNG with `segno`, defaulting to
+- [x] **CR1.9 Add QR codes.** Generate SVG and PNG with `segno`, defaulting to
   `<community.url>/connect` with a configurable destination. Include a quiet zone
   and print-suitable sizing. Warn if the destination is outside `domain.base`, since
   a hosting-provider URL would not survive a migration.
-- [ ] **CR1.10 Add the CLI.** Add `commands/connect_cmd.py` with `connect show`,
+- [x] **CR1.10 Add the CLI.** Add `commands/connect_cmd.py` with `connect show`,
   `connect generate-qr` and `connect export`.
-- [ ] **CR1.11 Extend the offline archive.** Add the page, QR codes and a
+- [x] **CR1.11 Extend the offline archive.** Add the page, QR codes and a
   machine-readable `community.json` to `OfflineArchiveExporter`, using relative links.
   Replace the "Cryptographically Verified" footer with an accurate statement.
-- [ ] **CR1.12 Link the portal.** Link `/connect` from `index.html`, `lite.html`
+- [x] **CR1.12 Link the portal.** Link `/connect` from `index.html`, `lite.html`
   and announcement pages.
 - [ ] **CR1.13 Update documentation.** Update `README.md`, `docs/operations.md`,
   `docs/deployment.md`, `docs/backup-restore.md` and `CHANGELOG.md`.
@@ -299,7 +299,7 @@ announcements in under a minute, without creating an account.
 
 ### Tasks
 
-- [ ] **CR2.1 Unify the subscriber database.** Point the CLI at
+- [x] **CR2.1 Unify the subscriber database.** Point the CLI at
   `data/announcements/subscribers.db` and merge any rows from the old path without
   overwriting existing records. This is a bug fix and can ship ahead of the phase.
 - [ ] **CR2.2 Record consent.** Add a `pending` status and columns for consent

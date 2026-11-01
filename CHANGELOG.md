@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Communication resilience, phase CR1 (contact page):**
+  - Optional `community:` configuration block: name, description, canonical URL, logo, contact, emergency instructions, social accounts and independent channel switches. Schema-validated; older configurations still work.
+  - Public `/connect` page, generated as static HTML: no JavaScript, printable, with channels that work listed and unavailable ones hidden.
+  - `community-stack connect show | render | generate-qr | export`, with SVG and PNG QR codes.
+  - Identity files included in offline archives; the archive footer no longer claims cryptographic verification.
+- Design roadmap in `docs/COMMUNICATION_RESILIENCE_ROADMAP.md`.
 - **Milestone 0: Reconnaissance and Architecture Decisions:**
   - Initial threat model (`docs/threat-model.md`).
   - Architecture documentation (`docs/architecture.md`).

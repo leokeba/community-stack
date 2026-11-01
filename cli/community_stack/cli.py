@@ -12,6 +12,7 @@ from community_stack.commands.archive_cmd import run_archive
 from community_stack.commands.backup_cmd import run_backup, run_backup_verify
 from community_stack.commands.bridge_cmd import run_bridge
 from community_stack.commands.check_cmd import run_check
+from community_stack.commands.connect_cmd import run_connect
 from community_stack.commands.init_cmd import run_init
 from community_stack.commands.install_cmd import run_install
 from community_stack.commands.logs_cmd import run_logs
@@ -282,6 +283,34 @@ def create_parser() -> argparse.ArgumentParser:
     p_arc_verify = archive_subs.add_parser("verify", help="Verify offline archive bundle")
     p_arc_verify.add_argument("path", help="Path to offline archive file")
 
+    # connect
+    p_connect = subparsers.add_parser(
+        "connect", help="Show the community's stable /connect page, QR codes and identity package"
+    )
+    p_connect.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+    connect_subs = p_connect.add_subparsers(dest="connect_action", help="Connect actions")
+    connect_subs.add_parser("show", help="Show the identity and which channels are listed")
+    p_con_qr = connect_subs.add_parser("generate-qr", help="Write printable QR codes (SVG and PNG)")
+    p_con_qr.add_argument(
+        "--format", choices=("svg", "png", "both"), default="both", help="Image format"
+    )
+    p_con_qr.add_argument(
+        "--destination", help="Address the QR code opens (default: the /connect page)"
+    )
+    p_con_qr.add_argument("--output-dir", help="Output folder (default: backups/connect-qr)")
+    p_con_export = connect_subs.add_parser(
+        "export", help="Export the identity package as a checksummed zip"
+    )
+    p_con_export.add_argument(
+        "-o", "--output", help="Target path (default: backups/community-identity.zip)"
+    )
+    p_con_render = connect_subs.add_parser("render", help="Rebuild the live /connect page now")
+    p_con_render.add_argument(
+        "--output-dir", help="Folder served as /connect (default: data/landing/connect)"
+    )
+
     return parser
 
 
@@ -353,6 +382,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_subscribers(args=args)
     elif args.command == "archive":
         return run_archive(args=args)
+    elif args.command == "connect":
+        return run_connect(args=args)
     else:
         parser.print_help()
         return 2

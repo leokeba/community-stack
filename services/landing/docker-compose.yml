@@ -6,6 +6,7 @@ services:
     volumes:
       - ./html:/usr/share/nginx/html:ro
       - ../../data/landing/feed:/usr/share/nginx/html/feed:ro
+      - ../../data/landing/connect:/usr/share/nginx/html/connect:ro
     networks:
       - proxy_net
     healthcheck:

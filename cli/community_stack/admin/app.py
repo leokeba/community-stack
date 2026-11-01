@@ -77,6 +77,7 @@ from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, norm
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
+from community_stack.continuity.connect_page import offline_connect_files
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
@@ -2380,9 +2381,10 @@ def create_app(
             name = load_config(config_path)["project"]["name"]
         except (ConfigError, KeyError, OSError):
             name = "Community"
+        connect_files, _warning = offline_connect_files(config_path, storage)
         with tempfile.TemporaryDirectory() as directory:
             path = OfflineArchiveExporter(storage=storage, community_name=name).export_archive(
-                Path(directory) / "offline-announcements.zip"
+                Path(directory) / "offline-announcements.zip", connect_files=connect_files
             )
             content = path.read_bytes()
         audit(request, session["username"], "announcements.offline_archive_downloaded")

@@ -232,6 +232,33 @@ cd /opt/community-stack
 This prints a temporary password once, signs the account out everywhere,
 re-enables it if it was disabled, and records the reset in the activity log.
 
+### Contact page (/connect)
+
+Every community gets a stable page at `https://<your domain>/connect/` that lists
+its official channels, social network accounts, an emergency note and recent
+announcements. It is plain HTML with no JavaScript, so it still loads when the
+announcements app is down. Put that address in every social profile.
+
+Describe the community in the optional `community:` block of
+`community-stack.yaml` (see `config/example.yaml`). Missing settings fall back
+to the project name and web domain, so older configurations keep working.
+
+```bash
+uv run community-stack connect show            # what the page lists, and why a channel is hidden
+uv run community-stack connect render          # rebuild the page now
+uv run community-stack connect generate-qr     # printable QR codes (SVG and PNG)
+uv run community-stack connect export          # identity package: page, QR codes, community.json
+```
+
+The page is also rebuilt after every publish, edit or withdrawal. Logos are
+re-encoded so metadata such as GPS location is removed; PNG, JPEG and WebP only.
+Print QR codes at least 3 cm square. Offline archives include the same files
+under `connect/`.
+
+Before the first `connect render` on a new server, create the folder that the
+landing page serves, owned by the announcements container's user:
+`data/landing/connect` (UID/GID 1000 by default).
+
 ### Delivery retries
 
 Drafts can be scheduled from the announcement page or with `announce
