@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import mimetypes
 import os
@@ -76,6 +77,7 @@ from community_stack.announcements.models import (
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
 from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.community import SOCIAL_PLATFORMS, connection_warnings, load_community
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
 from community_stack.continuity.connect_page import offline_connect_files
@@ -83,12 +85,18 @@ from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 from community_stack.subscriptions.email_signup import (
     EMAIL_CONSENT_TEXT,
     EMAIL_CONSENT_VERSION,
+    PRIVACY_NOTICE_REVIEWED,
     SIGNUP_SOURCE,
     confirmation_message,
     read_unsubscribe_token,
+    test_message,
 )
 from community_stack.subscriptions.email_transport import TransportError
-from community_stack.subscriptions.manager import Subscriber, SubscriberManager
+from community_stack.subscriptions.manager import (
+    Subscriber,
+    SubscriberManager,
+    validate_destination,
+)
 
 # What each sign-up choice receives. Announcements tagged 'important' reach the second group.
 PREFERENCE_TOPICS: dict[str, list[str]] = {"all": [], "important": ["important"]}
@@ -105,6 +113,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 WORKER_INTERVAL_SECONDS = 15.0
 MAX_INBOX_BYTES = 256 * 1024
 DEFAULT_AGENT_SOCKET = "/run/community-stack-agent/agent.sock"
+SOCIAL_ROWS = 5
 # Everything a console page uses is served from here; nothing is loaded from elsewhere.
 CONSOLE_CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
@@ -591,6 +600,8 @@ def create_app(
                 "email": "",
                 "token": "",
                 "masked": "",
+                "reviewed": PRIVACY_NOTICE_REVIEWED,
+                "contact": "",
                 **context,
             },
             status_code=status_code,
@@ -601,6 +612,20 @@ def create_app(
     def unsubscribe_secret_bytes() -> bytes | None:
         secret = storage.get_setting("subscriber_token_secret", "")
         return secret.encode() if secret else None
+
+    @app.get("/subscribe/email/privacy")
+    async def email_privacy_notice(request: Request) -> Response:
+        try:
+            profile, _config = load_community(config_path)
+            contact = profile.contact_email or ""
+        except (ConfigError, OSError):
+            contact = ""
+        return email_signup_page(
+            request,
+            "privacy",
+            reviewed=PRIVACY_NOTICE_REVIEWED,
+            contact=contact,
+        )
 
     @app.get("/subscribe/email")
     async def email_signup_form(request: Request) -> Response:
@@ -720,6 +745,131 @@ def create_app(
             return email_signup_page(request, "invalid", 400)
         adapter.subscriber_manager.unsubscribe("email", address)
         return email_signup_page(request, "unsubscribed")
+
+    # Subscribers console (CR2.10, CR2.13). Owners and admins only.
+
+    def subscriber_records() -> tuple[dict[str, int], list[dict[str, str]]]:
+        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
+        email = manager.export_records()
+        counts = {
+            "email_active": sum(1 for r in email if r["status"] == "active"),
+            "email_pending": sum(1 for r in email if r["status"] == "pending"),
+            "email_unsubscribed": sum(1 for r in email if r["status"] == "unsubscribed"),
+            "sms_active": len(manager.list_subscribers(channel="sms")),
+        }
+        rows = []
+        for record in email:
+            consent = record["consent_source"] or "not recorded"
+            if record["consent_source"] == "legacy":
+                consent = "recorded before consent tracking"
+            elif record["consent_at"]:
+                consent = f"{record['consent_at'][:10]}, {record['consent_source']}"
+            rows.append(
+                {
+                    "address": record["destination"],
+                    "masked": Subscriber(
+                        channel="email", destination=record["destination"]
+                    ).mask_destination(),
+                    "status": record["status"],
+                    "consent": consent,
+                    "topics": ", ".join(record["topics"]) or "everything",
+                }
+            )
+        return counts, rows
+
+    @app.get("/admin/subscribers")
+    async def subscribers_page(request: Request) -> Response:
+        session = require(request, "settings")
+        counts, records = subscriber_records()
+        return render(
+            request,
+            "subscribers.html",
+            page(
+                session,
+                counts=counts,
+                records=records,
+                reviewed=PRIVACY_NOTICE_REVIEWED,
+                warnings=connection_warnings(storage.list_connections()),
+            ),
+        )
+
+    @app.get("/admin/subscribers/export")
+    async def subscribers_export(request: Request) -> Response:
+        session = require(request, "settings")
+        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
+        body = json.dumps(
+            {"format": "community-stack/subscribers", "records": manager.export_records()},
+            indent=2,
+        )
+        audit(request, session["username"], "subscribers.exported")
+        return Response(
+            body,
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="subscribers-export.json"'},
+        )
+
+    @app.post("/admin/subscribers/erase")
+    async def subscribers_erase(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        address = form.get("address", "").strip().lower()
+        masked = Subscriber(channel="email", destination=address).mask_destination()
+        if form.get("confirm") != "yes":
+            raise HTTPException(status_code=400, detail="Tick the box to confirm erasure.")
+        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
+        erased = manager.delete_subscriber("email", address)
+        audit(
+            request,
+            session["username"],
+            "subscribers.erased",
+            masked,
+            outcome="succeeded" if erased else "not_found",
+        )
+        message = (
+            flash(f"Erased everything held about {masked}.")
+            if erased
+            else flash("No record was found for that address.", "warning")
+        )
+        return redirect_with(request, "/admin/subscribers", message)
+
+    @app.post("/admin/subscribers/test-email")
+    async def subscribers_test_email(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        address = form.get("to", "").strip()
+        masked = Subscriber(channel="email", destination=address).mask_destination()
+        try:
+            validate_destination("email", address)
+        except ValueError:
+            return redirect_with(
+                request, "/admin/subscribers", flash("Enter a valid email address.", "error")
+            )
+        adapter = email_adapter()
+        if adapter is None or adapter.unsubscribe_secret is None:
+            return redirect_with(
+                request,
+                "/admin/subscribers",
+                flash("No email server is connected. Connect one on the Channels page.", "error"),
+            )
+        message = test_message(
+            adapter.from_address,
+            address,
+            community_name(),
+            adapter.unsubscribe_url(address),
+        )
+        try:
+            await run_in_threadpool(adapter.transport.send, message)
+        except TransportError as exc:
+            audit(request, session["username"], "subscribers.test_sent", masked, outcome="failed")
+            return redirect_with(
+                request,
+                "/admin/subscribers",
+                flash(f"The test was not sent: {exc}", "error"),
+            )
+        audit(request, session["username"], "subscribers.test_sent", masked, outcome="succeeded")
+        return redirect_with(
+            request,
+            "/admin/subscribers",
+            flash(f"Test email sent to {masked}. Check the inbox and spam folder."),
+        )
 
     @app.get("/.well-known/webfinger")
     async def webfinger(request: Request) -> Response:
@@ -1648,6 +1798,122 @@ def create_app(
         )
         text = f"Retried {len(results)} failed deliveries." if results else "Nothing to retry."
         return redirect_with(request, f"/admin/announcements/{announcement_id}", flash(text))
+
+    # Community profile (CR1.8). Read from the configuration; saved through the agent.
+    community_labels = {
+        "website": "Our website",
+        "email": "Email updates",
+        "matrix": "Matrix chat room",
+        "activitypub": "Fediverse account",
+        "rss": "Feeds (RSS, Atom and JSON Feed)",
+    }
+
+    def community_form_values(form: dict[str, str]) -> dict[str, Any]:
+        social = []
+        for index in range(SOCIAL_ROWS):
+            social.append(
+                {
+                    "platform": form.get(f"social_platform_{index}", "").strip(),
+                    "url": form.get(f"social_url_{index}", "").strip(),
+                    "handle": form.get(f"social_handle_{index}", "").strip(),
+                }
+            )
+        return {
+            "name": form.get("name", ""),
+            "description": form.get("description", ""),
+            "url": form.get("url", ""),
+            "logo": form.get("logo", ""),
+            "contact_email": form.get("contact_email", ""),
+            "emergency_instructions": form.get("emergency_instructions", ""),
+            "social": social,
+            "independent": {
+                key: form.get(f"independent_{key}") == "on" for key in community_labels
+            },
+        }
+
+    def community_current_values() -> dict[str, Any]:
+        try:
+            raw = load_config(config_path).get("community") or {}
+        except (ConfigError, OSError):
+            raw = {}
+        social = [dict(item) for item in raw.get("social", [])][:SOCIAL_ROWS]
+        social += [{}] * (SOCIAL_ROWS - len(social))
+        independent = raw.get("independent") or {}
+        return {
+            "name": raw.get("name", ""),
+            "description": raw.get("description", ""),
+            "url": raw.get("url", ""),
+            "logo": raw.get("logo", ""),
+            "contact_email": (raw.get("contact") or {}).get("email", ""),
+            "emergency_instructions": raw.get("emergency_instructions", ""),
+            "social": social,
+            "independent": {
+                key: bool(independent.get(key, key in ("website", "rss")))
+                for key in community_labels
+            },
+        }
+
+    def community_page(
+        request: Request,
+        session: dict[str, Any],
+        values: dict[str, Any],
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        social_rows = [
+            {
+                "platform": item.get("platform", ""),
+                "url": item.get("url", ""),
+                "handle": item.get("handle", ""),
+            }
+            for item in values["social"]
+        ]
+        return render(
+            request,
+            "community.html",
+            page(
+                session,
+                v={**values, "social": social_rows},
+                social_rows=social_rows,
+                platforms=list(SOCIAL_PLATFORMS.items()),
+                channels=list(community_labels.items()),
+                flash_error=error,
+            ),
+            status_code=status_code,
+        )
+
+    @app.get("/admin/community")
+    async def community_profile_page(request: Request) -> Response:
+        session = require(request, "settings")
+        return community_page(request, session, community_current_values())
+
+    @app.post("/admin/community")
+    async def community_profile_save(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        values = community_form_values(form)
+        try:
+            await run_in_threadpool(
+                agent.call, "community.apply", session["username"], {"community": values}
+            )
+        except AgentUnavailable:
+            audit(request, session["username"], "community.updated", outcome="failed")
+            return community_page(
+                request,
+                session,
+                values,
+                "The control agent is not running, so nothing was saved.",
+                503,
+            )
+        except AgentRefused as exc:
+            audit(request, session["username"], "community.updated", outcome="refused")
+            return community_page(request, session, values, str(exc), 400)
+        publisher.refresh_connect_page()
+        audit(request, session["username"], "community.updated", outcome="succeeded")
+        return redirect_with(
+            request,
+            "/admin/community",
+            flash("Community profile saved. The contact page is updated."),
+        )
 
     @app.get("/admin/settings")
     async def settings_page(request: Request) -> Response:

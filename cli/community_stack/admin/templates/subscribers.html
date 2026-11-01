@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Subscribers{% endblock %}
+{% block content %}
+<h1>Subscribers</h1>
+<p class="page-intro">The people who receive announcements by email or text. Addresses are masked here. Anyone can ask for their record, or for it to be deleted; both are done from this page and are recorded in the activity log.</p>
+{% for warning in warnings %}
+<p class="flash error" role="alert">{{ warning }}</p>
+{% endfor %}
+{% if not reviewed %}
+<p class="flash error" role="alert">The consent and privacy wording has not yet been reviewed by a legal reviewer (decision D3). Do not invite the public to sign up until it has been.</p>
+{% endif %}
+<section class="card">
+  <h2>Counts</h2>
+  <ul>
+    <li>Email, active: {{ counts.email_active }}</li>
+    <li>Email, waiting for confirmation: {{ counts.email_pending }}</li>
+    <li>Email, unsubscribed: {{ counts.email_unsubscribed }}</li>
+    <li>Text messages, active: {{ counts.sms_active }}</li>
+  </ul>
+  <p><a href="/admin/subscribers/export">Download every record (JSON)</a></p>
+</section>
+<section class="card">
+  <h2>Send a test email</h2>
+  <p class="muted">Sends one message to an address you choose, with a working unsubscribe link. Nobody is subscribed by this.</p>
+  <form method="post" action="/admin/subscribers/test-email">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="test_to">Address to test</label>
+    <input id="test_to" name="to" type="email" required>
+    <p><button type="submit">Send test email</button></p>
+  </form>
+</section>
+<section class="card">
+  <h2>Email records</h2>
+  {% if records %}
+  <table>
+    <thead><tr><th scope="col">Address</th><th scope="col">Status</th><th scope="col">Consent</th><th scope="col">Receives</th><th scope="col">Remove</th></tr></thead>
+    <tbody>
+    {% for r in records %}
+      <tr>
+        <td>{{ r.masked }}</td>
+        <td>{{ r.status }}</td>
+        <td>{{ r.consent }}</td>
+        <td>{{ r.topics }}</td>
+        <td>
+          <form method="post" action="/admin/subscribers/erase">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="address" value="{{ r.address }}">
+            <label><input type="checkbox" name="confirm" value="yes" required> Erase permanently</label>
+            <button type="submit">Erase</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No email records yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

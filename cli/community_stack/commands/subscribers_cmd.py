@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from email.message import EmailMessage
 from pathlib import Path
 
-from community_stack.subscriptions.email_signup import EMAIL_CONSENT_TEXT, EMAIL_CONSENT_VERSION
+from community_stack.subscriptions.email_signup import (
+    EMAIL_CONSENT_TEXT,
+    EMAIL_CONSENT_VERSION,
+    test_message,
+)
 from community_stack.subscriptions.manager import (
     Subscriber,
     SubscriberManager,
@@ -158,17 +161,11 @@ def _test_email(args: argparse.Namespace) -> int:
         print("[ERROR] No email server is connected. Connect one on the Channels page first.")
         return 1
 
-    message = EmailMessage()
-    message["Subject"] = f"Test message from {profile.name}"
-    message["From"] = adapter.from_address
-    message["To"] = address
-    message["List-Unsubscribe"] = f"<{adapter.unsubscribe_url(address)}>"
-    message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-    message.set_content(
-        f"This is a test from {profile.name}. Nothing else was sent, and you have not been "
-        "subscribed.\n\n"
-        "If you can read this, email delivery is working. Check that it did not land in spam.\n\n"
-        f"To stop any future emails: {adapter.unsubscribe_url(address)}\n"
+    message = test_message(
+        adapter.from_address,
+        address,
+        profile.name,
+        adapter.unsubscribe_url(address),
     )
     try:
         adapter.transport.send(message)

@@ -48,6 +48,8 @@
           {{ nav_link("/admin/channels", "Channels", match=("/admin/channels", "/admin/whatsapp")) }}
           {{ nav_link("/admin/mirroring", "Mirrored rooms") }}
           {{ nav_link("/admin/settings", "Publishing settings") }}
+          {{ nav_link("/admin/community", "Community profile") }}
+          {{ nav_link("/admin/subscribers", "Subscribers") }}
         </div>
         {% endif %}
         {% if perms.accounts or perms.system %}

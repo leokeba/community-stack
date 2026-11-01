@@ -14,6 +14,7 @@ import yaml
 
 from community_stack import docker
 from community_stack.agent import backups, health, matrix_admin, updates
+from community_stack.agent import community as community_profile
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.config import ConfigError, load_config
@@ -160,6 +161,19 @@ def _changes_param(params: dict) -> dict[str, Any]:
     except settings_catalog.SettingsError as exc:
         raise OperationError(str(exc)) from exc
     return {"changes": params["changes"]}
+
+
+def _community_param(params: dict) -> dict[str, Any]:
+    if set(params) != {"community"} or not isinstance(params["community"], dict):
+        raise OperationError("Send the community profile as 'community'.")
+    return {"community": params["community"]}
+
+
+def community_apply(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return community_profile.apply(context, params["community"])
+    except community_profile.CommunityError as exc:
+        raise OperationError(str(exc)) from exc
 
 
 def _backup_settings_call(handler):
@@ -353,6 +367,14 @@ CATALOG: dict[str, Operation] = {
             custom_validate=_changes_param,
             needs_password=lambda params: settings_catalog.requires_password(params["changes"]),
             summary="Back up, change settings, start or stop services, and roll back on failure.",
+        ),
+        Operation(
+            "community.apply",
+            CHANGE,
+            "settings",
+            community_apply,
+            custom_validate=_community_param,
+            summary="Save the community profile: name, contact, social accounts and channel choices.",
         ),
         Operation(
             "restore.drill",

@@ -20,7 +20,7 @@
 <main>
   <h1>{{ community }} email updates</h1>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-  {% if not available %}
+  {% if not available and step != "privacy" %}
   <p>Email updates are not available yet.</p>
   {% elif step == "form" %}
   <p>Get public announcements in your inbox. We send a confirmation link to your address first, so nobody can sign you up without access to it.</p>
@@ -37,6 +37,7 @@
     <p><label><input type="checkbox" name="consent" value="yes" required> {{ consent_text }}</label></p>
     <p><button type="submit">Send me a confirmation link</button></p>
   </form>
+  <p class="muted"><a href="/subscribe/email/privacy">How we use your address</a>.</p>
   <p class="muted">Your address is used only for these announcements and is never shared. Prefer no email? <a href="/feed/rss.xml">Follow the RSS feed</a>, or <a href="/subscribe">get text alerts</a>.</p>
   {% elif step == "check" %}
   <p class="notice" role="status">If that address can receive email, we have sent it a confirmation link. The link works once and expires in three days. Check your spam folder if it does not arrive.</p>
@@ -56,6 +57,15 @@
   </form>
   {% elif step == "unsubscribed" %}
   <p class="notice" role="status">You will not receive any more announcements from {{ community }}.</p>
+  {% elif step == "privacy" %}
+  <h2>How we use your email address</h2>
+  {% if not reviewed %}<p class="muted"><em>Draft. This wording has not yet been reviewed for legal compliance.</em></p>{% endif %}
+  <p><strong>Who we are:</strong> {{ community }}{% if contact %}, contact <a href="mailto:{{ contact }}">{{ contact }}</a>{% endif %}.</p>
+  <p><strong>What we keep:</strong> your email address, when you agreed and to which version of this notice, how you agreed, which announcements you chose, and whether you are subscribed.</p>
+  <p><strong>Why:</strong> we send you public announcements from {{ community }} because you asked us to. We do not sell or share your address, and we do not add tracking to these emails.</p>
+  <p><strong>How long:</strong> until you unsubscribe or ask us to erase your record. Sign-ups never confirmed are removed after seven days.</p>
+  <p><strong>Your choices:</strong> you can stop at any time with the link in every email. You can ask for a copy of your record, correct it, or have it erased, by writing to us. You may also complain to your data protection authority, which in France is the CNIL.</p>
+  <p class="muted"><a href="/subscribe/email">Back to sign-up</a></p>
   {% elif step == "invalid" %}
   <p class="error" role="alert">This link is not valid. Use the newest email from us, or ask the community to help.</p>
   {% endif %}

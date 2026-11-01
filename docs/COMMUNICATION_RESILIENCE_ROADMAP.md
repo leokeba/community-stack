@@ -248,7 +248,7 @@ community:
 - [x] **CR1.7 Handle images.** Process logo and cover uploads through
   `announcements/media.py`, which strips metadata. Accept raster formats only until
   SVG sanitising exists, because the page shares an origin with `/admin`.
-- [ ] **CR1.8 Add console editing.** Add a Community profile page and a structured
+- [x] **CR1.8 Add console editing.** Add a Community profile page and a structured
   agent operation that validates against the schema, backs up, rewrites only the
   `community:` block, and writes an audit event. Require the `settings` permission.
 - [x] **CR1.9 Add QR codes.** Generate SVG and PNG with `segno`, defaulting to
@@ -262,7 +262,7 @@ community:
   Replace the "Cryptographically Verified" footer with an accurate statement.
 - [x] **CR1.12 Link the portal.** Link `/connect` from `index.html`, `lite.html`
   and announcement pages.
-- [ ] **CR1.13 Update documentation.** Update `README.md`, `docs/operations.md`,
+- [x] **CR1.13 Update documentation.** Update `README.md`, `docs/operations.md`,
   `docs/deployment.md`, `docs/backup-restore.md` and `CHANGELOG.md`.
 
 ### Page requirements
@@ -319,7 +319,7 @@ announcements in under a minute, without creating an account.
   RFC 8058 headers. Add a send ledger keyed by announcement, operation and subscriber
   so a retry skips people already mailed. Send in batches that fit the 5-minute job
   lease, or renew the lease.
-- [ ] **CR2.6 Build the public form.** Rework `/subscribe` into a page offering
+- [x] **CR2.6 Build the public form.** Rework `/subscribe` into a page offering
   email, SMS and feeds, with a mail address field, preference choice, unticked consent
   box and privacy notice. Reuse the existing CSRF, honeypot and hashed rate-limit
   approach, limited per address and per client. Give the same response whether or
@@ -341,7 +341,7 @@ announcements in under a minute, without creating an account.
   `announcements.db` already is, and add a restore test.
 - [x] **CR2.12 Handle listmonk overlap.** Warn when native email and listmonk are
   both connected, since members could be mailed twice.
-- [ ] **CR2.13 Help with deliverability.** Add a test-send button and SPF, DKIM and
+- [x] **CR2.13 Help with deliverability.** Add a test-send button and SPF, DKIM and
   DMARC guidance. Send no tracking pixels.
 - [ ] **CR2.14 Write the privacy wording.** Publish a notice that names the community
   from its profile, states what is stored and why, and explains how to leave. Have the

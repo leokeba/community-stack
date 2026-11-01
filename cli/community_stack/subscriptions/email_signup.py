@@ -12,6 +12,8 @@ import hmac
 import secrets
 from email.message import EmailMessage
 
+# Set to True only after decision D3 (legal review) has signed off the wording below.
+PRIVACY_NOTICE_REVIEWED = False
 EMAIL_CONSENT_VERSION = "2026-11-email"
 EMAIL_CONSENT_TEXT = (
     "I agree to receive public announcements from this community by email. "
@@ -65,5 +67,27 @@ def confirmation_message(
         "The link works once and expires in three days.\n\n"
         "If you did not ask for this, ignore this message. Nothing will be sent to you.\n\n"
         f"{EMAIL_CONSENT_TEXT}\n"
+    )
+    return msg
+
+
+def test_message(
+    from_address: str,
+    to_address: str,
+    community: str,
+    unsubscribe_url: str,
+) -> EmailMessage:
+    """A delivery test. It subscribes nobody, and it carries a working unsubscribe link."""
+    msg = EmailMessage()
+    msg["Subject"] = f"Test message from {community}"
+    msg["From"] = from_address
+    msg["To"] = to_address
+    msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+    msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    msg.set_content(
+        f"This is a test from {community}. Nothing else was sent, and you have not been "
+        "subscribed.\n\n"
+        "If you can read this, email delivery is working. Check that it did not land in spam.\n\n"
+        f"To stop any future emails: {unsubscribe_url}\n"
     )
     return msg

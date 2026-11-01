@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Community profile{% endblock %}
+{% block content %}
+<h1>Community profile</h1>
+<p class="page-intro">This is what people see on the <a href="/connect/">contact page</a>: who you are, how to reach you, and where to find you. Saving it updates the page and the offline package. Changes are backed up first.</p>
+{% if flash_error %}<p class="flash error" role="alert">{{ flash_error }}</p>{% endif %}
+<form class="card" method="post" action="/admin/community">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>Who you are</h2>
+  <label for="name">Community name</label>
+  <input id="name" name="name" type="text" maxlength="80" required value="{{ v.name }}">
+  <label for="description">Short description</label>
+  <textarea id="description" name="description" rows="2" maxlength="400">{{ v.description }}</textarea>
+  <label for="url">Main web address (https)</label>
+  <input id="url" name="url" type="url" maxlength="200" placeholder="https://community.example.org" value="{{ v.url }}">
+  <p class="muted">Leave empty to use the web address this server answers on.</p>
+  <label for="logo">Logo file name</label>
+  <input id="logo" name="logo" type="text" maxlength="90" placeholder="logo.png" value="{{ v.logo }}">
+  <p class="muted">Copy the image next to community-stack.yaml on the server first. PNG, JPEG or WebP.</p>
+  <label for="contact_email">Contact email</label>
+  <input id="contact_email" name="contact_email" type="email" maxlength="254" value="{{ v.contact_email }}">
+  <label for="emergency_instructions">If social networks are unavailable</label>
+  <textarea id="emergency_instructions" name="emergency_instructions" rows="4" maxlength="1000">{{ v.emergency_instructions }}</textarea>
+  <p class="muted">Plain instructions for reaching members if the platforms are down. Blank lines start new paragraphs.</p>
+  <h2>Social network accounts</h2>
+  <p class="muted">Official accounts that people can follow. Leave a row empty to skip it.</p>
+  {% for row in social_rows %}
+  <fieldset>
+    <legend>Account {{ loop.index }}</legend>
+    <label for="social_platform_{{ loop.index0 }}">Platform</label>
+    <select id="social_platform_{{ loop.index0 }}" name="social_platform_{{ loop.index0 }}">
+      <option value="">Choose a platform</option>
+      {% for key, label in platforms %}
+      <option value="{{ key }}" {% if row.platform == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <label for="social_url_{{ loop.index0 }}">Address</label>
+    <input id="social_url_{{ loop.index0 }}" name="social_url_{{ loop.index0 }}" type="url" maxlength="200" value="{{ row.url }}">
+    <label for="social_handle_{{ loop.index0 }}">Handle, such as @riverside</label>
+    <input id="social_handle_{{ loop.index0 }}" name="social_handle_{{ loop.index0 }}" type="text" maxlength="64" value="{{ row.handle }}">
+  </fieldset>
+  {% endfor %}
+  <h2>Independent channels</h2>
+  <p class="muted">Tick the channels you want listed. A channel is listed only if it also works: email needs a connected mail server, and a chat room needs a connected Matrix room.</p>
+  {% for key, label in channels %}
+  <p><label><input type="checkbox" name="independent_{{ key }}" value="on" {% if v.independent[key] %}checked{% endif %}> {{ label }}</label></p>
+  {% endfor %}
+  <p><button type="submit">Save profile</button></p>
+</form>
+{% endblock %}

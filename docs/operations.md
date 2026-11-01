@@ -239,8 +239,11 @@ its official channels, social network accounts, an emergency note and recent
 announcements. It is plain HTML with no JavaScript, so it still loads when the
 announcements app is down. Put that address in every social profile.
 
-Describe the community in the optional `community:` block of
-`community-stack.yaml` (see `config/example.yaml`). Missing settings fall back
+Edit the profile on the console's **Community profile** page, which saves
+through the control agent: validated, backed up first, and the previous file
+kept. You can also describe the community in the optional `community:` block of
+`community-stack.yaml` (see `config/example.yaml`); the console keeps the rest of
+the file as it is but replaces comments inside the `community:` block. Missing settings fall back
 to the project name and web domain, so older configurations keep working.
 
 ```bash
