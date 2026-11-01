@@ -166,7 +166,7 @@ CR2 and CR3 can run in parallel once CR1 is reviewed.
   `uv run pytest` baseline. Cover the announcement lifecycle and storage, portal
   and feed generation, Matrix and other adapters, subscribers and consent, backups
   and offline archives, CLI and config conventions, and deployment and Ansible.
-- [ ] **CR0.2 List documentation discrepancies.** Note where the README and docs
+- [x] **CR0.2 List documentation discrepancies.** Note where the README and docs
   differ from the code, and correct anything that misleads operators, starting
   with `docs/accessible-channels.md`.
 - [x] **CR0.3 Write `docs/COMMUNICATION_RESILIENCE.md`.** Keep it short. Cover the

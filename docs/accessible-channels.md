@@ -1,15 +1,21 @@
 # Accessible Channels & Multi-Platform Distribution
 
-This document records channel design and evaluation. It is not a deployment guide or a claim that external delivery is production-ready. At present, the default announcement publisher generates local public HTML, RSS, Atom, and JSON Feed output. Matrix, ActivityPub, and email adapter code is not enabled by default and has not been verified against live services.
+This document records channel design. It is not a deployment guide. Each
+destination's status below is checked against the code; the README and
+operations guide hold the operator steps.
+
+At present, the default announcement publisher generates local public HTML, RSS, Atom, and JSON Feed output, and the `/connect` contact page. Matrix, ActivityPub, email and SMS are available once connected in the console.
 
 ## Implementation Status
 
 | Status | Destinations |
 |---|---|
-| **Working and covered by automated tests** | Public HTML archive, stable announcement pages, RSS, Atom, and JSON Feed |
-| **Implemented; staging verification required** | Matrix public-room adapter. It is opt-in and disabled by default; CI uses test doubles, not a live homeserver |
-| **Experimental prototypes; not wired into the default publisher** | ActivityPub and email adapters |
-| **Planned/evaluation only** | SMS broadcast and voice/IVR delivery |
+| **Working and covered by automated tests** | Public HTML archive, stable announcement pages, RSS, Atom, JSON Feed, the `/connect` contact page and its QR codes |
+| **Implemented; staging verification required** | Matrix public-room adapter (opt-in). Email through the organizer's own mail server, with double opt-in sign-up, signed one-click unsubscribe and per-person delivery tracking. Text alerts through an Android SMS gateway |
+| **Implemented; not yet verified against a live service** | ActivityPub actor and follower delivery. Email delivery through a real SMTP relay (CI uses fake sessions; run `subscribers test-email` before relying on it) |
+| **Planned** | Voice/IVR delivery |
+
+---
 
 ---
 
@@ -26,7 +32,7 @@ The publishing domain is intended to provide independent adapters so the **same 
 
 ## 2. ActivityPub Federation (Fediverse)
 
-The `ActivityPubAdapter` prototype translates canonical announcements into ActivityStreams 2.0 `Create(Note)` objects. It is not configured by the default publisher and has not been verified against a live federated service.
+The `ActivityPubAdapter` translates canonical announcements into ActivityStreams 2.0 `Create(Note)` objects. It is connected from the console (the fediverse connection). It has not been verified against a live federated service.
 - **Audience:** Users of Mastodon, Misskey, GoToSocial, Pixelfed, and the wider fediverse.
 - **Protocol:** W3C ActivityPub standard.
 - **Privacy:** Public by design. No private community rooms are federated over ActivityPub.
@@ -34,7 +40,7 @@ The `ActivityPubAdapter` prototype translates canonical announcements into Activ
 
 ---
 
-## 3. Email Delivery & Newsletter Evaluation (Not Live-Enabled)
+## 3. Email Delivery & Newsletter
 
 Email remains the most ubiquitous open communications medium.
 
