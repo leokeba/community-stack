@@ -334,10 +334,10 @@ announcements in under a minute, without creating an account.
 - [ ] **CR2.9 Explain the channels.** On `/connect` and `/subscribe`, describe email,
   SMS, RSS and Atom, JSON Feed, Matrix and ActivityPub in plain language for
   non-technical readers.
-- [ ] **CR2.10 Add administration.** Add a console Subscribers page with masked
+- [x] **CR2.10 Add administration.** Add a console Subscribers page with masked
   addresses and aggregate counts, plus audited export and deletion. Add
   `subscribers export` and `subscribers delete` to the CLI.
-- [ ] **CR2.11 Fix backups.** Snapshot `subscribers.db` consistently, as
+- [x] **CR2.11 Fix backups.** Snapshot `subscribers.db` consistently, as
   `announcements.db` already is, and add a restore test.
 - [ ] **CR2.12 Handle listmonk overlap.** Warn when native email and listmonk are
   both connected, since members could be mailed twice.

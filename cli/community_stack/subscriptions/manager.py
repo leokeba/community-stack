@@ -420,6 +420,9 @@ class SubscriberManager:
                 "DELETE FROM subscribers WHERE channel = ? AND destination = ?",
                 (channel, clean_dest),
             )
+            # The send ledger and sign-up limits also hold the address, so they go too.
+            conn.execute("DELETE FROM email_sends WHERE destination = ?", (clean_dest,))
+            conn.execute("DELETE FROM signup_requests WHERE destination = ?", (clean_dest,))
             conn.commit()
             return cursor.rowcount > 0
 

@@ -130,3 +130,30 @@ def test_snapshot_archive_is_owner_only_regardless_of_umask(test_env):
     assert archives
     assert all(archive.stat().st_mode & 0o777 == 0o600 for archive in archives)
     assert engine.backup_dir.stat().st_mode & 0o077 == 0
+
+
+def test_subscriber_list_survives_backup_and_restore(test_env, tmp_path):
+    """Subscribers are snapshotted like announcements, so a restore keeps who consented (CR2.11)."""
+    from community_stack.subscriptions.manager import SubscriberManager
+
+    project_dir, config_file, env_file = test_env
+    subscribers = SubscriberManager(project_dir / "data" / "announcements" / "subscribers.db")
+    subscribers.register_consent_text("2026-11", "I agree.")
+    _sub, token = subscribers.request_subscription(
+        "email", "ann@example.org", consent_version="2026-11", consent_source="web_form"
+    )
+    subscribers.confirm_subscription(token)
+
+    engine = BackupEngine(config_path=config_file, env_path=env_file)
+    snapshot = engine.create_snapshot()
+
+    restore_target = tmp_path / "restored"
+    assert engine.restore_to_target(
+        target_dir=restore_target, snapshot_id=snapshot.id, confirm=True
+    )
+    restored = SubscriberManager(restore_target / "data" / "announcements" / "subscribers.db")
+    assert restored.get_active_recipients("email") == ["ann@example.org"]
+    record = restored.export_records()[0]
+    assert record["consent_version"] == "2026-11"
+    assert record["consent_source"] == "web_form"
+    assert record["confirmed_at"] is not None

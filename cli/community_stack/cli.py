@@ -260,12 +260,31 @@ def create_parser() -> argparse.ArgumentParser:
     p_s_add.add_argument("--channel", required=True, choices=["email", "sms"], help="Channel type")
     p_s_add.add_argument("--dest", required=True, help="Email address or phone number")
     p_s_add.add_argument("--topics", help="Comma-separated topic subscriptions")
+    p_s_add.add_argument(
+        "--consent-source",
+        help="Where and how the person agreed, e.g. 'paper_form' or 'event_signup'. "
+        "Required for email.",
+    )
 
     p_s_unsub = subs_subparsers.add_parser("unsubscribe", help="Unsubscribe a contact")
     p_s_unsub.add_argument(
         "--channel", required=True, choices=["email", "sms"], help="Channel type"
     )
     p_s_unsub.add_argument("--dest", required=True, help="Email address or phone number")
+
+    p_s_export = subs_subparsers.add_parser(
+        "export", help="Export every record held about subscribers, without secrets"
+    )
+    p_s_export.add_argument(
+        "-o", "--output", help="Target JSON file (default: backups/subscribers-export.json)"
+    )
+
+    p_s_delete = subs_subparsers.add_parser(
+        "delete", help="Erase everything held about one address (permanent)"
+    )
+    p_s_delete.add_argument("--channel", required=True, choices=["email", "sms"])
+    p_s_delete.add_argument("--dest", required=True, help="Email address or phone number")
+    p_s_delete.add_argument("--confirm", action="store_true", help="Required to erase the record")
 
     # archive
     p_archive = subparsers.add_parser(

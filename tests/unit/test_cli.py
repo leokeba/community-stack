@@ -275,6 +275,8 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
                 "cli_test@example.org",
                 "--topics",
                 "alerts",
+                "--consent-source",
+                "paper_form",
             ]
         )
         == 0

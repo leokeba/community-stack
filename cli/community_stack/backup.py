@@ -223,38 +223,40 @@ class BackupEngine:
             data_dir = self.project_root / "data"
             data_tar = staging_dir / "data.tar.gz"
             if data_dir.is_dir():
-                announcement_db = data_dir / "announcements" / "announcements.db"
-                sqlite_snapshot = staging_dir / "announcements.db.snapshot"
-                if announcement_db.is_file():
+                # Each SQLite database is copied through the backup API, so a write in progress
+                # cannot produce a corrupt copy. Live files are then left out of the archive.
+                live_databases = ("announcements/announcements.db", "announcements/subscribers.db")
+                snapshots: list[tuple[Path, str]] = []
+                for relative in live_databases:
+                    source_db = data_dir / relative
+                    if not source_db.is_file():
+                        continue
+                    snapshot = staging_dir / (Path(relative).name + ".snapshot")
                     try:
                         with (
-                            sqlite3.connect(announcement_db) as source,
-                            sqlite3.connect(sqlite_snapshot) as destination,
+                            sqlite3.connect(source_db) as source,
+                            sqlite3.connect(snapshot) as destination,
                         ):
                             source.backup(destination)
                     except sqlite3.Error as exc:
                         raise BackupError(
-                            f"Could not create a consistent announcement database snapshot: {exc}"
+                            f"Could not create a consistent snapshot of {relative}: {exc}"
                         ) from exc
+                    snapshots.append((snapshot, f"data/{relative}"))
 
                 def exclude_live_sqlite_files(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
                     relative_name = member.name.removeprefix("data/")
-                    if (
-                        relative_name == "announcements/announcements.db"
-                        or relative_name.startswith("announcements/announcements.db-")
-                    ):
-                        return None
+                    for database in live_databases:
+                        if relative_name == database or relative_name.startswith(database + "-"):
+                            return None
                     return member
 
                 with tarfile.open(data_tar, "w:gz") as tar:
                     tar.add(data_dir, arcname="data", filter=exclude_live_sqlite_files)
-                    if sqlite_snapshot.is_file():
-                        tar.add(
-                            sqlite_snapshot,
-                            arcname="data/announcements/announcements.db",
-                        )
-                if sqlite_snapshot.is_file():
-                    sqlite_snapshot.unlink()
+                    for snapshot, arcname in snapshots:
+                        tar.add(snapshot, arcname=arcname)
+                for snapshot, _arcname in snapshots:
+                    snapshot.unlink(missing_ok=True)
 
             # 3. Securely copy configuration and env
             shutil.copy(self.config_path, staging_dir / "community-stack.yaml")
