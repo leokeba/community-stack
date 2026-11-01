@@ -118,6 +118,15 @@ class SubscriberManager:
                 conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_hash TEXT")
                 conn.execute("ALTER TABLE subscribers ADD COLUMN confirmation_expires_at TEXT")
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS email_sends (
+                    announcement_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    sent_at TEXT,
+                    PRIMARY KEY (announcement_id, operation, destination)
+                );
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS consent_texts (
                     version TEXT PRIMARY KEY,
                     text TEXT NOT NULL,
@@ -436,6 +445,53 @@ class SubscriberManager:
                 }
             )
         return records
+
+    # Per-person send ledger (CR2.5). A retry mails only people who have not received it yet.
+
+    def queue_email_send(
+        self, announcement_id: str, operation: str, destinations: list[str]
+    ) -> None:
+        """Record who should receive an announcement. The audience is fixed on the first attempt."""
+        with self._get_conn() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM email_sends WHERE announcement_id = ? AND operation = ? LIMIT 1",
+                (announcement_id, operation),
+            ).fetchone()
+            if exists is None:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO email_sends (announcement_id, operation, destination) "
+                    "VALUES (?, ?, ?)",
+                    [(announcement_id, operation, d) for d in destinations],
+                )
+                conn.commit()
+
+    def pending_email_sends(self, announcement_id: str, operation: str) -> list[str]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT destination FROM email_sends WHERE announcement_id = ? AND operation = ? "
+                "AND sent_at IS NULL ORDER BY destination",
+                (announcement_id, operation),
+            ).fetchall()
+        return [row["destination"] for row in rows]
+
+    def email_send_progress(self, announcement_id: str, operation: str) -> tuple[int, int]:
+        """Return (people in the audience, people already sent to)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, COUNT(sent_at) AS sent FROM email_sends "
+                "WHERE announcement_id = ? AND operation = ?",
+                (announcement_id, operation),
+            ).fetchone()
+        return row["total"], row["sent"]
+
+    def mark_email_sent(self, announcement_id: str, operation: str, destination: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE email_sends SET sent_at = ? WHERE announcement_id = ? AND operation = ? "
+                "AND destination = ?",
+                (datetime.now(timezone.utc).isoformat(), announcement_id, operation, destination),
+            )
+            conn.commit()
 
     def get_active_recipients(self, channel: str, topic: str | None = None) -> list[str]:
         """Get verified active destination addresses eligible for a topic."""

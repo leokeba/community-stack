@@ -480,8 +480,8 @@ CONNECTORS: dict[str, ConnectorType] = {
             ),
             validate=_validate_email,
             build=lambda c: build_email_adapter(c, SubscriberManager()),
-            caveat="Each person gets their own message. Sending is not retried after some "
-            "messages have gone out, until delivery tracking per person is in place.",
+            caveat="Each person gets their own message. If sending is interrupted, a retry "
+            "continues with the people who have not yet received it.",
         ),
         ConnectorType(
             kind="listmonk",

@@ -176,13 +176,21 @@ def test_temporary_failure_before_any_send_is_retryable(subscribers):
     assert result.retryable is True
 
 
-def test_failure_after_some_sends_is_not_retried(subscribers):
-    """Retrying would mail people who already received it, so the job stops instead."""
-    mail = ScriptedMail(accept=1, error=TransportError("busy", retryable=True))
-    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=mail).publish(_ann())
+def test_retry_after_partial_send_mails_only_the_rest(subscribers):
+    """People already reached are not mailed again when the job is retried."""
+    first = ScriptedMail(accept=1, error=TransportError("busy", retryable=True))
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=first).publish(_ann())
     assert result.success is False
-    assert result.retryable is False
+    assert result.retryable is True
     assert "after 1 of 2" in result.error
+
+    second = ScriptedMail(accept=10, error=TransportError("unused", retryable=False))
+    result = EmailNewsletterAdapter(subscriber_manager=subscribers, transport=second).publish(
+        _ann()
+    )
+    assert result.success is True
+    assert len(second.accepted) == 1
+    assert sorted(first.accepted + second.accepted) == ["a@example.org", "b@example.org"]
 
 
 # Connector

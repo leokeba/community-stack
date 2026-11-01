@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import time
 from email.message import EmailMessage
 
 from community_stack.announcements.adapters.base import (
@@ -33,8 +35,10 @@ class EmailNewsletterAdapter(ChannelAdapter):
         unsubscribe_base_url: str = "https://community.example.org/subscribe/stop",
         transport: EmailTransport | None = None,
         enabled: bool = True,
+        time_budget_seconds: float = 200,
     ) -> None:
         self.subscriber_manager = subscriber_manager or SubscriberManager()
+        self.time_budget_seconds = time_budget_seconds
         self.from_address = from_address
         self.unsubscribe_base_url = unsubscribe_base_url
         self.enabled = enabled
@@ -99,6 +103,10 @@ class EmailNewsletterAdapter(ChannelAdapter):
         return msg
 
     def publish(self, announcement: Announcement) -> DeliveryResult:
+        return self._deliver(announcement, "publish")
+
+    def _deliver(self, announcement: Announcement, operation: str) -> DeliveryResult:
+        """Send one message per person still owed one, within this run's time budget."""
         if not self.enabled:
             return DeliveryResult(
                 success=False,
@@ -106,15 +114,28 @@ class EmailNewsletterAdapter(ChannelAdapter):
                 retryable=False,
             )
 
-        recipients = self.subscriber_manager.get_active_recipients(channel="email")
-        if not recipients:
-            return DeliveryResult(success=True, external_id="email_no_subscribers")
+        active = set(self.subscriber_manager.get_active_recipients(channel="email"))
+        self.subscriber_manager.queue_email_send(announcement.id, operation, sorted(active))
+        total, already = self.subscriber_manager.email_send_progress(announcement.id, operation)
+        if total == 0:
+            return DeliveryResult(success=True, external_id="email_no_subscribers", idempotent=True)
 
-        # One message per person, so no one sees another's address. Until the per-recipient
-        # ledger exists (CR2.5), a failure after some messages were sent is not retried,
-        # because retrying would mail the people already reached a second time.
-        sent = 0
-        for address in recipients:
+        # Only people still subscribed, who were in the audience when sending began.
+        owed = [
+            address
+            for address in self.subscriber_manager.pending_email_sends(announcement.id, operation)
+            if address in active
+        ]
+        started = time.monotonic()
+        for address in owed:
+            if time.monotonic() - started > self.time_budget_seconds:
+                return DeliveryResult(
+                    success=False,
+                    error=f"Paused after {already} of {total} to stay within the job time limit; "
+                    "the rest will be sent on retry.",
+                    retryable=True,
+                    idempotent=True,
+                )
             message = self.build_email_message(announcement)
             message["To"] = address
             try:
@@ -122,14 +143,24 @@ class EmailNewsletterAdapter(ChannelAdapter):
             except TransportError as exc:
                 return DeliveryResult(
                     success=False,
-                    error=f"Email delivery stopped after {sent} of {len(recipients)}: {exc}",
-                    retryable=exc.retryable and sent == 0,
+                    error=f"Email delivery stopped after {already} of {total}: {exc}",
+                    retryable=exc.retryable,
+                    idempotent=True,
                 )
-            sent += 1
-        return DeliveryResult(success=True, external_id=f"email_sent_{sent}_recipients")
+            self.subscriber_manager.mark_email_sent(announcement.id, operation, address)
+            already += 1
+        return DeliveryResult(
+            success=True,
+            external_id=f"email_sent_{total}_recipients",
+            idempotent=True,
+        )
 
     def update(self, announcement: Announcement) -> DeliveryResult:
-        return self.publish(announcement)
+        # Each revision is sent once to the people who are subscribed when it is published.
+        revision = hashlib.sha256(
+            f"{announcement.title}\0{announcement.body}".encode()
+        ).hexdigest()[:12]
+        return self._deliver(announcement, f"update:{revision}")
 
     def withdraw(self, announcement_id: str) -> DeliveryResult:
         # Email cannot be un-sent; send retraction notice to list
