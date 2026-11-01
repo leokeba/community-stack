@@ -287,7 +287,9 @@ def test_example_config_still_produces_a_page_without_community_block(tmp_path, 
 
 def test_deploy_script_prepares_the_contact_page_folder_and_landing():
     script = (REPO / "scripts/deploy-vps.sh").read_text(encoding="utf-8")
-    assert "install -d -m 0755 -o 1000 -g 1000" in script
+    assert "install -d -m 0755" in script
+    assert "COMMUNITY_STACK_UID=" in script and '-o "$container_uid"' in script
+    assert 'exec -u "$container_uid:$container_gid"' in script
     assert "data/landing/connect" in script
     assert "connect render" in script
     assert "up -d --force-recreate landing" in script

@@ -123,10 +123,18 @@ else
     sudo -n -u community "$project_dir/.venv/bin/pip" install --quiet -e "$project_dir"
 fi
 sudo -n -u community "$project_dir/.venv/bin/community-stack" --help >/dev/null
-# The contact page (/connect) is served from this folder, and the announcements
-# container (UID 1000) writes it. Create it with that owner before Docker can
-# create it as root.
-sudo -n install -d -m 0755 -o 1000 -g 1000 "$project_dir/data/landing/connect"
+# The announcements container runs as the UID/GID in .env (COMMUNITY_STACK_UID/GID), which
+# is not always 1000. Read only those two numbers, and give the contact page folder that
+# owner before Docker can create it as root.
+container_uid="$(sudo -n sh -c "grep -E '^COMMUNITY_STACK_UID=' '$project_dir/.env' | cut -d= -f2" || true)"
+container_gid="$(sudo -n sh -c "grep -E '^COMMUNITY_STACK_GID=' '$project_dir/.env' | cut -d= -f2" || true)"
+container_uid="${container_uid:-1000}"
+container_gid="${container_gid:-1000}"
+if [[ ! "$container_uid" =~ ^[0-9]+$ || ! "$container_gid" =~ ^[0-9]+$ ]]; then
+    printf 'COMMUNITY_STACK_UID and COMMUNITY_STACK_GID must be numbers.\n' >&2
+    exit 1
+fi
+sudo -n install -d -m 0755 -o "$container_uid" -g "$container_gid" "$project_dir/data/landing/connect"
 
 docker_cmd=(sudo -n docker)
 compose_shell='cd "$1" && shift && exec "$@"'
@@ -171,7 +179,7 @@ fi
 
 # Render the contact page now, from inside the container that owns the data. If this
 # fails the page is rebuilt after the next delivery, so it is not fatal.
-"${docker_cmd[@]}" exec -u 1000 community_announcements \
+"${docker_cmd[@]}" exec -u "$container_uid:$container_gid" community_announcements \
     community-stack connect render --output-dir /app/data/landing/connect \
     || printf 'Warning: the contact page was not rendered; it updates after the next delivery.\n' >&2
 
