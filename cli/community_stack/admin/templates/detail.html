@@ -50,6 +50,45 @@
       <p><button type="submit" class="secondary">Upload image</button></p>
     </form>
   </details>
+
+  <details class="card">
+    <summary>Per-platform image overrides</summary>
+    <p class="muted">An override is sent instead of the shared image. Without one, the shared image is used. Whether a platform accepts images depends on its publishing method.</p>
+    {% for channel in platform_media %}
+    {% if channel.image %}
+    <section class="card">
+      <h3>{{ channel.name }}</h3>
+      <figure>
+        <img src="/admin/media/{{ channel.image.id }}" alt="{{ channel.image.alt }}" width="{{ channel.image.width }}" height="{{ channel.image.height }}">
+        <figcaption class="muted">Description: {{ channel.image.alt }}</figcaption>
+      </figure>
+      <form method="post" action="/admin/announcements/{{ announcement.id }}/channel-image/{{ channel.identifier }}/alt">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="channel-image-alt-{{ channel.identifier }}">Description for people who cannot see the image</label>
+        <textarea id="channel-image-alt-{{ channel.identifier }}" name="alt" maxlength="1000" rows="2" required>{{ channel.image.alt }}</textarea>
+        <p><button type="submit" class="secondary">Save description</button></p>
+      </form>
+      <form method="post" action="/admin/announcements/{{ announcement.id }}/channel-image/{{ channel.identifier }}/remove" data-confirm="Remove the {{ channel.name }} image override?" data-confirm-label="Remove override">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary danger">Remove override</button>
+      </form>
+    </section>
+    {% endif %}
+    {% endfor %}
+    <form method="post" action="/admin/announcements/{{ announcement.id }}/channel-image" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="channel-image-platform">Platform</label>
+      <select id="channel-image-platform" name="channel" required>
+        {% for channel in platform_media %}<option value="{{ channel.identifier }}">{{ channel.name }}</option>{% endfor %}
+      </select>
+      <label for="channel-image-file">Platform-specific image (JPEG, PNG, WebP or GIF, up to 10 MB)</label>
+      <input id="channel-image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required>
+      <label for="channel-image-new-alt">Description for people who cannot see the image</label>
+      <textarea id="channel-image-new-alt" name="alt" maxlength="1000" rows="2" required></textarea>
+      <p class="muted">Location and camera details are removed from the file, and large images are resized.</p>
+      <p><button type="submit" class="secondary">Save platform image</button></p>
+    </form>
+  </details>
   {% endif %}
 
   {% if checks and status != "withdrawn" %}
@@ -60,7 +99,7 @@
     <tbody>
     {% for check in checks %}
     <tr>
-      <td>{{ check.capabilities.label }}{% if announcement.image and not check.capabilities.supports_media %}<br><span class="muted">The image is not sent to this channel.</span>{% endif %}<details><summary>What is sent</summary><pre>{{ check.preview }}</pre></details></td>
+      <td>{{ check.capabilities.label }}{% if not check.capabilities.supports_media and (announcement.channel_media.get(check.name) or announcement.image) %}<br><span class="muted">The image is not sent to this channel.</span>{% endif %}<details><summary>What is sent</summary><pre>{{ check.preview }}</pre></details></td>
       <td>{% if check.over_limit and check.capabilities.shortens_long_text %}{{ check.text_length }} characters: shortened to {{ check.capabilities.max_text_length }} with a link to the full announcement{% elif check.over_limit %}<strong class="error">{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters: too long for this channel</strong>{% elif check.capabilities.max_text_length %}{{ check.text_length }} of {{ check.capabilities.max_text_length }} characters{% else %}No limit{% endif %}</td>
       <td>{{ check.capabilities.update_description }}</td>
       <td>{{ check.capabilities.withdraw_description }}</td>

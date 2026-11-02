@@ -3,6 +3,7 @@
 import io
 import json
 import re
+import sqlite3
 
 import pytest
 from community_stack.admin.app import create_app
@@ -105,6 +106,105 @@ def test_replacing_an_image_deletes_the_old_file(setup):
     replacement = storage.save_image(draft.id, media.process_image(jpeg_with_location()), ALT, None)
     assert not image.path.exists()
     assert storage.get_announcement(draft.id).image.id == replacement.id
+
+
+def test_channel_image_override_persists_dispatches_and_cleans_up(setup):
+    storage, publisher, draft, shared, tmp_path = setup
+    override = storage.save_channel_image(
+        draft.id, "mastodon", media.process_image(jpeg_with_location()), ALT, "olga"
+    )
+    loaded = storage.get_announcement(draft.id)
+
+    assert loaded.image.id == shared.id
+    assert loaded.channel_media["mastodon"].id == override.id
+    assert publisher.channel_variant(loaded, "mastodon").image.id == override.id
+    assert publisher.channel_variant(loaded, "bluesky").image.id == shared.id
+
+    publisher.publish_draft(draft.id)
+    public_override = tmp_path / "feed" / "media" / override.filename
+    assert public_override.read_bytes() == override.read_bytes()
+
+    replacement = storage.save_channel_image(
+        draft.id, "mastodon", media.process_image(jpeg_with_location()), ALT, "olga"
+    )
+    assert not override.path.exists()
+    assert storage.remove_channel_image(draft.id, "mastodon")
+    assert not replacement.path.exists()
+    assert storage.get_announcement(draft.id).channel_media == {}
+    publisher.withdraw(draft.id)
+    assert not public_override.exists()
+
+
+def test_social_adapter_receives_channel_image_instead_of_shared_image(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    feed = WebFeedAdapter(output_dir=tmp_path / "feed", storage=storage)
+    shared = media.process_image(jpeg_with_location())
+    specific = media.process_image(jpeg_with_location(size=(640, 480)))
+    calls = []
+    replies = [(200, {"id": "media-1"}), (200, {"id": "status-1"})]
+
+    def transport(method, url, headers, payload):
+        calls.append((method, url, headers, payload))
+        return replies.pop(0)
+
+    mastodon = MastodonAdapter("https://social.example", "token-12345678", transport=transport)
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        adapters=[feed, mastodon],
+        config_path=tmp_path / "missing.yaml",
+        feed_dir=tmp_path / "feed",
+    )
+    draft = publisher.create_draft("Food drive", "Bring supplies.")
+    shared_image = storage.save_image(draft.id, shared, ALT, None)
+    specific_image = storage.save_channel_image(draft.id, "mastodon", specific, ALT, None)
+
+    publisher.publish_draft(draft.id)
+
+    upload = calls[0][3]
+    assert upload.files[0][3] == specific_image.read_bytes()
+    assert upload.files[0][3] != shared_image.read_bytes()
+    assert calls[1][3]["media_ids"] == ["media-1"]
+
+
+def test_existing_database_migrates_channel_media_column(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("""
+            CREATE TABLE announcements (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
+                published_at TEXT NOT NULL, language TEXT NOT NULL, status TEXT NOT NULL,
+                canonical_url TEXT NOT NULL, expires_at TEXT, audience TEXT NOT NULL,
+                author TEXT, tags_json TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, scheduled_at TEXT,
+                channel_text_json TEXT NOT NULL DEFAULT '{}', image_id TEXT,
+                channels_json TEXT NOT NULL DEFAULT '[]'
+            )
+        """)
+        connection.execute(
+            """
+            INSERT INTO announcements (
+                id, title, body, published_at, language, status, canonical_url, audience,
+                tags_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ann_20260101_000000_abcd1234",
+                "Legacy notice",
+                "Existing content.",
+                "2026-01-01T00:00:00+00:00",
+                "en",
+                "draft",
+                "",
+                "public",
+                "[]",
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+
+    storage = AnnouncementStorage(db_path=db_path)
+
+    assert storage.get_announcement("ann_20260101_000000_abcd1234").channel_media_ids == {}
 
 
 def test_bytes_within_shrinks_for_channel_limits(setup):
@@ -245,6 +345,65 @@ def test_console_upload_describe_and_remove(console):
     assert "/admin/media/" not in client.get(url).text
     actions = [event["action"] for event in app.state.auth_store.list_events()]
     assert {"announcement.image_added", "announcement.image_removed"} <= set(actions)
+
+
+def test_console_channel_image_override_upload_and_remove(console):
+    app, client, url = console
+    detail = client.get(url)
+    upload_form = {
+        "csrf_token": csrf(detail),
+        "channel": "instagram",
+        "alt": ALT,
+    }
+
+    assert (
+        client.post(
+            f"{url}/channel-image",
+            data={**upload_form, "channel": "unknown"},
+            files={"image": ("photo.jpg", jpeg_with_location(), "image/jpeg")},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            f"{url}/channel-image",
+            data={**upload_form, "csrf_token": "wrong"},
+            files={"image": ("photo.jpg", jpeg_with_location(), "image/jpeg")},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"{url}/channel-image",
+            data={**upload_form, "alt": " "},
+            files={"image": ("photo.jpg", jpeg_with_location(), "image/jpeg")},
+        ).status_code
+        == 400
+    )
+
+    saved = client.post(
+        f"{url}/channel-image",
+        data=upload_form,
+        files={"image": ("photo.jpg", jpeg_with_location(), "image/jpeg")},
+    )
+    assert saved.status_code == 303
+    announcement_id = url.rsplit("/", 1)[-1]
+    announcement = app.state.storage.get_announcement(announcement_id)
+    image = announcement.channel_media["instagram"]
+    assert image.path.is_file()
+    assert "Instagram" in client.get(url).text
+
+    removed = client.post(
+        f"{url}/channel-image/instagram/remove",
+        data={"csrf_token": csrf(client.get(url))},
+    )
+    assert removed.status_code == 303
+    assert app.state.storage.get_announcement(announcement_id).channel_media == {}
+    actions = [event["action"] for event in app.state.auth_store.list_events()]
+    assert {
+        "announcement.channel_image_added",
+        "announcement.channel_image_removed",
+    } <= set(actions)
 
 
 def test_images_cannot_change_after_publication(console):

@@ -58,10 +58,12 @@ class Announcement:
     # Optional text to send instead of title + body, keyed by channel name.
     channel_text: dict[str, str] = field(default_factory=dict)
     image_id: str | None = None
+    channel_media_ids: dict[str, str] = field(default_factory=dict)
     # Channels to publish to; empty means every enabled channel.
     channels: list[str] = field(default_factory=list)
     # Filled in by storage from the media table; not part of the announcement record.
     image: Any = field(default=None, compare=False, repr=False)
+    channel_media: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.status, str) and not isinstance(self.status, AnnouncementStatus):
@@ -111,6 +113,8 @@ class Announcement:
                 raise ModelValidationError("Invalid channel name for custom text.")
             if len(text) > 5_000:
                 raise ModelValidationError("Custom channel text is limited to 5,000 characters.")
+        if any(not re.match(r"^[a-z0-9_]{1,40}$", channel) for channel in self.channel_media_ids):
+            raise ModelValidationError("Invalid channel name for channel-specific media.")
 
         if self.scheduled_at:
             try:
@@ -131,6 +135,7 @@ class Announcement:
         """Convert announcement to standard dictionary representation."""
         data = asdict(self)
         data.pop("image", None)
+        data.pop("channel_media", None)
         data["status"] = self.status.value
         return data
 

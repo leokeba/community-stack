@@ -1,9 +1,9 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-this update also reflects the CR1.7 image-upload work in the current, not-yet-
-deployed working tree. Live connector acceptance remains open. Audience:
-maintainers and the coding agents implementing this work.
+the current working tree includes the later CR1.7, CR0.1, CR3.1 and CR3.2
+work, which has not been deployed. Live connector acceptance remains open.
+Audience: maintainers and the coding agents implementing this work.
 
 Communities should keep the reach of proprietary social networks and still be
 able to contact their members if a network goes down, restricts access, changes
@@ -381,10 +381,14 @@ Start with manual publishing. Do not try to automate every platform.
   channel connections. None of this goes in the `Announcement` model. Current
   adapter capabilities are checked against the catalogue; manual-only limits and
   media support are explicitly marked unverified rather than guessed.
-- [ ] **CR3.2 Prepare per-platform content.** Build on `channel_text` to generate
-  adapted text with a shortened description, canonical URL, suggested hashtags and a
-  call to action pointing to independent channels. Add per-channel media. Keep generated
-  text editable, and avoid identical copy on every platform.
+- [x] **CR3.2 Prepare per-platform content.** Generate deterministic plain-text
+  variants with platform-verified limits, the canonical announcement URL, suggested
+  hashtags and a link to the community's independent channels. Variants remain
+  editable; only explicit edits persist in `channel_text`, so defaults refresh when
+  canonical content changes. Per-platform image overrides are stored separately from
+  the shared image, used for that channel's delivery, and published for public media
+  URLs only while the announcement is active. Tests cover generation, persistence,
+  delivery, uploads and the legacy database migration.
 - [ ] **CR3.3 Add a manual adapter.** Add a `ManualChannelAdapter` that reuses the
   connector's channel name, so a platform's text and history carry over if it is
   automated later. Add a `prepared` outcome to `DeliveryResult`.

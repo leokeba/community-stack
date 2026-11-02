@@ -99,7 +99,12 @@ class WebFeedAdapter(ChannelAdapter):
         """Copy published announcements' images to the public feed and remove all others."""
         media_dir = self.output_dir / "media"
         media_dir.mkdir(parents=True, exist_ok=True)
-        wanted = {a.image.filename: a.image for a in announcements if a.image}
+        wanted = {
+            image.filename: image
+            for announcement in announcements
+            for image in (announcement.image, *announcement.channel_media.values())
+            if image
+        }
         for existing in media_dir.iterdir():
             if existing.name not in wanted:
                 existing.unlink(missing_ok=True)

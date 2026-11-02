@@ -1509,6 +1509,96 @@ def create_app(
             request, f"/admin/announcements/{announcement_id}", flash("Image removed.")
         )
 
+    @app.post("/admin/announcements/{announcement_id}/channel-image")
+    async def upload_channel_image(request: Request, announcement_id: str) -> Response:
+        session = require(request, "edit")
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES + 65536:
+            raise HTTPException(status_code=413, detail="Images must be 10 MB or smaller.")
+        form = await request.form()
+        if not tokens_match(session["csrf_token"], str(form.get("csrf_token", ""))):
+            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+        editable_announcement(announcement_id)
+        channel = str(form.get("channel", ""))
+        if channel not in PLATFORMS:
+            raise HTTPException(status_code=400, detail="Choose a supported platform.")
+        upload = form.get("image")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="Choose an image to upload.")
+        try:
+            alt = validate_alt(str(form.get("alt", "")))
+            data = await upload.read(MAX_UPLOAD_BYTES + 1)
+            processed = await run_in_threadpool(process_image, data)
+        except MediaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        image = storage.save_channel_image(
+            announcement_id, channel, processed, alt, session["username"]
+        )
+        audit(
+            request,
+            session["username"],
+            "announcement.channel_image_added",
+            announcement_id,
+            channel=channel,
+            width=image.width,
+            height=image.height,
+        )
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash(f"{PLATFORMS[channel].name} image saved."),
+        )
+
+    @app.post("/admin/announcements/{announcement_id}/channel-image/{channel}/alt")
+    async def change_channel_image_alt(
+        request: Request, announcement_id: str, channel: str
+    ) -> Response:
+        session, form = await checked_form(request, "edit")
+        if channel not in PLATFORMS:
+            raise HTTPException(status_code=404)
+        announcement = editable_announcement(announcement_id)
+        image = announcement.channel_media.get(channel)
+        if image is None:
+            raise HTTPException(status_code=404, detail="This platform has no image override.")
+        try:
+            storage.set_image_alt(image.id, validate_alt(form.get("alt", "")))
+        except MediaError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "announcement.channel_image_described",
+            announcement_id,
+            channel=channel,
+        )
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash(f"{PLATFORMS[channel].name} image description saved."),
+        )
+
+    @app.post("/admin/announcements/{announcement_id}/channel-image/{channel}/remove")
+    async def remove_channel_image(
+        request: Request, announcement_id: str, channel: str
+    ) -> Response:
+        session, _ = await checked_form(request, "edit")
+        if channel not in PLATFORMS:
+            raise HTTPException(status_code=404)
+        editable_announcement(announcement_id)
+        if not storage.remove_channel_image(announcement_id, channel):
+            raise HTTPException(status_code=404, detail="This platform has no image override.")
+        audit(
+            request,
+            session["username"],
+            "announcement.channel_image_removed",
+            announcement_id,
+            channel=channel,
+        )
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash(f"{PLATFORMS[channel].name} image override removed."),
+        )
+
     @app.get("/admin/media/{media_id}")
     async def media(request: Request, media_id: str) -> Response:
         require(request, "view")
@@ -1581,6 +1671,14 @@ def create_app(
                 deliveries=storage.get_delivery_states(announcement_id),
                 jobs=storage.get_active_jobs(announcement_id),
                 checks=publisher.channel_checks(announcement),
+                platform_media=[
+                    {
+                        "identifier": platform.identifier,
+                        "name": platform.name,
+                        "image": announcement.channel_media.get(platform.identifier),
+                    }
+                    for platform in PLATFORM_CATALOG
+                ],
                 delivery_attempts=storage.get_delivery_attempts(announcement_id),
             ),
         )

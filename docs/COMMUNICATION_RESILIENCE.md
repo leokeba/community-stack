@@ -66,7 +66,7 @@ flowchart LR
 | CR1 `/connect`, QR codes, identity package | Implemented, including console profile editing and tested logo/cover uploads; deployment acceptance is pending |
 | CR2.1–CR2.14 subscriptions | Implemented and tested; legal review approved 2026-11-02 |
 | Pixelfed connector | Implemented separately from Instagram; live-instance acceptance is pending |
-| CR3 | Platform catalogue (CR3.1) implemented; manual publishing workflow (CR3.2–CR3.8) remains |
+| CR3 | Platform catalogue, generated editable copy and per-platform media (CR3.1–CR3.2) implemented; manual publishing workflow (CR3.3–CR3.8) remains |
 | CR4–CR6 | Not started |
 
 ## Dependencies between phases

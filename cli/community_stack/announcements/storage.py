@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -88,6 +89,10 @@ class AnnouncementStorage:
                 )
             if "image_id" not in announcement_columns:
                 conn.execute("ALTER TABLE announcements ADD COLUMN image_id TEXT")
+            if "channel_media_json" not in announcement_columns:
+                conn.execute(
+                    "ALTER TABLE announcements ADD COLUMN channel_media_json TEXT NOT NULL DEFAULT '{}'"
+                )
             if "channel_text_json" not in announcement_columns:
                 conn.execute(
                     "ALTER TABLE announcements ADD COLUMN channel_text_json TEXT NOT NULL DEFAULT '{}'"
@@ -229,8 +234,8 @@ class AnnouncementStorage:
                     id, title, body, published_at, language, status,
                     canonical_url, expires_at, audience, author, tags_json,
                     created_at, updated_at, scheduled_at, channel_text_json, image_id,
-                    channels_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    channel_media_json, channels_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     body=excluded.body,
@@ -246,6 +251,7 @@ class AnnouncementStorage:
                     scheduled_at=excluded.scheduled_at,
                     channel_text_json=excluded.channel_text_json,
                     image_id=excluded.image_id,
+                    channel_media_json=excluded.channel_media_json,
                     channels_json=excluded.channels_json
                 ;
                 """,
@@ -266,6 +272,7 @@ class AnnouncementStorage:
                     ann.scheduled_at,
                     json.dumps(ann.channel_text),
                     ann.image_id,
+                    json.dumps(ann.channel_media_ids),
                     json.dumps(ann.channels),
                 ),
             )
@@ -288,10 +295,16 @@ class AnnouncementStorage:
             scheduled_at=row["scheduled_at"],
             channel_text=json.loads(row["channel_text_json"] or "{}"),
             image_id=row["image_id"],
+            channel_media_ids=json.loads(row["channel_media_json"] or "{}"),
             channels=json.loads(row["channels_json"] or "[]"),
         )
         if announcement.image_id:
             announcement.image = self._media(conn, announcement.image_id)
+        announcement.channel_media = {
+            channel: image
+            for channel, media_id in announcement.channel_media_ids.items()
+            if (image := self._media(conn, media_id)) is not None
+        }
         return announcement
 
     def _media(self, conn: sqlite3.Connection, media_id: str) -> MediaImage | None:
@@ -697,6 +710,74 @@ class AnnouncementStorage:
             if previous and previous["image_id"]:
                 self._delete_media(conn, previous["image_id"])
             return self._media(conn, media_id)
+
+    def save_channel_image(
+        self, announcement_id: str, channel_name: str, image, alt: str, actor: str | None
+    ) -> MediaImage:
+        """Store an image override for one channel, replacing its previous override."""
+        if not re.fullmatch(r"[a-z0-9_]{1,40}", channel_name):
+            raise ValueError("Invalid channel name for channel-specific media.")
+        if self.get_announcement(announcement_id) is None:
+            raise KeyError(f"Announcement '{announcement_id}' not found.")
+        self.media_dir.mkdir(mode=0o750, parents=True, exist_ok=True)
+        media_id = new_media_id()
+        filename = f"{media_id}.{image.extension}"
+        (self.media_dir / filename).write_bytes(image.content)
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT channel_media_json FROM announcements WHERE id = ?", (announcement_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Announcement '{announcement_id}' not found.")
+            channel_media_ids = json.loads(row["channel_media_json"] or "{}")
+            previous_id = channel_media_ids.get(channel_name)
+            channel_media_ids[channel_name] = media_id
+            conn.execute(
+                """
+                INSERT INTO media (id, announcement_id, filename, content_type, width, height,
+                    alt_text, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    media_id,
+                    announcement_id,
+                    filename,
+                    image.content_type,
+                    image.width,
+                    image.height,
+                    alt,
+                    datetime.now(timezone.utc).isoformat(),
+                    actor,
+                ),
+            )
+            conn.execute(
+                "UPDATE announcements SET channel_media_json = ? WHERE id = ?",
+                (json.dumps(channel_media_ids), announcement_id),
+            )
+            if previous_id:
+                self._delete_media(conn, previous_id)
+            return self._media(conn, media_id)
+
+    def remove_channel_image(self, announcement_id: str, channel_name: str) -> bool:
+        """Remove one channel image override and return whether one existed."""
+        if not re.fullmatch(r"[a-z0-9_]{1,40}", channel_name):
+            raise ValueError("Invalid channel name for channel-specific media.")
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT channel_media_json FROM announcements WHERE id = ?", (announcement_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Announcement '{announcement_id}' not found.")
+            channel_media_ids = json.loads(row["channel_media_json"] or "{}")
+            media_id = channel_media_ids.pop(channel_name, None)
+            if media_id is None:
+                return False
+            conn.execute(
+                "UPDATE announcements SET channel_media_json = ? WHERE id = ?",
+                (json.dumps(channel_media_ids), announcement_id),
+            )
+            self._delete_media(conn, media_id)
+            return True
 
     def set_image_alt(self, media_id: str, alt: str) -> None:
         with self._get_connection() as conn:
