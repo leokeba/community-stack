@@ -35,6 +35,7 @@ class UpdateMode(str, Enum):
 
     IN_PLACE = "in_place"
     FOLLOW_UP = "follow_up"
+    MANUAL = "manual"
     NONE = "none"
 
 
@@ -43,17 +44,20 @@ class WithdrawMode(str, Enum):
 
     DELETE = "delete"
     NOTICE = "notice"
+    MANUAL = "manual"
     NONE = "none"
 
 
 UPDATE_DESCRIPTIONS = {
     UpdateMode.IN_PLACE: "Edits change the published post.",
     UpdateMode.FOLLOW_UP: "Edits are sent as a new message; the original stays.",
+    UpdateMode.MANUAL: "An administrator must update the post manually.",
     UpdateMode.NONE: "Edits are not sent to this channel.",
 }
 WITHDRAW_DESCRIPTIONS = {
     WithdrawMode.DELETE: "Withdrawal removes the post.",
     WithdrawMode.NOTICE: "Withdrawal sends a retraction notice; the original stays.",
+    WithdrawMode.MANUAL: "An administrator must remove the post manually.",
     WithdrawMode.NONE: "Withdrawal cannot be sent to this channel.",
 }
 

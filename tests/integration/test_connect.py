@@ -348,13 +348,140 @@ def test_manual_publication_outcomes_record_url_timestamp_and_actor(site):
         for item in storage.get_delivery_attempts(announcement.id)
         if item["operation"] == "manual_publish"
     )
-
     final_detail = client.get(detail_url)
     assert 'href="https://instagram.com/p/abc123/"' in final_detail.text
     assert "View post" in final_detail.text
     assert "olga" in final_detail.text
     assert "Unknown" in final_detail.text
     assert "Failed" in final_detail.text
+
+
+def test_manual_channels_create_update_and_withdrawal_tasks(site):
+    db_path = site / "data/announcements/announcements.db"
+    AdminStore(db_path).create_admin("olga", PASSWORD)
+    app = create_app(
+        db_path=db_path,
+        feed_dir=site / "data/landing/feed",
+        config_path=site / "community-stack.yaml",
+        setup_token="unused",
+        run_worker=False,
+    )
+    storage = AnnouncementStorage(db_path)
+    client = TestClient(app, base_url="https://community.test", follow_redirects=False)
+    login = client.get("/admin/login")
+    client.post(
+        "/admin/login",
+        data={"csrf_token": _csrf(login), "username": "olga", "password": PASSWORD},
+    )
+
+    editor = client.get("/admin/announcements/new")
+    created = client.post(
+        "/admin/announcements/new",
+        data={"csrf_token": _csrf(editor), "title": "Food drive", "body": "Bring supplies."},
+    )
+    detail_url = created.headers["location"]
+    announcement_id = detail_url.rsplit("/", 1)[-1]
+    _, results = app.state.publisher.publish_draft(announcement_id)
+    assert results["instagram"].success and results["instagram"].prepared
+
+    detail = client.get(detail_url)
+    post_url = "https://www.instagram.com/p/abc123/"
+    recorded = client.post(
+        f"{detail_url}/channels/instagram/outcome",
+        data={
+            "csrf_token": _csrf(detail),
+            "outcome": "published",
+            "post_url": post_url,
+        },
+    )
+    assert recorded.status_code == 303
+
+    storage.set_channel_enabled("instagram", False)
+    edit = client.get(f"{detail_url}/edit")
+    updated = client.post(
+        f"{detail_url}/update",
+        data={
+            "csrf_token": _csrf(edit),
+            "title": "Food drive updated",
+            "body": "Bring supplies tomorrow.",
+        },
+    )
+    assert updated.status_code == 303
+    delivery = next(
+        item
+        for item in storage.get_delivery_states(announcement_id)
+        if item["adapter_name"] == "instagram"
+    )
+    assert delivery["operation"] == "manual_update"
+    assert delivery["status"] == "prepared"
+    assert delivery["post_url"] == post_url
+    detail = client.get(detail_url)
+    assert "Manual action:</strong> Update the existing post" in detail.text
+    assert '<option value="updated">Updated</option>' in detail.text
+    updated_outcome = client.post(
+        f"{detail_url}/channels/instagram/outcome",
+        data={
+            "csrf_token": _csrf(detail),
+            "outcome": "updated",
+            "post_url": post_url,
+        },
+    )
+    assert updated_outcome.status_code == 303
+    detail = client.get(detail_url)
+    assert "View updated post" in detail.text
+    assert "Manual action:</strong> Update the existing post" not in detail.text
+
+    withdrawn = client.post(
+        f"{detail_url}/withdraw",
+        data={"csrf_token": _csrf(detail), "confirm": "withdraw"},
+    )
+    assert withdrawn.status_code == 303
+    detail = client.get(detail_url)
+    assert "Manual withdrawal tasks" in detail.text
+    assert "Remove the existing post from this platform." in detail.text
+    assert '<option value="withdrawn">Withdrawn</option>' in detail.text
+    withdrawn_outcome = client.post(
+        f"{detail_url}/channels/instagram/outcome",
+        data={"csrf_token": _csrf(detail), "outcome": "withdrawn"},
+    )
+    assert withdrawn_outcome.status_code == 303
+    delivery = next(
+        item
+        for item in storage.get_delivery_states(announcement_id)
+        if item["adapter_name"] == "instagram"
+    )
+    assert delivery["status"] == "withdrawn"
+    assert delivery["operation"] == "manual_withdraw"
+    assert delivery["post_url"] is None
+
+
+def test_failed_manual_publication_does_not_create_follow_up_task(site):
+    storage = _storage(site)
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        config_path=site / "community-stack.yaml",
+        feed_dir=site / "data/landing/feed",
+    )
+    announcement, results = publisher.publish("Food drive", "Bring supplies.")
+    assert results["instagram"].prepared
+    storage.record_delivery(
+        announcement.id,
+        "instagram",
+        "failed",
+        error="The manual post was not published.",
+        operation="manual_publish",
+    )
+
+    _, update_results = publisher.update(announcement.id, body="Bring supplies tomorrow.")
+
+    assert "instagram" not in update_results
+    delivery = next(
+        item
+        for item in storage.get_delivery_states(announcement.id)
+        if item["adapter_name"] == "instagram"
+    )
+    assert delivery["status"] == "failed"
+    assert delivery["operation"] == "manual_publish"
 
 
 def test_page_follows_canonical_state_even_when_a_channel_fails(site):

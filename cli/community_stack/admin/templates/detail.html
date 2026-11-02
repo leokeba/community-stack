@@ -23,10 +23,14 @@
     <div>{{ body_html }}</div>
   </article>
 
-  {% if platform_content and status != "withdrawn" %}
+  {% if platform_content %}
   <section aria-labelledby="platform-kits-heading">
-    <h2 id="platform-kits-heading">Platform publishing kits</h2>
+    <h2 id="platform-kits-heading">{{ "Manual withdrawal tasks" if status == "withdrawn" else "Platform publishing kits" }}</h2>
+    {% if status == "withdrawn" %}
+    <p class="muted">These manual channels may still have the post. Open it and remove it, then record the outcome.</p>
+    {% else %}
     <p class="muted">Review the exact text and selected image for each configured platform. Copy or download them before opening the platform; nothing is published automatically from these links.</p>
+    {% endif %}
     {% for item in platform_content %}
     <article class="card" id="platform-kit-{{ item.spec.identifier }}">
       <div class="section-heading">
@@ -35,18 +39,28 @@
           {% if item.spec.official_url %}
           <a href="{{ item.spec.official_url }}" target="_blank" rel="noopener noreferrer">Open {{ item.spec.name }}</a>
           {% endif %}
+          {% if item.manual_action != "withdraw" %}
           <button type="button" class="secondary small" data-copy-target="platform-text-{{ item.spec.identifier }}" hidden>Copy text</button>
+          {% endif %}
         </div>
       </div>
       {% if item.delivery %}
       <p><strong>Status:</strong> {{ badge(item.delivery.status) }} · Last activity <time datetime="{{ item.delivery.last_attempt_at }}">{{ item.delivery.last_attempt_at }}</time>{% if item.delivery.recorded_by %} · Recorded by {{ item.delivery.recorded_by }}{% endif %}
-        {% if item.delivery.status == "delivered" and item.delivery.recorded_by and item.delivery.post_url %}
-        · <a href="{{ item.delivery.post_url }}" target="_blank" rel="noopener noreferrer">View published post</a>
+        {% if item.delivery.post_url and item.delivery.status != "withdrawn" %}
+        · <a href="{{ item.delivery.post_url }}" target="_blank" rel="noopener noreferrer">{% if item.manual_action == "update" and item.delivery.status in ["prepared", "failed", "unknown"] %}Open post to update{% elif item.manual_action == "withdraw" %}Open post to remove{% elif item.delivery.status == "updated" %}View updated post{% else %}View published post{% endif %}</a>
         {% endif %}
       </p>
+      {% if item.manual_action == "update" and item.delivery.status in ["prepared", "failed", "unknown"] %}
+      <p><strong>Manual action:</strong> Update the existing post with this current text and image.</p>
+      {% elif item.manual_action == "withdraw" and item.delivery.status in ["prepared", "failed", "unknown"] %}
+      <p><strong>Manual action:</strong> Remove the existing post from this platform.</p>
+      {% elif item.manual_action == "publish" and item.delivery.status in ["prepared", "failed", "unknown"] %}
+      <p><strong>Manual action:</strong> Publish this text and image on the platform.</p>
+      {% endif %}
       {% else %}
       <p class="muted">Not yet prepared or published.</p>
       {% endif %}
+      {% if item.manual_action != "withdraw" %}
       <h4>Text</h4>
       <pre id="platform-text-{{ item.spec.identifier }}">{{ item.text }}</pre>
       <h4>Selected image</h4>
@@ -65,20 +79,29 @@
       <p class="muted">No image is selected for this platform.</p>
       {% endif %}
       {% if item.spec.notes %}<p class="muted">{{ item.spec.notes }}</p>{% endif %}
-      {% if item.manual and item.delivery and item.delivery.status in ["prepared", "failed", "unknown"] and perms.edit %}
+      {% endif %}
+      {% if item.manual and item.manual_action and item.delivery and item.delivery.status in ["prepared", "failed", "unknown"] and perms.edit %}
       <form method="post" action="/admin/announcements/{{ announcement.id }}/channels/{{ item.spec.identifier }}/outcome">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label for="manual-outcome-{{ item.spec.identifier }}">Outcome</label>
         <select id="manual-outcome-{{ item.spec.identifier }}" name="outcome">
+          {% if item.manual_action == "update" %}
+          <option value="updated">Updated</option>
+          {% elif item.manual_action == "withdraw" %}
+          <option value="withdrawn">Withdrawn</option>
+          {% else %}
           <option value="published">Published</option>
+          {% endif %}
           <option value="failed">Failed</option>
           <option value="unknown">Unknown</option>
         </select>
-        <label for="manual-post-url-{{ item.spec.identifier }}">Post URL (required for Published)</label>
-        <input id="manual-post-url-{{ item.spec.identifier }}" name="post_url" type="url" maxlength="2048">
+        {% if item.manual_action in ["publish", "update"] %}
+        <label for="manual-post-url-{{ item.spec.identifier }}">Post URL (required for Published or Updated)</label>
+        <input id="manual-post-url-{{ item.spec.identifier }}" name="post_url" type="url" maxlength="2048" value="{{ item.delivery.post_url or '' }}">
+        {% endif %}
         <label for="manual-note-{{ item.spec.identifier }}">Note (optional)</label>
         <input id="manual-note-{{ item.spec.identifier }}" name="note" maxlength="1000">
-        <button type="submit" class="secondary small">Record outcome</button>
+        <button type="submit" class="secondary small">{{ "Record update" if item.manual_action == "update" else "Record withdrawal" if item.manual_action == "withdraw" else "Record outcome" }}</button>
       </form>
       {% endif %}
     </article>

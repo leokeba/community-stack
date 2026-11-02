@@ -400,18 +400,31 @@ class AnnouncementPublisher:
         channel_settings = self.storage.get_channel_settings()
         # Edits and withdrawals only go where the announcement was sent, so a channel
         # never gets a correction for a post it never had.
-        reached = (
-            {state["adapter_name"] for state in self.storage.get_delivery_states(ann.id)}
+        prior_states = (
+            {state["adapter_name"]: state for state in self.storage.get_delivery_states(ann.id)}
             if operation != "publish"
-            else set()
+            else {}
         )
+        reached = set(prior_states)
         for adapter in self.adapters:
-            if not channel_settings.get(adapter.name, True) and operation != "withdraw":
+            manual_update = isinstance(adapter, ManualChannelAdapter) and operation == "update"
+            if (
+                not channel_settings.get(adapter.name, True)
+                and operation != "withdraw"
+                and not manual_update
+            ):
                 continue
             if operation == "publish" and ann.channels and adapter.name not in ann.channels:
                 continue
             if operation != "publish" and adapter.name not in reached:
                 continue
+            if isinstance(adapter, ManualChannelAdapter) and operation != "publish":
+                previous = prior_states[adapter.name]
+                if previous["status"] == "withdrawn" or (
+                    previous["status"] == "failed"
+                    and previous["operation"] in ("publish", "manual_publish")
+                ):
+                    continue
             capabilities = adapter.capabilities
             if (operation == "update" and capabilities.update_mode == UpdateMode.NONE) or (
                 operation == "withdraw" and capabilities.withdraw_mode == WithdrawMode.NONE
@@ -447,7 +460,9 @@ class AnnouncementPublisher:
             reason = None
             if ann.status == AnnouncementStatus.WITHDRAWN:
                 reason = "Announcement was withdrawn before delivery."
-            elif not self.storage.get_channel_settings().get(adapter.name, True):
+            elif not self.storage.get_channel_settings().get(adapter.name, True) and not (
+                isinstance(adapter, ManualChannelAdapter) and operation == "update"
+            ):
                 reason = "Channel was disabled before delivery."
             if reason:
                 self.storage.finish_job(job_id, "cancelled", reason)
@@ -465,23 +480,42 @@ class AnnouncementPublisher:
         except Exception as exc:
             res = DeliveryResult(success=False, error=str(exc), retryable=False)
 
+        previous_manual_state = (
+            next(
+                (
+                    state
+                    for state in self.storage.get_delivery_states(ann.id)
+                    if state["adapter_name"] == adapter.name
+                ),
+                None,
+            )
+            if isinstance(adapter, ManualChannelAdapter)
+            else None
+        )
         self.storage.record_delivery(
             announcement_id=ann.id,
             adapter_name=adapter.name,
             status=(
-                "withdrawn"
-                if operation == "withdraw" and res.success
-                else "prepared"
+                "prepared"
                 if res.success and res.prepared
+                else "withdrawn"
+                if operation == "withdraw" and res.success
                 else "delivered"
                 if res.success
                 else "failed"
             ),
             error=res.error,
             external_id=res.external_id,
-            operation=operation,
+            operation=(
+                f"manual_{operation}" if isinstance(adapter, ManualChannelAdapter) else operation
+            ),
             retryable=res.retryable,
             idempotent=res.idempotent,
+            post_url=(
+                previous_manual_state["post_url"]
+                if previous_manual_state and operation in ("update", "withdraw")
+                else None
+            ),
         )
         if res.success:
             self.storage.finish_job(job_id, "succeeded")

@@ -1681,7 +1681,26 @@ def create_app(
         platform_content = []
         for platform in PLATFORM_CATALOG:
             adapter = adapters_by_name.get(platform.identifier)
+            delivery = delivery_by_channel.get(platform.identifier)
+            operation = delivery["operation"] if delivery else None
+            manual_action = {
+                "manual_publish": "publish",
+                "manual_update": "update",
+                "manual_withdraw": "withdraw",
+            }.get(operation)
+            if adapter is None and manual_action is None:
+                continue
             if adapter is None:
+                adapter = ManualChannelAdapter(platform)
+            if manual_action is None and isinstance(adapter, ManualChannelAdapter):
+                manual_action = (
+                    operation if operation in ("publish", "update", "withdraw") else None
+                )
+            if announcement.status == AnnouncementStatus.WITHDRAWN and not (
+                manual_action == "withdraw"
+                and delivery
+                and delivery["status"] in ("prepared", "failed", "unknown")
+            ):
                 continue
             variant = publisher.channel_variant(announcement, platform.identifier)
             check = adapter.check(variant)
@@ -1691,8 +1710,10 @@ def create_app(
                     "text": check.preview,
                     "image": variant.image,
                     "check": check,
-                    "delivery": delivery_by_channel.get(platform.identifier),
-                    "manual": isinstance(adapter, ManualChannelAdapter),
+                    "delivery": delivery,
+                    "manual": isinstance(adapter, ManualChannelAdapter)
+                    or manual_action is not None,
+                    "manual_action": manual_action,
                 }
             )
         return render(
@@ -1813,13 +1834,6 @@ def create_app(
         if channel not in PLATFORMS:
             raise HTTPException(status_code=404)
         announcement = announcement_or_404(announcement_id)
-        if announcement.status not in (
-            AnnouncementStatus.PUBLISHED,
-            AnnouncementStatus.UPDATED,
-        ):
-            raise HTTPException(
-                status_code=409, detail="Manual outcomes can only be recorded after publication."
-            )
         adapter = next(
             (
                 item
@@ -1828,10 +1842,6 @@ def create_app(
             ),
             None,
         )
-        if adapter is None:
-            raise HTTPException(
-                status_code=409, detail="This platform is not set up for manual posting."
-            )
         delivery = next(
             (
                 item
@@ -1845,13 +1855,43 @@ def create_app(
                 status_code=409, detail="This manual delivery is not awaiting an outcome."
             )
 
+        operation = delivery["operation"]
+        manual_action = {
+            "manual_publish": "publish",
+            "manual_update": "update",
+            "manual_withdraw": "withdraw",
+        }.get(operation)
+        if manual_action is None and adapter is not None:
+            manual_action = operation if operation in ("publish", "update", "withdraw") else None
+        if manual_action is None or (adapter is None and not operation.startswith("manual_")):
+            raise HTTPException(
+                status_code=409, detail="This platform is not set up for manual posting."
+            )
+        if manual_action == "withdraw":
+            valid_announcement_state = announcement.status == AnnouncementStatus.WITHDRAWN
+        else:
+            valid_announcement_state = announcement.status in (
+                AnnouncementStatus.PUBLISHED,
+                AnnouncementStatus.UPDATED,
+            )
+        if not valid_announcement_state:
+            raise HTTPException(
+                status_code=409, detail="This manual action does not match the announcement state."
+            )
+
         outcome = form.get("outcome", "")
-        status_by_outcome = {"published": "delivered", "failed": "failed", "unknown": "unknown"}
+        outcome_statuses = {
+            "publish": {"published": "delivered", "failed": "failed", "unknown": "unknown"},
+            "update": {"updated": "updated", "failed": "failed", "unknown": "unknown"},
+            "withdraw": {"withdrawn": "withdrawn", "failed": "failed", "unknown": "unknown"},
+        }
+        status_by_outcome = outcome_statuses[manual_action]
         if outcome not in status_by_outcome:
-            raise HTTPException(status_code=400, detail="Choose Published, Failed or Unknown.")
+            choices = ", ".join(label.capitalize() for label in status_by_outcome)
+            raise HTTPException(status_code=400, detail=f"Choose {choices}.")
         post_url = form.get("post_url", "").strip()
         note = " ".join(form.get("note", "").split())[:1000]
-        if outcome == "published":
+        if outcome in ("published", "updated"):
             try:
                 parsed_url = urlsplit(post_url)
                 valid_url = (
@@ -1869,16 +1909,21 @@ def create_app(
             if not valid_url:
                 raise HTTPException(
                     status_code=400,
-                    detail="Enter the HTTPS URL of the published post.",
+                    detail="Enter the HTTPS URL of the published or updated post.",
                 )
             recorded_post_url = post_url
             error = None
         else:
-            recorded_post_url = None
+            recorded_post_url = (
+                delivery["post_url"]
+                if manual_action in ("update", "withdraw") and outcome in ("failed", "unknown")
+                else None
+            )
+            action_label = "post" if manual_action == "publish" else manual_action
             error = note or (
-                "Administrator recorded that the manual post failed."
+                f"Administrator recorded that the manual {action_label} failed."
                 if outcome == "failed"
-                else "Administrator could not confirm whether the manual post was published."
+                else f"Administrator could not confirm whether the manual {action_label} was completed."
             )
 
         storage.record_delivery(
@@ -1886,7 +1931,7 @@ def create_app(
             channel,
             status_by_outcome[outcome],
             error=error,
-            operation="manual_publish",
+            operation=f"manual_{manual_action}",
             recorded_by=session["username"],
             post_url=recorded_post_url,
         )
@@ -1902,7 +1947,7 @@ def create_app(
         return redirect_with(
             request,
             f"/admin/announcements/{announcement_id}",
-            flash(f"{PLATFORMS[channel].name} manual outcome recorded as {outcome}."),
+            flash(f"{PLATFORMS[channel].name} manual {manual_action} recorded as {outcome}."),
         )
 
     @app.post("/admin/announcements/{announcement_id}/submit")

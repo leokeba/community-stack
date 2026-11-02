@@ -17,9 +17,13 @@ def test_manual_adapter_returns_prepared_and_uses_platform_copy():
     assert adapter.name == "instagram"
     assert adapter.preview_text(announcement) == "Join our food drive!"
     assert result.success and result.prepared
-    assert adapter.capabilities.update_mode == UpdateMode.NONE
-    assert adapter.capabilities.withdraw_mode == WithdrawMode.NONE
     assert adapter.health_check().ok
+    assert adapter.capabilities.update_mode == UpdateMode.MANUAL
+    assert adapter.capabilities.withdraw_mode == WithdrawMode.MANUAL
+    assert "manually" in adapter.capabilities.update_description
+    assert "manually" in adapter.capabilities.withdraw_description
+    assert adapter.update(announcement).prepared
+    assert adapter.withdraw(announcement.id).prepared
 
 
 def test_manual_adapter_rejects_over_limit_and_does_not_guess_limits():
@@ -35,4 +39,5 @@ def test_manual_adapter_rejects_over_limit_and_does_not_guess_limits():
 
     assert not result.success and not result.prepared
     assert "verified limit" in result.error
+    assert not limited.update(oversized).prepared
     assert ManualChannelAdapter(PLATFORMS["tiktok"]).capabilities.max_text_length is None

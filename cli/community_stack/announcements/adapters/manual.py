@@ -37,8 +37,8 @@ class ManualChannelAdapter(ChannelAdapter):
                 self.platform.supported_media and "image" in self.platform.supported_media
             ),
             custom_text=True,
-            update_mode=UpdateMode.NONE,
-            withdraw_mode=WithdrawMode.NONE,
+            update_mode=UpdateMode.MANUAL,
+            withdraw_mode=WithdrawMode.MANUAL,
         )
 
     def render_text(self, announcement: Announcement) -> str:
@@ -57,7 +57,7 @@ class ManualChannelAdapter(ChannelAdapter):
         return DeliveryResult(success=True, prepared=True)
 
     def update(self, announcement: Announcement) -> DeliveryResult:
-        return DeliveryResult(success=True, prepared=True)
+        return self.publish(announcement)
 
     def withdraw(self, announcement_id: str) -> DeliveryResult:
         return DeliveryResult(success=True, prepared=True)

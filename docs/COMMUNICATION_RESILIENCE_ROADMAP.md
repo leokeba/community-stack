@@ -1,7 +1,7 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.5
+the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.6
 work, which has not been deployed. Live connector acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
@@ -406,8 +406,14 @@ Start with manual publishing. Do not try to automate every platform.
   available. Manual outcome actions sit with the platform kit; opening a link
   changes nothing. Tests cover generated text, official links, and shared-image
   fallback versus a per-platform override.
-- [ ] **CR3.6 Cover edits and withdrawals.** When a published announcement changes
-  or is withdrawn, create a visible task for each manual channel.
+- [x] **CR3.6 Cover edits and withdrawals.** When a published announcement changes
+  or is withdrawn, create a visible task for each manual channel that may have
+  received the post. Manual adapters mark edits and withdrawals as requiring a
+  human action, without contacting the platform; the announcement page shows the
+  current edit text or the post to remove and records Updated, Withdrawn, Failed
+  or Unknown with an actor and timestamp. Confirmed update URLs are kept, and a
+  removed post no longer appears as live. Failed initial manual publications do
+  not create follow-up tasks.
 - [ ] **CR3.7 Add the CLI.** Add commands to list publications for an announcement
   and record an outcome.
 - [ ] **CR3.8 Review automatic adapters.** Confirm each one is independently
