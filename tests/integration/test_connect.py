@@ -2,10 +2,13 @@
 
 import copy
 import logging
+import re
 from pathlib import Path
 
 import pytest
 import yaml
+from community_stack.admin.app import create_app
+from community_stack.admin.store import AdminStore
 from community_stack.announcements.adapters.base import ChannelAdapter, DeliveryResult, HealthResult
 from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.models import Announcement, AnnouncementStatus
@@ -14,9 +17,11 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.cli import main
 from community_stack.continuity.connect_page import offline_connect_files
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
+from fastapi.testclient import TestClient
 from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
+PASSWORD = "a-long-safe-test-password"
 
 
 class RecordingAdapter(ChannelAdapter):
@@ -79,6 +84,10 @@ def _announcement(ann_id: str, status: AnnouncementStatus, title: str) -> Announ
         status=status,
         canonical_url=f"https://community.example.org/feed/announcements/{ann_id}/",
     )
+
+
+def _csrf(response) -> str:
+    return re.search(r'name="csrf_token" value="([^"]+)"', response.text).group(1)
 
 
 def test_recent_list_excludes_drafts_and_withdrawn(site):
@@ -234,6 +243,118 @@ def test_unconnected_profile_platform_is_prepared_and_keeps_connector_name(site)
     publisher.reload_connections()
     instagram = next(adapter for adapter in publisher.adapters if adapter.name == "instagram")
     assert not isinstance(instagram, ManualChannelAdapter)
+
+
+def test_manual_publication_outcomes_record_url_timestamp_and_actor(site):
+    config_path = site / "community-stack.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["community"]["social"].extend(
+        [
+            {"platform": "tiktok", "url": "https://www.tiktok.com/@example"},
+            {"platform": "x", "url": "https://x.com/example"},
+        ]
+    )
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    db_path = site / "data/announcements/announcements.db"
+    AdminStore(db_path).create_admin("olga", PASSWORD)
+    storage = AnnouncementStorage(db_path)
+    announcement = Announcement(
+        title="Food drive",
+        body="Bring supplies.",
+        status=AnnouncementStatus.PUBLISHED,
+    )
+    storage.save_announcement(announcement)
+    for channel in ("instagram", "tiktok", "x"):
+        storage.record_delivery(announcement.id, channel, "prepared")
+
+    app = create_app(
+        db_path=db_path,
+        feed_dir=site / "data/landing/feed",
+        config_path=config_path,
+        setup_token="unused",
+        run_worker=False,
+    )
+    client = TestClient(app, base_url="https://community.test", follow_redirects=False)
+    login = client.get("/admin/login")
+    client.post(
+        "/admin/login",
+        data={"csrf_token": _csrf(login), "username": "olga", "password": PASSWORD},
+    )
+    detail_url = f"/admin/announcements/{announcement.id}"
+    detail = client.get(detail_url)
+    outcome_url = f"{detail_url}/channels/instagram/outcome"
+
+    assert (
+        client.post(
+            outcome_url,
+            data={"csrf_token": _csrf(detail), "outcome": "published"},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            outcome_url,
+            data={
+                "csrf_token": _csrf(detail),
+                "outcome": "published",
+                "post_url": "javascript:alert(1)",
+            },
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            outcome_url,
+            data={
+                "csrf_token": _csrf(detail),
+                "outcome": "published",
+                "post_url": "https://instagram.com/p/abc123/",
+            },
+        ).status_code
+        == 303
+    )
+    assert (
+        client.post(
+            f"{detail_url}/channels/tiktok/outcome",
+            data={
+                "csrf_token": _csrf(detail),
+                "outcome": "failed",
+                "note": "The platform rejected the post.",
+            },
+        ).status_code
+        == 303
+    )
+    assert (
+        client.post(
+            f"{detail_url}/channels/x/outcome",
+            data={"csrf_token": _csrf(detail), "outcome": "unknown"},
+        ).status_code
+        == 303
+    )
+
+    states = {item["adapter_name"]: item for item in storage.get_delivery_states(announcement.id)}
+    assert states["instagram"]["status"] == "delivered"
+    assert states["instagram"]["external_id"] is None
+    assert states["instagram"]["post_url"] == "https://instagram.com/p/abc123/"
+    assert storage.get_external_id(announcement.id, "instagram") is None
+    assert states["instagram"]["recorded_by"] == "olga"
+    assert states["tiktok"]["status"] == "failed"
+    assert states["tiktok"]["last_error"] == "The platform rejected the post."
+    assert states["x"]["status"] == "unknown"
+    assert states["x"]["recorded_by"] == "olga"
+    assert all(
+        item["recorded_by"] == "olga"
+        for item in storage.get_delivery_attempts(announcement.id)
+        if item["operation"] == "manual_publish"
+    )
+
+    final_detail = client.get(detail_url)
+    assert 'href="https://instagram.com/p/abc123/"' in final_detail.text
+    assert "View post" in final_detail.text
+    assert "olga" in final_detail.text
+    assert "Unknown" in final_detail.text
+    assert "Failed" in final_detail.text
 
 
 def test_page_follows_canonical_state_even_when_a_channel_fails(site):

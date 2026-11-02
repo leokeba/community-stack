@@ -17,7 +17,7 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
@@ -52,6 +52,7 @@ from community_stack.agent.settings import SETTINGS
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
 from community_stack.announcements.adapters.http import UnsafeURLError
+from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
@@ -146,8 +147,10 @@ STATUS_BADGES = {
     "published": ("Published", "success"),
     "updated": ("Updated", "success"),
     "withdrawn": ("Withdrawn", "neutral"),
-    "delivered": ("Delivered", "success"),
+    "prepared": ("Prepared", "info"),
+    "delivered": ("Published", "success"),
     "failed": ("Failed", "danger"),
+    "unknown": ("Unknown", "warning"),
     "queued": ("Waiting to retry", "warning"),
     "running": ("In progress", "info"),
     "ok": ("OK", "success"),
@@ -1694,6 +1697,11 @@ def create_app(
                     }
                     for platform in PLATFORM_CATALOG
                 ],
+                manual_channels=[
+                    adapter.name
+                    for adapter in publisher.adapters
+                    if isinstance(adapter, ManualChannelAdapter)
+                ],
                 delivery_attempts=storage.get_delivery_attempts(announcement_id),
             ),
         )
@@ -1777,6 +1785,106 @@ def create_app(
             request,
             f"/admin/announcements/{announcement_id}",
             delivery_message("Published.", results),
+        )
+
+    @app.post("/admin/announcements/{announcement_id}/channels/{channel}/outcome")
+    async def record_manual_outcome(
+        request: Request, announcement_id: str, channel: str
+    ) -> Response:
+        session, form = await checked_form(request, "edit")
+        if channel not in PLATFORMS:
+            raise HTTPException(status_code=404)
+        announcement = announcement_or_404(announcement_id)
+        if announcement.status not in (
+            AnnouncementStatus.PUBLISHED,
+            AnnouncementStatus.UPDATED,
+        ):
+            raise HTTPException(
+                status_code=409, detail="Manual outcomes can only be recorded after publication."
+            )
+        adapter = next(
+            (
+                item
+                for item in publisher.adapters
+                if item.name == channel and isinstance(item, ManualChannelAdapter)
+            ),
+            None,
+        )
+        if adapter is None:
+            raise HTTPException(
+                status_code=409, detail="This platform is not set up for manual posting."
+            )
+        delivery = next(
+            (
+                item
+                for item in storage.get_delivery_states(announcement_id)
+                if item["adapter_name"] == channel
+            ),
+            None,
+        )
+        if delivery is None or delivery["status"] not in ("prepared", "failed", "unknown"):
+            raise HTTPException(
+                status_code=409, detail="This manual delivery is not awaiting an outcome."
+            )
+
+        outcome = form.get("outcome", "")
+        status_by_outcome = {"published": "delivered", "failed": "failed", "unknown": "unknown"}
+        if outcome not in status_by_outcome:
+            raise HTTPException(status_code=400, detail="Choose Published, Failed or Unknown.")
+        post_url = form.get("post_url", "").strip()
+        note = " ".join(form.get("note", "").split())[:1000]
+        if outcome == "published":
+            try:
+                parsed_url = urlsplit(post_url)
+                valid_url = (
+                    len(post_url) <= 2048
+                    and not any(character.isspace() for character in post_url)
+                    and parsed_url.scheme == "https"
+                    and parsed_url.hostname is not None
+                    and parsed_url.path not in ("", "/")
+                    and parsed_url.username is None
+                    and parsed_url.password is None
+                )
+                _ = parsed_url.port
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Enter the HTTPS URL of the published post.",
+                )
+            recorded_post_url = post_url
+            error = None
+        else:
+            recorded_post_url = None
+            error = note or (
+                "Administrator recorded that the manual post failed."
+                if outcome == "failed"
+                else "Administrator could not confirm whether the manual post was published."
+            )
+
+        storage.record_delivery(
+            announcement_id,
+            channel,
+            status_by_outcome[outcome],
+            error=error,
+            operation="manual_publish",
+            recorded_by=session["username"],
+            post_url=recorded_post_url,
+        )
+        audit(
+            request,
+            session["username"],
+            "announcement.manual_outcome_recorded",
+            announcement_id,
+            channel=channel,
+            outcome=outcome,
+            post_url=recorded_post_url,
+        )
+        return redirect_with(
+            request,
+            f"/admin/announcements/{announcement_id}",
+            flash(f"{PLATFORMS[channel].name} manual outcome recorded as {outcome}."),
         )
 
     @app.post("/admin/announcements/{announcement_id}/submit")

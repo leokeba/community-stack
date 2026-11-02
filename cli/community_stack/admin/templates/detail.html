@@ -122,12 +122,34 @@
   {% if deliveries %}
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead>
+    <thead><tr><th>Channel</th><th>Status</th><th>Last activity</th><th>Recorded by</th><th>Post or outcome</th><th>Attempts</th><th>Last error</th></tr></thead>
     <tbody>
     {% for delivery in deliveries %}
     <tr>
       <td class="mono">{{ delivery.adapter_name }}</td>
       <td>{{ badge(delivery.status) }}</td>
+      <td><time datetime="{{ delivery.last_attempt_at }}">{{ delivery.last_attempt_at }}</time></td>
+      <td>{{ delivery.recorded_by or "—" }}</td>
+      <td>
+        {% if delivery.status == "delivered" and delivery.recorded_by and delivery.post_url %}
+        <a href="{{ delivery.post_url }}" rel="noopener noreferrer">View post</a>
+        {% elif delivery.adapter_name in manual_channels and delivery.status in ["prepared", "failed", "unknown"] and perms.edit %}
+        <form method="post" action="/admin/announcements/{{ announcement.id }}/channels/{{ delivery.adapter_name }}/outcome">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="manual-outcome-{{ delivery.adapter_name }}">Outcome</label>
+          <select id="manual-outcome-{{ delivery.adapter_name }}" name="outcome">
+            <option value="published">Published</option>
+            <option value="failed">Failed</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <label for="manual-post-url-{{ delivery.adapter_name }}">Post URL (required for Published)</label>
+          <input id="manual-post-url-{{ delivery.adapter_name }}" name="post_url" type="url" maxlength="2048">
+          <label for="manual-note-{{ delivery.adapter_name }}">Note (optional)</label>
+          <input id="manual-note-{{ delivery.adapter_name }}" name="note" maxlength="1000">
+          <button type="submit" class="secondary small">Record outcome</button>
+        </form>
+        {% else %}—{% endif %}
+      </td>
       <td>{{ delivery.attempts }}</td>
       <td>{{ delivery.last_error or "—" }}</td>
     </tr>

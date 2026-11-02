@@ -1,7 +1,7 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.3
+the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.4
 work, which has not been deployed. Live connector acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
@@ -393,11 +393,12 @@ Start with manual publishing. Do not try to automate every platform.
   in the community profile when no connector is configured. It uses the platform's
   connector name, preserving delivery history when the account switches to automation.
   Manual preparation records the `prepared` outcome without contacting the platform.
-- [ ] **CR3.4 Extend delivery states.** Add `prepared` and `unknown` to
-  `delivery_states`, and a column for who recorded the result. Show the four states
-  Prepared, Published, Failed and Unknown in the console, with `delivered` displayed
-  as Published. Only an explicit administrator action sets a manual channel to
-  published, with its post URL and timestamp.
+- [x] **CR3.4 Extend delivery states.** Persist `prepared` and `unknown` outcomes and
+  record the administrator who records a manual result in both the current state and
+  attempt history. The console displays Prepared, Published, Failed and Unknown;
+  automatic `delivered` outcomes display as Published. A manual channel becomes
+  Published only after an administrator records a valid HTTPS post URL, stored
+  separately from connector external IDs.
 - [ ] **CR3.5 Build the console workflow.** On the announcement page, show each
   platform's text and media, a copy-to-clipboard button, a link to the official
   platform, and actions to record the outcome. Text must remain selectable without

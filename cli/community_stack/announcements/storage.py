@@ -58,8 +58,10 @@ class AnnouncementStorage:
                     last_attempt_at TEXT NOT NULL,
                     last_error TEXT,
                     external_id TEXT,
+                    post_url TEXT,
                     retryable INTEGER NOT NULL DEFAULT 0,
                     idempotent INTEGER NOT NULL DEFAULT 0,
+                    recorded_by TEXT,
                     PRIMARY KEY (announcement_id, adapter_name),
                     FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
                 );
@@ -115,6 +117,10 @@ class AnnouncementStorage:
                 conn.execute(
                     "ALTER TABLE delivery_states ADD COLUMN idempotent INTEGER NOT NULL DEFAULT 0"
                 )
+            if "recorded_by" not in columns:
+                conn.execute("ALTER TABLE delivery_states ADD COLUMN recorded_by TEXT")
+            if "post_url" not in columns:
+                conn.execute("ALTER TABLE delivery_states ADD COLUMN post_url TEXT")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS delivery_attempts (
                     attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,13 +132,22 @@ class AnnouncementStorage:
                     attempted_at TEXT NOT NULL,
                     error TEXT,
                     external_id TEXT,
+                    post_url TEXT,
                     retryable INTEGER NOT NULL DEFAULT 0,
                     idempotent INTEGER NOT NULL DEFAULT 0,
+                    recorded_by TEXT,
                     legacy_snapshot INTEGER NOT NULL DEFAULT 0,
                     UNIQUE (announcement_id, adapter_name, attempt_number),
                     FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
                 );
             """)
+            attempt_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(delivery_attempts)")
+            }
+            if "recorded_by" not in attempt_columns:
+                conn.execute("ALTER TABLE delivery_attempts ADD COLUMN recorded_by TEXT")
+            if "post_url" not in attempt_columns:
+                conn.execute("ALTER TABLE delivery_attempts ADD COLUMN post_url TEXT")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS delivery_attempts_announcement_idx
                 ON delivery_attempts (announcement_id, attempted_at, attempt_id);
@@ -368,6 +383,8 @@ class AnnouncementStorage:
         operation: str = "publish",
         retryable: bool = False,
         idempotent: bool = False,
+        recorded_by: str | None = None,
+        post_url: str | None = None,
     ) -> None:
         """Record the outcome of a delivery attempt for an adapter."""
         now = datetime.now(timezone.utc).isoformat()
@@ -385,8 +402,8 @@ class AnnouncementStorage:
                 """
                 INSERT INTO delivery_attempts (
                     announcement_id, adapter_name, attempt_number, operation, status,
-                    attempted_at, error, external_id, retryable, idempotent
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    attempted_at, error, external_id, post_url, retryable, idempotent, recorded_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     announcement_id,
@@ -397,16 +414,19 @@ class AnnouncementStorage:
                     now,
                     error,
                     external_id,
+                    post_url,
                     int(retryable),
                     int(idempotent),
+                    recorded_by,
                 ),
             )
             conn.execute(
                 """
                 INSERT INTO delivery_states (
                     announcement_id, adapter_name, status, operation, attempts,
-                    last_attempt_at, last_error, external_id, retryable, idempotent
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    last_attempt_at, last_error, external_id, post_url, retryable, idempotent,
+                    recorded_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(announcement_id, adapter_name) DO UPDATE SET
                     status=excluded.status,
                     operation=excluded.operation,
@@ -414,8 +434,10 @@ class AnnouncementStorage:
                     last_attempt_at=excluded.last_attempt_at,
                     last_error=excluded.last_error,
                     external_id=COALESCE(excluded.external_id, delivery_states.external_id),
+                    post_url=excluded.post_url,
                     retryable=excluded.retryable,
-                    idempotent=excluded.idempotent
+                    idempotent=excluded.idempotent,
+                    recorded_by=excluded.recorded_by
                 ;
                 """,
                 (
@@ -427,8 +449,10 @@ class AnnouncementStorage:
                     now,
                     error,
                     external_id,
+                    post_url,
                     int(retryable),
                     int(idempotent),
+                    recorded_by,
                 ),
             )
             conn.commit()

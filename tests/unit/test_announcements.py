@@ -142,15 +142,18 @@ def test_storage_migrates_legacy_timestamp_and_delivery_state(tmp_path):
         status="delivered",
         operation="update",
         idempotent=True,
+        recorded_by="olga",
     )
     history = storage.get_delivery_attempts("ann_legacy_1")
     assert [attempt["attempt_number"] for attempt in history] == [4, 5]
     assert [attempt["status"] for attempt in history] == ["failed", "delivered"]
     assert history[0]["error"] == "Old failure"
     assert history[1]["legacy_snapshot"] == 0
+    assert history[1]["recorded_by"] == "olga"
     current = storage.get_delivery_states("ann_legacy_1")[0]
     assert current["attempts"] == 5
     assert current["status"] == "delivered"
+    assert current["recorded_by"] == "olga"
 
 
 def test_storage_delivery_state_tracking(tmp_path):
