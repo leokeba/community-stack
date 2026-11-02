@@ -550,6 +550,7 @@ def test_deployment_mounts_connect_directory_writable_for_announcements():
 
 def test_connect_mountpoint_exists_in_read_only_html_volume():
     assert (REPO / "services/landing/html/connect").is_dir()
+    assert (REPO / "services/landing/html/continuity").is_dir()
 
 
 def test_portal_pages_link_to_the_connect_page():
