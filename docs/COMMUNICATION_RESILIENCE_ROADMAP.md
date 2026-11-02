@@ -1,7 +1,7 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, CR3.1 and CR3.2
+the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.3
 work, which has not been deployed. Live connector acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
@@ -389,9 +389,10 @@ Start with manual publishing. Do not try to automate every platform.
   the shared image, used for that channel's delivery, and published for public media
   URLs only while the announcement is active. Tests cover generation, persistence,
   delivery, uploads and the legacy database migration.
-- [ ] **CR3.3 Add a manual adapter.** Add a `ManualChannelAdapter` that reuses the
-  connector's channel name, so a platform's text and history carry over if it is
-  automated later. Add a `prepared` outcome to `DeliveryResult`.
+- [x] **CR3.3 Add a manual adapter.** Add a `ManualChannelAdapter` for social accounts
+  in the community profile when no connector is configured. It uses the platform's
+  connector name, preserving delivery history when the account switches to automation.
+  Manual preparation records the `prepared` outcome without contacting the platform.
 - [ ] **CR3.4 Extend delivery states.** Add `prepared` and `unknown` to
   `delivery_states`, and a column for who recorded the result. Show the four states
   Prepared, Published, Failed and Unknown in the console, with `delivered` displayed

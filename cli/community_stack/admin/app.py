@@ -348,16 +348,31 @@ def create_app(
         return next((a.capabilities.label for a in publisher.adapters if a.name == name), name)
 
     def delivery_message(text: str, results: dict[str, Any]) -> dict[str, Any]:
+        prepared = sorted(
+            channel_label(name) for name, result in results.items() if result.prepared
+        )
         failed = sorted(
             channel_label(name) for name, result in results.items() if not result.success
         )
-        if not failed:
-            return flash(text)
-        return flash(
-            f"{text} Some channels failed: {', '.join(failed)}.",
-            "warning",
-            ["Failures that are safe to repeat are retried automatically. See the delivery list."],
-        )
+        if prepared:
+            automatic_success = any(
+                result.success and not result.prepared for result in results.values()
+            )
+            text = (
+                "Published to automatic channels."
+                if automatic_success
+                else "No automatic channel was published."
+            )
+            text += f" Prepared for manual publishing on: {', '.join(prepared)}."
+        if failed:
+            return flash(
+                f"{text} Some channels failed: {', '.join(failed)}.",
+                "warning",
+                [
+                    "Failures that are safe to repeat are retried automatically. See the delivery list."
+                ],
+            )
+        return flash(text)
 
     def page(session: dict[str, Any], **context: Any) -> dict[str, Any]:
         """Template context for a signed-in page, including what the role may do."""

@@ -19,6 +19,7 @@ class DeliveryResult:
     error: str | None = None
     retryable: bool = False
     idempotent: bool = False
+    prepared: bool = False
 
 
 @dataclass

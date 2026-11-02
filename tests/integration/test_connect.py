@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 from community_stack.announcements.adapters.base import ChannelAdapter, DeliveryResult, HealthResult
+from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
@@ -203,6 +204,36 @@ def test_failed_page_refresh_never_blocks_delivery(site, caplog):
     assert adapter.published
     assert "Could not refresh the /connect page." in caplog.text
     assert not (site / "data/landing/connect/index.html").exists()
+
+
+def test_unconnected_profile_platform_is_prepared_and_keeps_connector_name(site):
+    storage = _storage(site)
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        config_path=site / "community-stack.yaml",
+        feed_dir=site / "data/landing/feed",
+    )
+    manual = next(adapter for adapter in publisher.adapters if adapter.name == "instagram")
+    assert isinstance(manual, ManualChannelAdapter)
+
+    announcement, results = publisher.publish("Food drive", "Bring supplies.")
+
+    assert results["instagram"].success and results["instagram"].prepared
+    delivery = next(
+        state
+        for state in storage.get_delivery_states(announcement.id)
+        if state["adapter_name"] == "instagram"
+    )
+    assert delivery["status"] == "prepared"
+
+    storage.save_connection(
+        "instagram",
+        {"account_id": "123456789", "access_token": "test-access-token"},
+        "olga",
+    )
+    publisher.reload_connections()
+    instagram = next(adapter for adapter in publisher.adapters if adapter.name == "instagram")
+    assert not isinstance(instagram, ManualChannelAdapter)
 
 
 def test_page_follows_canonical_state_even_when_a_channel_fails(site):

@@ -18,6 +18,7 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.connectors import (
@@ -28,7 +29,7 @@ from community_stack.announcements.connectors import (
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.platform_content import generate_platform_text
-from community_stack.announcements.platforms import PLATFORMS
+from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
 from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
@@ -97,6 +98,7 @@ class AnnouncementPublisher:
         base_url = "https://community.example.org"
         community_name = "Community Communications"
         channels: dict[str, Any] = {}
+        social_platforms: set[str] = set()
         self.whatsapp_bridge_enabled = False
         self.matrix_auth = None
         if self.config_path.is_file():
@@ -107,6 +109,9 @@ class AnnouncementPublisher:
             community_url = cfg.get("community", {}).get("url") or base_url
             self.connect_url = f"{community_url.rstrip('/')}/connect/"
             community_name = cfg.get("project", {}).get("name", "Community")
+            social_platforms = {
+                item["platform"] for item in (cfg.get("community") or {}).get("social", [])
+            }
             announcement_config = cfg["services"]["announcements"]
             if not announcement_config["enabled"]:
                 return adapters
@@ -164,7 +169,15 @@ class AnnouncementPublisher:
                     access_token=access_token,
                 )
             )
-        return adapters + self._connected_adapters()
+        connected = self._connected_adapters()
+        configured_names = {adapter.name for adapter in (*adapters, *connected)}
+        manual = [
+            ManualChannelAdapter(platform)
+            for platform in PLATFORM_CATALOG
+            if platform.identifier in social_platforms
+            and platform.identifier not in configured_names
+        ]
+        return adapters + connected + manual
 
     def _connected_adapters(self) -> list[ChannelAdapter]:
         """Adapters for channels organizers connected in the console."""
@@ -458,6 +471,8 @@ class AnnouncementPublisher:
             status=(
                 "withdrawn"
                 if operation == "withdraw" and res.success
+                else "prepared"
+                if res.success and res.prepared
                 else "delivered"
                 if res.success
                 else "failed"
