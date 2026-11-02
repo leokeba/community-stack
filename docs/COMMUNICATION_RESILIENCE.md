@@ -67,7 +67,9 @@ flowchart LR
 | CR2.1–CR2.14 subscriptions | Implemented and tested; legal review approved 2026-11-02 |
 | Pixelfed connector | Implemented separately from Instagram; live-instance acceptance is pending |
 | CR3 | CR3.1–CR3.8 implemented and tested; automatic adapter live acceptance remains pending for every external provider |
-| CR4–CR6 | Not started |
+| CR4 continuity mode | Implemented: manual channel states, audited activation/deactivation, resumable migration steps, public notice, offline guide and operator runbook; staging acceptance is pending |
+| CR5 adoption and exercises | Not started |
+| CR6 integration intake | Deferred pending a qualifying demand and acceptance case |
 
 ## Dependencies between phases
 CR2 depends on CR1 for the sign-up links and channel explanations. CR4 depends

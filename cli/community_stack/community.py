@@ -56,6 +56,7 @@ class CommunityProfile:
     url: str
     domain: str
     base_domain: str
+    languages: tuple[str, ...] = ("en",)
     description: str = ""
     logo: str | None = None
     cover: str | None = None
@@ -113,6 +114,7 @@ def load_profile(config: dict[str, Any], domain_web: str | None = None) -> Commu
         url=url,
         domain=web_domain,
         base_domain=base_domain,
+        languages=tuple(community.get("languages") or ["en"]),
         description=community.get("description", ""),
         logo=community.get("logo"),
         cover=community.get("cover"),

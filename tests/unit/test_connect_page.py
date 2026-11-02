@@ -138,6 +138,35 @@ def test_page_gives_the_address_as_plain_text_for_print():
     assert "Social networks can change their rules" in page
 
 
+def test_page_renders_channel_states_and_multilingual_continuity_notice():
+    page = render_page(
+        _profile(),
+        _resolution(),
+        [],
+        None,
+        GENERATED,
+        channel_states={
+            "instagram": {
+                "status": "unavailable",
+                "reason": "<script>unsafe</script>",
+                "updated_at": GENERATED,
+                "actor": "olga",
+            }
+        },
+        notice={
+            "translations": {
+                "en": {"title": "Important update", "body": "Use the feed."},
+                "fr": {"title": "Mise à jour", "body": "Utilisez le flux."},
+            }
+        },
+    )
+
+    assert "Unavailable" in page
+    assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
+    assert 'lang="en"><h2>Important update</h2>' in page
+    assert 'lang="fr"><h2>Mise à jour</h2>' in page
+
+
 def test_prepare_logo_removes_metadata(tmp_path):
     path = tmp_path / "logo.png"
     info = PngInfo()
@@ -198,7 +227,13 @@ def test_qr_svg_is_well_formed_and_qr_png_decodes_as_image():
 def test_bundle_contains_identity_files_and_no_private_data():
     profile = _profile()
     bundle = build_bundle(profile, _resolution(), [], None, GENERATED)
-    assert set(bundle) == {"index.html", "community.json", "qr.svg", "qr.png"}
+    assert set(bundle) == {
+        "index.html",
+        "continuity-notice.html",
+        "community.json",
+        "qr.svg",
+        "qr.png",
+    }
 
     data = json.loads(bundle["community.json"])
     assert data["connect_url"] == "https://community.example.org/connect/"
@@ -225,7 +260,7 @@ def test_bundle_contains_cover_image_and_metadata():
 def test_build_site_includes_logo_when_given(tmp_path):
     profile = _profile()
     files = build_site(profile, _resolution(), [], ("logo.jpg", b"jpegbytes"), GENERATED)
-    assert set(files) == {"index.html", "logo.jpg"}
+    assert set(files) == {"index.html", "continuity-notice.html", "logo.jpg"}
     assert b'src="logo.jpg"' in files["index.html"]
 
 

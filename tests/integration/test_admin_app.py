@@ -6,6 +6,7 @@ from pathlib import Path
 
 from community_stack.admin.app import LOGIN_IP_LIMIT, AdminStore, create_app
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
+from community_stack.continuity.service import DEFAULT_ENGLISH_TEMPLATE
 from fastapi.testclient import TestClient
 
 
@@ -413,3 +414,62 @@ def test_announcement_list_filters_by_status(tmp_path):
     assert "Water outage" not in published.text
     assert "No announcements with this status." in published.text
     assert "Water outage" in client.get("/admin/announcements?status=nonsense").text
+
+
+def test_continuity_console_is_authenticated_and_renders_channel_controls(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    assert client.get("/admin/continuity").status_code == 303
+
+    setup_admin(client)
+    response = client.get("/admin/continuity")
+
+    assert response.status_code == 200
+    assert "Plan a migration" in response.text
+    assert "Preview plan" in response.text
+    assert "Activate continuity mode" in response.text
+    assert 'name="password"' in response.text
+    assert "Channel status" in response.text
+
+
+def test_continuity_console_reconfirms_password_and_audits_activation_and_deactivation(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    setup_admin(client)
+    page = client.get("/admin/continuity")
+    csrf_token = extract_csrf(page)
+    form = {
+        "csrf_token": csrf_token,
+        "reason": "Our Instagram account is unavailable.",
+        "affected": "instagram",
+        "title:en": DEFAULT_ENGLISH_TEMPLATE["title"],
+        "body_template:en": DEFAULT_ENGLISH_TEMPLATE["body_template"],
+        "what_happened:en": DEFAULT_ENGLISH_TEMPLATE["what_happened"],
+        "join_instructions:en": DEFAULT_ENGLISH_TEMPLATE["join_instructions"],
+    }
+
+    rejected = client.post(
+        "/admin/continuity/activate",
+        data={**form, "password": "incorrect-password"},
+    )
+    assert rejected.status_code == 403
+    assert client.app.state.continuity.status()["current"] is None
+
+    activated = client.post(
+        "/admin/continuity/activate",
+        data={**form, "password": "a-long-safe-test-password"},
+    )
+    assert activated.status_code == 303
+    assert client.app.state.continuity.status()["current"]["active"] is True
+
+    deactivated = client.post(
+        "/admin/continuity/deactivate",
+        data={
+            "csrf_token": csrf_token,
+            "reason": "Normal service has resumed.",
+            "password": "a-long-safe-test-password",
+        },
+    )
+    assert deactivated.status_code == 303
+    assert client.app.state.continuity.status()["current"]["active"] is False
+    actions = [event["action"] for event in client.app.state.auth_store.list_events()]
+    assert "continuity.activated" in actions
+    assert "continuity.deactivated" in actions

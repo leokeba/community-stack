@@ -72,8 +72,8 @@ connector or production failover acceptance.
 | Community identity | Optional YAML profile, console editing through the agent, sanitized logo and cover uploads, QR codes and offline identity package | Verify the new upload flow on a deployed instance |
 | Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads, Pixelfed and a native fediverse actor | No external provider has live acceptance recorded; CI uses fakes |
 | Email and subscribers | Native SMTP connector, double opt-in, consent records, per-recipient unsubscribe, preferences, administration, CLI and backup support | Validate real-provider delivery; legal review approved 2026-11-02 |
-| Offline | Checksummed archive plus identity page, channel details, QR codes and `community.json` | No offline continuity guide (CR4.6) |
-| Continuity | Static `/connect` and archive foundations | No channel states, activation workflow or drills (CR4–CR5) |
+| Offline | Checksummed archive plus identity page, channel details, QR codes and `community.json` | Continuity guide is now available; keep advance distribution current (CR4.6, CR4.9) |
+| Continuity | Manual channel states, append-only events, resumable activation, public notice, offline guide and operator runbook | Staging acceptance remains; adoption metrics and drills are CR5 |
 | Social publishing | Automatic connectors, per-channel content, manual publishing kits, outcomes and edit/withdraw follow-up tasks | Live provider acceptance and continuity operations remain |
 
 ### Findings that shape the remaining work
@@ -459,41 +459,41 @@ what separates Community Stack from a conventional multi-channel publisher.
 
 ### Tasks
 
-- [ ] **CR4.1 Add channel states.** Add a table recording operational, degraded,
+- [x] **CR4.1 Add channel states.** Add a table recording operational, degraded,
   unavailable or retired, with reason, time and actor, for social and independent
   channels. States are set manually. Never infer them from API availability, because
   account restrictions, moderation and local blocking differ from platform outages.
   Show them on `/connect`.
-- [ ] **CR4.2 Add continuity events.** Add an append-only table of activations and
+- [x] **CR4.2 Add continuity events.** Add an append-only table of activations and
   deactivations, with time, actor, reason and affected channels.
-- [ ] **CR4.3 Build the continuity service.** Add `continuity/service.py`, used by
+- [x] **CR4.3 Build the continuity service.** Add `continuity/service.py`, used by
   both CLI and console. Activation records the event, updates affected channels,
   shows the public notice, publishes to independent channels, prepares social messages,
   and generates the guide. Each step is idempotent and logged, so a failed step can
   be resumed and cannot block the others. Normal publishing and archiving keep
   working throughout.
-- [ ] **CR4.4 Add the migration template.** Seed a template covering what happened,
+- [x] **CR4.4 Add the migration template.** Seed a template covering what happened,
   which channels are affected, where to reach the community, the canonical URL, how
   to join independent channels, and the date and time of the update. Support each
   language in `community.languages`. Publish through the existing urgent path, and
   only to channels not marked affected.
-- [ ] **CR4.5 Show the public notice.** Display it on `/connect` and on the home page.
+- [x] **CR4.5 Show the public notice.** Display it on `/connect` and on the home page.
   `index.html` is a read-only shipped file, so replace the dead `emergency-banner` with
   a mechanism that needs no JavaScript.
-- [ ] **CR4.6 Build the offline continuity package.** Add `continuity/package.py`
+- [x] **CR4.6 Build the offline continuity package.** Add `continuity/package.py`
   producing a zip with identity and contacts, official channel URLs, independent channel
   instructions, latest important announcements, emergency procedures, QR codes, a
   printable HTML guide, and JSON data. Reuse the manifest and `archive verify`. Publish
   the guide as a downloadable contact and communication guide. Never include subscriber
   data.
-- [ ] **CR4.7 Add commands and console controls.** Add `continuity status`, `plan`,
+- [x] **CR4.7 Add commands and console controls.** Add `continuity status`, `plan`,
   `activate` and `deactivate`, plus a console page with password re-confirmation for
   owners and admins. `plan` previews everything activation would do. Both surfaces write
   to the audit log.
-- [ ] **CR4.8 Make it reversible.** Deactivation removes the notice and keeps the
+- [x] **CR4.8 Make it reversible.** Deactivation removes the notice and keeps the
   history. Nothing in this phase deletes, disconnects or retires a social account
   automatically.
-- [ ] **CR4.9 Document the failure of your own server.** `/connect` depends on the
+- [x] **CR4.9 Document the failure of your own server.** `/connect` depends on the
   community's domain and host. Document the operator runbook, the standby host in
   `docs/multi-host-resilience.md`, and how to distribute the offline package in advance.
 

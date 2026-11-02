@@ -19,6 +19,7 @@ from community_stack.continuity.connect_page import (
     write_files,
 )
 from community_stack.continuity.offline_exporter import write_checksummed_zip
+from community_stack.continuity.store import ContinuityStore
 
 DEFAULT_QR_DIR = Path("backups/connect-qr")
 DEFAULT_EXPORT = Path("backups/community-identity.zip")
@@ -110,7 +111,17 @@ def _export(args: argparse.Namespace, config_path: Path | str, storage) -> int:
         config_path, storage, require_images=True
     )
     now = datetime.now(timezone.utc).isoformat()
-    files = build_bundle(profile, resolution, announcements, logo, now, cover)
+    continuity = ContinuityStore(storage.db_path)
+    files = build_bundle(
+        profile,
+        resolution,
+        announcements,
+        logo,
+        now,
+        cover,
+        continuity.list_channel_states(),
+        continuity.active_notice(),
+    )
     target = Path(getattr(args, "output", None) or DEFAULT_EXPORT)
     if target.suffix != ".zip":
         target = target.with_suffix(".zip")
@@ -128,7 +139,21 @@ def _render(args: argparse.Namespace, config_path: Path | str, storage) -> int:
         config_path, storage, require_images=True
     )
     output_dir = Path(getattr(args, "output_dir", None) or DEFAULT_SITE_DIR)
-    write_files(output_dir, build_site(profile, resolution, announcements, logo, cover=cover))
+    continuity = ContinuityStore(storage.db_path)
+    guide_available = (output_dir.parent / "continuity" / "guide.zip").is_file()
+    write_files(
+        output_dir,
+        build_site(
+            profile,
+            resolution,
+            announcements,
+            logo,
+            cover=cover,
+            channel_states=continuity.list_channel_states(),
+            notice=continuity.active_notice(),
+            guide_available=guide_available,
+        ),
+    )
     print(f"Wrote the public /connect page to {output_dir.resolve()}")
     return 0
 

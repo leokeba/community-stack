@@ -72,6 +72,34 @@ def _paragraphs(text: str) -> str:
     return "".join(f"<p>{_e(part).replace(chr(10), '<br>')}</p>" for part in parts)
 
 
+def _channel_state(channel_states: dict[str, dict[str, str]], key: str) -> str:
+    state = channel_states.get(key)
+    if not state:
+        return ""
+    reason = f' <span class="muted">{_e(state["reason"])}</span>' if state.get("reason") else ""
+    return (
+        f'<br><span class="channel-state">{_e(state["status"].replace("_", " ").title())}</span>'
+        f"{reason}"
+    )
+
+
+def render_continuity_notice(notice: dict[str, Any] | None) -> str:
+    """Render the active notice fragment shared by /connect and the static homepage."""
+    if not notice:
+        return ""
+    translations = notice.get("notice_translations") or notice.get("translations") or {}
+    sections = "".join(
+        f'<div lang="{_e(language)}"><h2>{_e(item["title"])}</h2>{_paragraphs(item["body"])}</div>'
+        for language, item in sorted(translations.items())
+    )
+    if not sections:
+        return ""
+    return (
+        '<section class="warning" id="continuity-notice" aria-labelledby="continuity-heading">'
+        f'<h2 id="continuity-heading">Continuity notice</h2>{sections}</section>'
+    )
+
+
 def recent_announcements(storage: AnnouncementStorage) -> list[Announcement]:
     """Published or updated public announcements, newest first. Drafts never appear."""
     public = (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
@@ -147,15 +175,20 @@ def render_page(
     logo_name: str | None,
     generated_at: str,
     cover_name: str | None = None,
+    channel_states: dict[str, dict[str, str]] | None = None,
+    notice: dict[str, Any] | None = None,
+    guide_available: bool = False,
 ) -> str:
     """Return the complete page. Every profile value is escaped, and nothing is loaded from elsewhere."""
+    channel_states = channel_states or {}
     channels = "".join(
         f'<li><a href="{_e(ch.url)}">{_e(ch.label)}</a><br>'
-        f'<span class="muted">{_e(ch.description)}</span></li>'
+        f'<span class="muted">{_e(ch.description)}</span>{_channel_state(channel_states, ch.key)}</li>'
         if ch.url
         else f"<li><strong>{_e(ch.label)}</strong><br>"
         f'<span class="muted">{_e(ch.description)}</span>'
-        f'<br>Address: <span class="address">{_e(ch.detail)}</span></li>'
+        f'<br>Address: <span class="address">{_e(ch.detail)}</span>'
+        f"{_channel_state(channel_states, ch.key)}</li>"
         for ch in resolution.shown
     )
     independent_html = (
@@ -167,6 +200,7 @@ def render_page(
     social_items = "".join(
         f'<li><a href="{_e(acc.url)}">{_e(acc.label)}</a>'
         + (f' <span class="muted">{_e(acc.handle)}</span>' if acc.handle else "")
+        + _channel_state(channel_states, acc.platform)
         + "</li>"
         for acc in profile.social
     )
@@ -208,6 +242,13 @@ def render_page(
         if profile.emergency_instructions.strip()
         else ""
     )
+    notice_html = render_continuity_notice(notice)
+    guide_html = (
+        '<p><a href="/continuity/guide.zip">Download the contact and communication guide</a>'
+        " (printable and usable offline).</p>"
+        if guide_available
+        else ""
+    )
     generated_date = generated_at[:10]
 
     return f"""<!DOCTYPE html>
@@ -233,6 +274,7 @@ def render_page(
     </div>
   </header>
   <main>
+    {notice_html}
     <section aria-labelledby="address">
       <h2 id="address">Bookmark this page</h2>
       <p>This address stays the same, even if we change social networks:</p>
@@ -263,6 +305,7 @@ def render_page(
     <section aria-labelledby="recent">
       <h2 id="recent">Recent announcements</h2>
       {recent_html}
+      {guide_html}
     </section>
   </main>
   <footer>
@@ -292,6 +335,9 @@ def build_site(
     logo: tuple[str, bytes] | None,
     generated_at: str | None = None,
     cover: tuple[str, bytes] | None = None,
+    channel_states: dict[str, dict[str, str]] | None = None,
+    notice: dict[str, Any] | None = None,
+    guide_available: bool = False,
 ) -> dict[str, bytes]:
     """The files the live site needs: the page and its logo."""
     stamp = generated_at or datetime.now(timezone.utc).isoformat()
@@ -302,8 +348,14 @@ def build_site(
         logo[0] if logo else None,
         stamp,
         cover[0] if cover else None,
+        channel_states,
+        notice,
+        guide_available,
     )
-    files = {"index.html": page.encode("utf-8")}
+    files = {
+        "index.html": page.encode("utf-8"),
+        "continuity-notice.html": render_continuity_notice(notice).encode("utf-8"),
+    }
     if logo:
         files[logo[0]] = logo[1]
     if cover:
@@ -318,10 +370,21 @@ def build_bundle(
     logo: tuple[str, bytes] | None,
     generated_at: str | None = None,
     cover: tuple[str, bytes] | None = None,
+    channel_states: dict[str, dict[str, str]] | None = None,
+    notice: dict[str, Any] | None = None,
 ) -> dict[str, bytes]:
     """Everything for an identity package: page, logo, QR codes and machine-readable data."""
     stamp = generated_at or datetime.now(timezone.utc).isoformat()
-    files = build_site(profile, resolution, announcements, logo, stamp, cover)
+    files = build_site(
+        profile,
+        resolution,
+        announcements,
+        logo,
+        stamp,
+        cover,
+        channel_states,
+        notice,
+    )
     data: dict[str, Any] = {
         "format": "community-stack/connect",
         "format_version": 1,
@@ -334,6 +397,8 @@ def build_bundle(
         "cover": cover[0] if cover else None,
         "contact_email": profile.contact_email,
         "emergency_instructions": profile.emergency_instructions,
+        "continuity_notice": notice,
+        "channel_states": channel_states or {},
         "social": [
             {"platform": acc.platform, "label": acc.label, "url": acc.url, "handle": acc.handle}
             for acc in profile.social
@@ -390,7 +455,21 @@ def offline_connect_files(
         profile, resolution, announcements, logo, cover = load_identity(config_path, storage)
     except (ConfigError, ConnectError) as exc:
         return None, f"Community contacts were left out of the archive: {exc}"
-    return build_bundle(profile, resolution, announcements, logo, cover=cover), None
+    from community_stack.continuity.store import ContinuityStore
+
+    continuity = ContinuityStore(storage.db_path)
+    return (
+        build_bundle(
+            profile,
+            resolution,
+            announcements,
+            logo,
+            cover=cover,
+            channel_states=continuity.list_channel_states(),
+            notice=continuity.active_notice(),
+        ),
+        None,
+    )
 
 
 def write_files(directory: Path | str, files: dict[str, bytes]) -> None:

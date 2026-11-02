@@ -34,6 +34,7 @@ from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.continuity.connect_page import build_site, load_identity, write_files
+from community_stack.continuity.store import ContinuityStore
 from community_stack.secrets import parse_env_file
 from community_stack.subscriptions.email_signup import new_secret
 from community_stack.subscriptions.manager import SubscriberManager
@@ -546,7 +547,18 @@ class AnnouncementPublisher:
             profile, resolution, announcements, logo, cover = load_identity(
                 self.config_path, self.storage
             )
-            files = build_site(profile, resolution, announcements, logo, cover=cover)
+            continuity = ContinuityStore(self.storage.db_path)
+            guide = self.feed_dir.parent / "continuity" / "guide.zip"
+            files = build_site(
+                profile,
+                resolution,
+                announcements,
+                logo,
+                cover=cover,
+                channel_states=continuity.list_channel_states(),
+                notice=continuity.active_notice(),
+                guide_available=guide.is_file(),
+            )
             write_files(self.feed_dir.parent / "connect", files)
         except Exception:
             logger.warning("Could not refresh the /connect page.", exc_info=True)

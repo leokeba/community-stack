@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./html:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ../../data/landing/feed:/usr/share/nginx/html/feed:ro
       - ../../data/landing/connect:/usr/share/nginx/html/connect:ro
+      - ../../data/landing/continuity:/usr/share/nginx/html/continuity:ro
     networks:
       - proxy_net
     healthcheck:

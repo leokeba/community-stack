@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Continuity mode{% endblock %}
+{% block content %}
+<h1>Continuity mode</h1>
+<p class="page-intro">Record channel status and prepare a reversible migration notice. Channel health is set manually; it is never inferred from provider checks.</p>
+
+{% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+{% if status.current and status.current.active %}
+<section class="card">
+  <h2>Continuity mode is active</h2>
+  <p><strong>Reason:</strong> {{ status.current.reason }}</p>
+  <p><strong>Affected channels:</strong> {{ status.current.affected_channels|join(", ") }}</p>
+  <p class="muted">Deactivation removes the public notice but does not restore channel states. Mark recovered channels operational separately after confirming service.</p>
+  <p><strong>Started:</strong> <time>{{ status.current.changed_at }}</time></p>
+  {% if status.steps %}
+  <h3>Activation steps</h3>
+  <ul>
+    {% for step in status.steps %}
+    <li>{{ step.step|replace("_", " ")|title }} — {{ badge(step.status) }}{% if step.error %}<p class="muted">{{ step.error }}</p>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="muted">Submitting the activation form with the original details retries failed or incomplete steps.</p>
+  <form method="post" action="/admin/continuity/deactivate" data-confirm="Remove the public continuity notice and end continuity mode?" data-confirm-label="End continuity mode">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="deactivate-reason">Deactivation reason</label>
+    <input id="deactivate-reason" name="reason" maxlength="500" required>
+    <label for="deactivate-password">Confirm your password</label>
+    <input id="deactivate-password" name="password" type="password" autocomplete="current-password" required>
+    <p><button class="danger" type="submit">Deactivate continuity mode</button></p>
+  </form>
+</section>
+{% else %}
+<p class="notice">Continuity mode is inactive. Plan the migration first; activation requires password confirmation.</p>
+{% endif %}
+
+<section class="card">
+  <h2>{{ "Review migration details" if status.current and status.current.active else "Plan a migration" }}</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="continuity-reason">What happened?</label>
+    <textarea id="continuity-reason" name="reason" rows="3" maxlength="500" required>{{ form_values.reason }}</textarea>
+    <fieldset>
+      <legend>Channels affected by this incident</legend>
+      <p class="muted">Only unaffected, enabled channels will receive migration announcements.</p>
+      {% for key, label in channel_options %}
+      <label class="check-row">
+        <input type="checkbox" name="affected" value="{{ key }}" {% if key in form_values.affected %}checked{% endif %}>
+        {{ label }}
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <h3>Public migration message</h3>
+    <p class="muted">Provide a message for every configured language. The body template must contain: {what_happened}, {affected_channels}, {connect_url}, {join_instructions}, and {updated_at}. Optional placeholders: {reason}, {community}.</p>
+    {% for language in languages %}
+    {% set values = translations.get(language, {}) %}
+    <details class="card" {% if language == "en" or languages|length == 1 %}open{% endif %}>
+      <summary>{{ language }}</summary>
+      <label for="title-{{ language }}">Title</label>
+      <input id="title-{{ language }}" name="title:{{ language }}" value="{{ values.get('title', '') }}" maxlength="200">
+      <label for="what-{{ language }}">What happened</label>
+      <textarea id="what-{{ language }}" name="what_happened:{{ language }}" rows="2">{{ values.get('what_happened', '') }}</textarea>
+      <label for="join-{{ language }}">How to reach the community</label>
+      <textarea id="join-{{ language }}" name="join_instructions:{{ language }}" rows="2">{{ values.get('join_instructions', '') }}</textarea>
+      <label for="body-{{ language }}">Message body template</label>
+      <textarea id="body-{{ language }}" name="body_template:{{ language }}" rows="9">{{ values.get('body_template', '') }}</textarea>
+    </details>
+    {% endfor %}
+
+    <div class="actions">
+      <button type="submit" formaction="/admin/continuity/plan">Preview plan</button>
+      <label for="continuity-password">Password confirmation for activation</label>
+      <input id="continuity-password" name="password" type="password" autocomplete="current-password">
+      <button type="submit" formaction="/admin/continuity/activate" class="danger">{{ "Resume / retry activation" if status.current and status.current.active else "Activate continuity mode" }}</button>
+    </div>
+  </form>
+</section>
+
+{% if plan %}
+<section class="card">
+  <h2>Plan preview</h2>
+  <p>Activation marks affected channels unavailable, publishes the public notice, sends the migration message only to unaffected enabled destinations, and builds the offline guide. Each step can be retried independently.</p>
+  <p><strong>Affected channels:</strong> {{ plan.affected_channels|join(", ") }}</p>
+  <p><strong>Migration announcement destinations:</strong> {{ plan.target_channels|join(", ") if plan.target_channels else "None (no unaffected enabled channels)" }}</p>
+  <p><strong>Offline guide:</strong> {{ plan.guide_path }}</p>
+  {% for language, message in plan.messages.items() %}
+  <details>
+    <summary>{{ language }} message preview</summary>
+    <h3>{{ message.title }}</h3>
+    <pre>{{ message.body }}</pre>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section>
+  <h2>Channel status</h2>
+  <p class="muted">These statuses are an operator record and do not change publishing settings or automatically disable a connector.</p>
+  {% for key, label in channel_options %}
+  {% set channel = status.channel_states.get(key) %}
+  <form class="card" method="post" action="/admin/continuity/channel">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="channel" value="{{ key }}">
+    <h3>{{ label }} {% if channel %}{{ badge(channel.status) }}{% else %}{{ badge("operational") }}{% endif %}</h3>
+    {% if channel %}<p class="muted">{{ channel.reason }} · Updated {{ channel.updated_at }} by {{ channel.actor }}</p>{% endif %}
+    <label for="state-{{ key }}">Status</label>
+    <select id="state-{{ key }}" name="status">
+      {% for state in ("operational", "degraded", "unavailable", "retired") %}
+      <option value="{{ state }}" {% if (channel and channel.status == state) or (not channel and state == "operational") %}selected{% endif %}>{{ state|title }}</option>
+      {% endfor %}
+    </select>
+    <label for="state-reason-{{ key }}">Reason</label>
+    <input id="state-reason-{{ key }}" name="reason" maxlength="500" value="{{ channel.reason if channel else '' }}" required>
+    <label for="state-password-{{ key }}">Confirm your password</label>
+    <input id="state-password-{{ key }}" name="password" type="password" autocomplete="current-password" required>
+    <p><button type="submit">Save channel status</button></p>
+  </form>
+  {% endfor %}
+</section>
+
+{% if status.guide_available %}
+<p><a href="/admin/continuity/guide.zip">Download continuity guide</a></p>
+{% endif %}
+
+{% if status.events %}
+<section>
+  <h2>Continuity history</h2>
+  <ol>
+    {% for event in status.events %}
+    <li><time>{{ event.occurred_at }}</time> · {{ event.action|replace("_", " ")|title }} by {{ event.actor }}{% if event.reason %}: {{ event.reason }}{% endif %}{% if event.affected_channels %} — {{ event.affected_channels|join(", ") }}{% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+{% endblock %}

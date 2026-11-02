@@ -13,6 +13,7 @@ from community_stack.commands.backup_cmd import run_backup, run_backup_verify
 from community_stack.commands.bridge_cmd import run_bridge
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.connect_cmd import run_connect
+from community_stack.commands.continuity_cmd import run_continuity
 from community_stack.commands.init_cmd import run_init
 from community_stack.commands.install_cmd import run_install
 from community_stack.commands.logs_cmd import run_logs
@@ -357,6 +358,72 @@ def create_parser() -> argparse.ArgumentParser:
         "--output-dir", help="Folder served as /connect (default: data/landing/connect)"
     )
 
+    # continuity
+    p_continuity = subparsers.add_parser(
+        "continuity", help="Manage outage notices, channel states and offline guides"
+    )
+    continuity_subs = p_continuity.add_subparsers(
+        dest="continuity_action", help="Continuity actions"
+    )
+    continuity_subs.add_parser("status", help="Show continuity mode, channel states and history")
+
+    p_cont_plan = continuity_subs.add_parser("plan", help="Preview a continuity activation")
+    p_cont_plan.add_argument("--actor", required=True, help="Responsible administrator")
+    p_cont_plan.add_argument("--reason", required=True, help="Why continuity mode is needed")
+    p_cont_plan.add_argument(
+        "--affected", action="append", required=True, help="Affected channel (repeatable)"
+    )
+    p_cont_plan.add_argument("--translations", help="JSON file with translated migration templates")
+    p_cont_plan.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    p_cont_activate = continuity_subs.add_parser(
+        "activate", help="Activate or resume continuity mode"
+    )
+    p_cont_activate.add_argument("--actor", required=True, help="Responsible administrator")
+    p_cont_activate.add_argument("--reason", required=True, help="Why continuity mode is needed")
+    p_cont_activate.add_argument(
+        "--affected", action="append", required=True, help="Affected channel (repeatable)"
+    )
+    p_cont_activate.add_argument(
+        "--translations", help="JSON file with translated migration templates"
+    )
+    p_cont_activate.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    p_cont_deactivate = continuity_subs.add_parser(
+        "deactivate", help="Remove the active continuity notice"
+    )
+    p_cont_deactivate.add_argument("--actor", required=True, help="Responsible administrator")
+    p_cont_deactivate.add_argument("--reason", required=True, help="Why continuity mode ended")
+    p_cont_deactivate.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    p_cont_channel = continuity_subs.add_parser(
+        "channel", help="Manually record one channel's operational state"
+    )
+    p_cont_channel.add_argument("channel", help="Channel identifier")
+    p_cont_channel.add_argument(
+        "status", choices=["operational", "degraded", "unavailable", "retired"]
+    )
+    p_cont_channel.add_argument("--actor", required=True, help="Responsible administrator")
+    p_cont_channel.add_argument("--reason", required=True, help="Reason for the state")
+    p_cont_channel.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    p_cont_package = continuity_subs.add_parser(
+        "package", help="Build and verify the public offline contact guide"
+    )
+    p_cont_package.add_argument("-o", "--output", help="Output zip (default: public guide path)")
+    p_cont_package.add_argument("--actor", default="local operator", help="Responsible operator")
+    p_cont_package.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
     return parser
 
 
@@ -430,6 +497,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_archive(args=args)
     elif args.command == "connect":
         return run_connect(args=args)
+    elif args.command == "continuity":
+        return run_continuity(args=args)
     else:
         parser.print_help()
         return 2

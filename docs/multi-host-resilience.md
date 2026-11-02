@@ -60,6 +60,35 @@ This installs Docker, firewall rules, and pre-pulls all required container image
    - Update `A`/`AAAA` records for `community.example.org` and `matrix.example.org` to point to the Standby Host IP address.
    - Caddy on the standby host will automatically obtain fresh TLS certificates as soon as DNS propagation completes.
 
+### Preparing for Failure of the Community's Own Host
+
+The `/connect` page and its continuity notice are served by the same domain and
+host as the rest of the website. They are not an independent recovery channel.
+Prepare and distribute the public guide before an incident:
+
+1. Generate and verify the guide after updating the community profile and
+   emergency instructions:
+   ```bash
+   docker exec community_announcements community-stack continuity package \
+     --output /app/data/landing/continuity/guide.zip
+   docker exec community_announcements community-stack archive verify \
+     /app/data/landing/continuity/guide.zip
+   ```
+2. Download it from `/connect/continuity/guide.zip` and distribute copies in
+   advance through trusted community organizers, print, and removable media.
+   Keep copies in more than one physical location and on the standby host. The
+   package contains public contact information and announcements, not subscriber
+   records; still review it before distributing.
+3. Verify every copy with `community-stack archive verify <path>` after transfer.
+   Rebuild and redistribute the guide whenever official contacts, channel URLs,
+   or emergency instructions change.
+4. If the primary host fails, use the distributed guide and alternate contacts
+   to tell members where to find updates. Restore the latest snapshot on the
+   standby host using the runbook above, then check `community-stack continuity
+   status`, rebuild `/connect` with `community-stack connect render`, and
+   regenerate and verify the guide before directing members back to the site.
+   Do not assume DNS or `/connect` will remain available during restoration.
+
 ---
 
 ## 3. Local Wi-Fi Captive Portal & Offline Distribution
