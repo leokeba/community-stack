@@ -374,11 +374,13 @@ Start with manual publishing. Do not try to automate every platform.
 
 ### Tasks
 
-- [ ] **CR3.1 Add a platform catalogue.** Create `announcements/platforms.py` with
+- [x] **CR3.1 Add a platform catalogue.** Create `announcements/platforms.py` with
   each platform's identifier, name, capabilities, character limits, supported media
   and publication modes, reusing `ChannelCapabilities`. Per-community details (account
   URL, handle, adapter configuration, enabled state) stay in `community.social` and
-  channel connections. None of this goes in the `Announcement` model.
+  channel connections. None of this goes in the `Announcement` model. Current
+  adapter capabilities are checked against the catalogue; manual-only limits and
+  media support are explicitly marked unverified rather than guessed.
 - [ ] **CR3.2 Prepare per-platform content.** Build on `channel_text` to generate
   adapted text with a shortened description, canonical URL, suggested hashtags and a
   call to action pointing to independent channels. Add per-channel media. Keep generated
