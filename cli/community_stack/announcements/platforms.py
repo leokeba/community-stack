@@ -49,6 +49,25 @@ class PlatformSpec:
     connector_name: str | None
     character_limit_verified: bool
     notes: str = ""
+    official_url: str | None = None
+
+
+_OFFICIAL_URLS = {
+    "facebook": "https://www.facebook.com/",
+    "instagram": "https://www.instagram.com/",
+    "threads": "https://www.threads.net/",
+    "x": "https://x.com/",
+    "tiktok": "https://www.tiktok.com/",
+    "youtube": "https://www.youtube.com/",
+    "linkedin": "https://www.linkedin.com/",
+    "whatsapp": "https://www.whatsapp.com/",
+    "telegram": "https://telegram.org/",
+    "mastodon": "https://joinmastodon.org/",
+    "pixelfed": "https://pixelfed.org/",
+    "bluesky": "https://bsky.app/",
+    "discord": "https://discord.com/",
+    "signal": "https://signal.org/",
+}
 
 
 def _platform(
@@ -75,6 +94,7 @@ def _platform(
         connector_name=connector_name,
         character_limit_verified=character_limit_verified,
         notes=notes,
+        official_url=_OFFICIAL_URLS.get(identifier),
     )
 
 

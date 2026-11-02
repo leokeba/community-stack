@@ -80,6 +80,15 @@ def test_unknown_manual_platform_limits_and_media_are_not_guessed():
         assert platform.notes
 
 
+def test_catalogue_has_official_links_for_known_platforms():
+    assert all(
+        platform.official_url is not None
+        for platform in PLATFORM_CATALOG
+        if platform.identifier != "other"
+    )
+    assert PLATFORMS["other"].official_url is None
+
+
 def test_pixelfed_default_limit_is_marked_as_instance_dependent():
     pixelfed = PLATFORMS["pixelfed"]
     assert pixelfed.capabilities.max_text_length == 2000

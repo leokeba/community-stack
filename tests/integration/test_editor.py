@@ -1,10 +1,12 @@
 """Markdown formatting, per-channel custom text, and the editor's live preview."""
 
+import io
 import re
 
 import pytest
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
+from community_stack.announcements import media
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.social import MastodonAdapter
@@ -15,6 +17,7 @@ from community_stack.announcements.platforms import PLATFORMS
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 from fastapi.testclient import TestClient
+from PIL import Image
 
 PASSWORD = "a-long-safe-test-password"
 BODY = "## Food bank\n\nOpen **Saturday**.\n\n- Rice\n- Beans\n\nSee [the map](https://example.org/map)."
@@ -162,6 +165,52 @@ def test_editor_saves_custom_text_and_detail_shows_formatting(console):
         data={"csrf_token": csrf(edit), "title": "Weekly update", "body": BODY},
     )
     assert app.state.storage.get_announcement(announcement_id).channel_text == {}
+
+
+def test_platform_kit_shows_text_official_link_and_selected_image(console):
+    app, client = console
+    editor = client.get("/admin/announcements/new")
+    created = client.post(
+        "/admin/announcements/new",
+        data={
+            "csrf_token": csrf(editor),
+            "title": "Community update",
+            "body": "Bring supplies.",
+            "channel_text:mastodon": "Mastodon-specific copy",
+        },
+    )
+    announcement_id = created.headers["location"].rsplit("/", 1)[-1]
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (32, 32), "navy").save(image_buffer, format="PNG")
+    processed_image = media.process_image(image_buffer.getvalue())
+    shared = app.state.storage.save_image(
+        announcement_id, processed_image, "Shared image description", "olga"
+    )
+
+    detail = client.get(created.headers["location"])
+    kit = re.search(
+        r'<article class="card" id="platform-kit-mastodon">(.*?)</article>',
+        detail.text,
+        re.DOTALL,
+    ).group(1)
+    assert '<pre id="platform-text-mastodon">Mastodon-specific copy</pre>' in kit
+    assert 'href="https://joinmastodon.org/" target="_blank" rel="noopener noreferrer"' in kit
+    assert 'data-copy-target="platform-text-mastodon" hidden' in kit
+    assert f"/admin/media/{shared.id}" in kit
+    assert "nothing is published automatically" in detail.text
+
+    override = app.state.storage.save_channel_image(
+        announcement_id, "mastodon", processed_image, "Platform image description", "olga"
+    )
+    updated_detail = client.get(created.headers["location"])
+    updated_kit = re.search(
+        r'<article class="card" id="platform-kit-mastodon">(.*?)</article>',
+        updated_detail.text,
+        re.DOTALL,
+    ).group(1)
+    assert f"/admin/media/{override.id}" in updated_kit
+    assert f"/admin/media/{shared.id}" not in updated_kit
+    assert "Platform image description" in updated_kit
 
 
 def test_publisher_delivers_generated_platform_copy(tmp_path):

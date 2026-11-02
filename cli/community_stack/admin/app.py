@@ -1673,6 +1673,28 @@ def create_app(
             if announcement.scheduled_at
             else None
         )
+        delivery_states = storage.get_delivery_states(announcement_id)
+        delivery_by_channel = {item["adapter_name"]: item for item in delivery_states}
+        adapters_by_name = {
+            adapter.name: adapter for adapter in publisher.adapters if adapter.name in PLATFORMS
+        }
+        platform_content = []
+        for platform in PLATFORM_CATALOG:
+            adapter = adapters_by_name.get(platform.identifier)
+            if adapter is None:
+                continue
+            variant = publisher.channel_variant(announcement, platform.identifier)
+            check = adapter.check(variant)
+            platform_content.append(
+                {
+                    "spec": platform,
+                    "text": check.preview,
+                    "image": variant.image,
+                    "check": check,
+                    "delivery": delivery_by_channel.get(platform.identifier),
+                    "manual": isinstance(adapter, ManualChannelAdapter),
+                }
+            )
         return render(
             request,
             "detail.html",
@@ -1686,9 +1708,10 @@ def create_app(
                 scheduled_local=scheduled_local,
                 timezone_name=str(publisher.timezone),
                 now_local=datetime.now(publisher.timezone).strftime("%Y-%m-%dT%H:%M"),
-                deliveries=storage.get_delivery_states(announcement_id),
+                deliveries=delivery_states,
                 jobs=storage.get_active_jobs(announcement_id),
                 checks=publisher.channel_checks(announcement),
+                platform_content=platform_content,
                 platform_media=[
                     {
                         "identifier": platform.identifier,
@@ -1696,11 +1719,6 @@ def create_app(
                         "image": announcement.channel_media.get(platform.identifier),
                     }
                     for platform in PLATFORM_CATALOG
-                ],
-                manual_channels=[
-                    adapter.name
-                    for adapter in publisher.adapters
-                    if isinstance(adapter, ManualChannelAdapter)
                 ],
                 delivery_attempts=storage.get_delivery_attempts(announcement_id),
             ),

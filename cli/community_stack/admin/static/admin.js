@@ -249,6 +249,10 @@
   function pageReady() {
     startToastTimers();
     for (const button of document.querySelectorAll("[data-history-back]")) button.hidden = false;
+    const clipboardAvailable = window.isSecureContext && navigator.clipboard?.writeText;
+    for (const button of document.querySelectorAll("[data-copy-target]")) {
+      button.hidden = !clipboardAvailable;
+    }
     // Content the last action produced, such as recovery codes, is brought into view.
     const reveal = document.querySelector("[data-reveal]");
     if (reveal) {
@@ -260,6 +264,24 @@
   document.addEventListener("click", (event) => {
     if (event.target.closest("[data-toast-close]")) {
       event.target.closest("[data-toast]")?.remove();
+      return;
+    }
+    const copyButton = event.target.closest("[data-copy-target]");
+    if (copyButton) {
+      event.preventDefault();
+      const target = document.getElementById(copyButton.dataset.copyTarget);
+      if (!target) {
+        showToast("Platform text could not be found.", "error");
+        return;
+      }
+      if (!navigator.clipboard?.writeText) {
+        showToast("Clipboard access is unavailable. Select and copy the text instead.", "error");
+        return;
+      }
+      navigator.clipboard.writeText(target.textContent).then(
+        () => showToast("Platform text copied to the clipboard.", "success"),
+        () => showToast("Could not copy platform text. Select and copy it instead.", "error"),
+      );
       return;
     }
     if (event.target.closest("[data-history-back]")) {

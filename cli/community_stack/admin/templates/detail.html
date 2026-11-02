@@ -23,6 +23,69 @@
     <div>{{ body_html }}</div>
   </article>
 
+  {% if platform_content and status != "withdrawn" %}
+  <section aria-labelledby="platform-kits-heading">
+    <h2 id="platform-kits-heading">Platform publishing kits</h2>
+    <p class="muted">Review the exact text and selected image for each configured platform. Copy or download them before opening the platform; nothing is published automatically from these links.</p>
+    {% for item in platform_content %}
+    <article class="card" id="platform-kit-{{ item.spec.identifier }}">
+      <div class="section-heading">
+        <h3>{{ item.spec.name }}</h3>
+        <div class="actions">
+          {% if item.spec.official_url %}
+          <a href="{{ item.spec.official_url }}" target="_blank" rel="noopener noreferrer">Open {{ item.spec.name }}</a>
+          {% endif %}
+          <button type="button" class="secondary small" data-copy-target="platform-text-{{ item.spec.identifier }}" hidden>Copy text</button>
+        </div>
+      </div>
+      {% if item.delivery %}
+      <p><strong>Status:</strong> {{ badge(item.delivery.status) }} · Last activity <time datetime="{{ item.delivery.last_attempt_at }}">{{ item.delivery.last_attempt_at }}</time>{% if item.delivery.recorded_by %} · Recorded by {{ item.delivery.recorded_by }}{% endif %}
+        {% if item.delivery.status == "delivered" and item.delivery.recorded_by and item.delivery.post_url %}
+        · <a href="{{ item.delivery.post_url }}" target="_blank" rel="noopener noreferrer">View published post</a>
+        {% endif %}
+      </p>
+      {% else %}
+      <p class="muted">Not yet prepared or published.</p>
+      {% endif %}
+      <h4>Text</h4>
+      <pre id="platform-text-{{ item.spec.identifier }}">{{ item.text }}</pre>
+      <h4>Selected image</h4>
+      {% if item.image %}
+      <figure>
+        <img src="/admin/media/{{ item.image.id }}" alt="{{ item.image.alt }}" width="{{ item.image.width }}" height="{{ item.image.height }}">
+        <figcaption class="muted">Description: {{ item.image.alt }}</figcaption>
+      </figure>
+      {% if item.check.capabilities.supports_media %}
+      <a href="/admin/media/{{ item.image.id }}" download>Download selected image</a>
+      {% else %}
+      <p class="muted">This publishing method will not attach the image. Download it to upload manually.</p>
+      <a href="/admin/media/{{ item.image.id }}" download>Download selected image</a>
+      {% endif %}
+      {% else %}
+      <p class="muted">No image is selected for this platform.</p>
+      {% endif %}
+      {% if item.spec.notes %}<p class="muted">{{ item.spec.notes }}</p>{% endif %}
+      {% if item.manual and item.delivery and item.delivery.status in ["prepared", "failed", "unknown"] and perms.edit %}
+      <form method="post" action="/admin/announcements/{{ announcement.id }}/channels/{{ item.spec.identifier }}/outcome">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="manual-outcome-{{ item.spec.identifier }}">Outcome</label>
+        <select id="manual-outcome-{{ item.spec.identifier }}" name="outcome">
+          <option value="published">Published</option>
+          <option value="failed">Failed</option>
+          <option value="unknown">Unknown</option>
+        </select>
+        <label for="manual-post-url-{{ item.spec.identifier }}">Post URL (required for Published)</label>
+        <input id="manual-post-url-{{ item.spec.identifier }}" name="post_url" type="url" maxlength="2048">
+        <label for="manual-note-{{ item.spec.identifier }}">Note (optional)</label>
+        <input id="manual-note-{{ item.spec.identifier }}" name="note" maxlength="1000">
+        <button type="submit" class="secondary small">Record outcome</button>
+      </form>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if perms.edit and (status == "draft" or (status == "scheduled" and not review_required)) %}
   <details class="card" {% if not announcement.image %}open{% endif %}>
     <summary>Image</summary>
@@ -122,7 +185,7 @@
   {% if deliveries %}
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Channel</th><th>Status</th><th>Last activity</th><th>Recorded by</th><th>Post or outcome</th><th>Attempts</th><th>Last error</th></tr></thead>
+    <thead><tr><th>Channel</th><th>Status</th><th>Last activity</th><th>Recorded by</th><th>Post</th><th>Attempts</th><th>Last error</th></tr></thead>
     <tbody>
     {% for delivery in deliveries %}
     <tr>
@@ -132,22 +195,7 @@
       <td>{{ delivery.recorded_by or "—" }}</td>
       <td>
         {% if delivery.status == "delivered" and delivery.recorded_by and delivery.post_url %}
-        <a href="{{ delivery.post_url }}" rel="noopener noreferrer">View post</a>
-        {% elif delivery.adapter_name in manual_channels and delivery.status in ["prepared", "failed", "unknown"] and perms.edit %}
-        <form method="post" action="/admin/announcements/{{ announcement.id }}/channels/{{ delivery.adapter_name }}/outcome">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <label for="manual-outcome-{{ delivery.adapter_name }}">Outcome</label>
-          <select id="manual-outcome-{{ delivery.adapter_name }}" name="outcome">
-            <option value="published">Published</option>
-            <option value="failed">Failed</option>
-            <option value="unknown">Unknown</option>
-          </select>
-          <label for="manual-post-url-{{ delivery.adapter_name }}">Post URL (required for Published)</label>
-          <input id="manual-post-url-{{ delivery.adapter_name }}" name="post_url" type="url" maxlength="2048">
-          <label for="manual-note-{{ delivery.adapter_name }}">Note (optional)</label>
-          <input id="manual-note-{{ delivery.adapter_name }}" name="note" maxlength="1000">
-          <button type="submit" class="secondary small">Record outcome</button>
-        </form>
+        <a href="{{ delivery.post_url }}" target="_blank" rel="noopener noreferrer">View post</a>
         {% else %}—{% endif %}
       </td>
       <td>{{ delivery.attempts }}</td>

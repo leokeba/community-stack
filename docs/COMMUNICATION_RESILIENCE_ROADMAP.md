@@ -1,7 +1,7 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.4
+the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.5
 work, which has not been deployed. Live connector acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
@@ -399,10 +399,13 @@ Start with manual publishing. Do not try to automate every platform.
   automatic `delivered` outcomes display as Published. A manual channel becomes
   Published only after an administrator records a valid HTTPS post URL, stored
   separately from connector external IDs.
-- [ ] **CR3.5 Build the console workflow.** On the announcement page, show each
-  platform's text and media, a copy-to-clipboard button, a link to the official
-  platform, and actions to record the outcome. Text must remain selectable without
-  JavaScript. Opening a link changes nothing.
+- [x] **CR3.5 Build the console workflow.** On the announcement page, show each
+  configured platform's exact text and selected image, with an official-platform
+  link and a copy-to-clipboard enhancement. Text stays selectable without
+  JavaScript, and copy controls appear only where secure clipboard access is
+  available. Manual outcome actions sit with the platform kit; opening a link
+  changes nothing. Tests cover generated text, official links, and shared-image
+  fallback versus a per-platform override.
 - [ ] **CR3.6 Cover edits and withdrawals.** When a published announcement changes
   or is withdrawn, create a visible task for each manual channel.
 - [ ] **CR3.7 Add the CLI.** Add commands to list publications for an announcement
