@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from copy import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,8 +27,11 @@ from community_stack.announcements.connectors import (
 )
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
+from community_stack.announcements.platform_content import generate_platform_text
+from community_stack.announcements.platforms import PLATFORMS
 from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.community import load_community
 from community_stack.config import load_config
 from community_stack.continuity.connect_page import build_site, load_identity, write_files
 from community_stack.secrets import parse_env_file
@@ -73,6 +77,7 @@ class AnnouncementPublisher:
         self.config_path = Path(config_path)
         self.max_attempts = max_attempts
         self.base_url = "https://community.example.org"
+        self.connect_url = load_community(self.config_path)[0].connect_url
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
         self.whatsapp_bridge_enabled = False
@@ -255,10 +260,37 @@ class AnnouncementPublisher:
         """Check an announcement against every channel it would be sent to."""
         channel_settings = self.storage.get_channel_settings()
         return [
-            adapter.check(announcement)
+            adapter.check(self.channel_variant(announcement, adapter.name))
             for adapter in self.adapters
             if channel_settings.get(adapter.name, True)
         ]
+
+    def canonical_url_for(self, announcement: Announcement) -> str:
+        """Return the public feed URL, including for drafts not published yet."""
+        if announcement.canonical_url:
+            return announcement.canonical_url
+        web_adapter = next(
+            (adapter for adapter in self.adapters if isinstance(adapter, WebFeedAdapter)),
+            None,
+        )
+        return web_adapter.canonical_url_for(announcement) if web_adapter else ""
+
+    def channel_variant(self, announcement: Announcement, channel_name: str) -> Announcement:
+        """Return the generated platform copy unless the editor saved an explicit override."""
+        platform = PLATFORMS.get(channel_name)
+        if platform is None or channel_name in announcement.channel_text:
+            return announcement
+        variant = copy(announcement)
+        variant.channel_text = dict(announcement.channel_text)
+        variant.channel_text[channel_name] = generate_platform_text(
+            title=announcement.title,
+            body=announcement.body,
+            canonical_url=self.canonical_url_for(announcement),
+            tags=announcement.tags,
+            connect_url=self.connect_url,
+            platform=platform,
+        )
+        return variant
 
     def schedule(self, announcement_id: str, when: datetime) -> Announcement:
         """Schedule a draft for automatic publication at ``when`` (timezone-aware)."""
@@ -402,10 +434,11 @@ class AnnouncementPublisher:
 
         try:
             external_id = self.storage.get_external_id(ann.id, adapter.name)
+            channel_announcement = self.channel_variant(ann, adapter.name)
             if operation == "publish":
-                res = adapter.publish(ann)
+                res = adapter.publish(channel_announcement)
             elif operation == "update":
-                res = adapter.update_post(ann, external_id)
+                res = adapter.update_post(channel_announcement, external_id)
             else:
                 res = adapter.withdraw_post(ann.id, external_id)
         except Exception as exc:

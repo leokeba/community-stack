@@ -75,6 +75,8 @@ from community_stack.announcements.models import (
     AnnouncementStatus,
     ModelValidationError,
 )
+from community_stack.announcements.platform_content import generate_platform_text
+from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
 from community_stack.announcements.storage import AnnouncementStorage
@@ -447,28 +449,102 @@ def create_app(
         return [
             adapter
             for adapter in publisher.adapters
-            if adapter.capabilities.custom_text and enabled.get(adapter.name, True)
+            if (
+                adapter.name not in PLATFORMS
+                and adapter.capabilities.custom_text
+                and enabled.get(adapter.name, True)
+            )
         ]
 
-    def parse_channel_text(form: dict[str, str]) -> dict[str, str]:
-        return {
-            adapter.name: form[f"channel_text:{adapter.name}"].strip()
-            for adapter in custom_text_channels()
-            if form.get(f"channel_text:{adapter.name}", "").strip()
-        }
+    def parse_channel_text(
+        form: dict[str, str], announcement: Announcement | None = None
+    ) -> dict[str, str]:
+        title = form.get("title", announcement.title if announcement else "").strip()
+        body = form.get("body", announcement.body if announcement else "").strip()
+        tags = parse_tags(form) if "tags" in form else (announcement.tags if announcement else [])
+        canonical_url = publisher.canonical_url_for(announcement) if announcement else ""
+        generated = (
+            {
+                platform.identifier: generate_platform_text(
+                    title=title,
+                    body=body,
+                    canonical_url=canonical_url,
+                    tags=tags,
+                    connect_url=publisher.connect_url,
+                    platform=platform,
+                )
+                for platform in PLATFORM_CATALOG
+            }
+            if title and body
+            else {}
+        )
+        saved = announcement.channel_text if announcement else {}
+        names = [*PLATFORMS, *(adapter.name for adapter in custom_text_channels())]
+        result = {}
+        for name in names:
+            text = form.get(f"channel_text:{name}", "").strip()
+            if text and (text != generated.get(name) or text == saved.get(name)):
+                result[name] = text
+        return result
 
     def editor_page(session: dict[str, Any], announcement: Any, error: str | None) -> dict:
         saved = getattr(announcement, "channel_text", None) or {}
         submitted = announcement if isinstance(announcement, dict) else {}
-        channels = [
+        title = submitted.get("title", getattr(announcement, "title", "")).strip()
+        body = submitted.get("body", getattr(announcement, "body", "")).strip()
+        if "tags" in submitted:
+            tags = parse_tags(submitted)
+        else:
+            tags = getattr(announcement, "tags", [])
+        canonical_url = (
+            publisher.canonical_url_for(announcement)
+            if isinstance(announcement, Announcement)
+            else ""
+        )
+        generated = (
+            {
+                platform.identifier: generate_platform_text(
+                    title=title,
+                    body=body,
+                    canonical_url=canonical_url,
+                    tags=tags,
+                    connect_url=publisher.connect_url,
+                    platform=platform,
+                )
+                for platform in PLATFORM_CATALOG
+            }
+            if title and body
+            else {}
+        )
+
+        def platform_channel(platform):
+            name = platform.identifier
+            value = submitted.get(f"channel_text:{name}", saved.get(name, generated.get(name, "")))
+            return {
+                "name": name,
+                "label": platform.name,
+                "limit": (
+                    platform.capabilities.max_text_length
+                    if platform.character_limit_verified
+                    else None
+                ),
+                "limit_verified": platform.character_limit_verified,
+                "value": value,
+                "is_generated": name not in saved and value == generated.get(name),
+            }
+
+        channels = [platform_channel(platform) for platform in PLATFORM_CATALOG]
+        channels.extend(
             {
                 "name": adapter.name,
                 "label": adapter.capabilities.label,
                 "limit": adapter.capabilities.max_text_length,
+                "limit_verified": True,
                 "value": submitted.get(f"channel_text:{adapter.name}", saved.get(adapter.name, "")),
+                "is_generated": False,
             }
             for adapter in custom_text_channels()
-        ]
+        )
         return page(session, announcement=announcement, error=error, custom_channels=channels)
 
     @app.get("/health")
@@ -1523,7 +1599,8 @@ def create_app(
     @app.post("/admin/announcements/{announcement_id}/update")
     async def update_announcement(request: Request, announcement_id: str) -> Response:
         session, form = await checked_form(request, "edit")
-        before = announcement_or_404(announcement_id).status
+        existing = announcement_or_404(announcement_id)
+        before = existing.status
         try:
             announcement, _ = publisher.update(
                 announcement_id,
@@ -1531,7 +1608,7 @@ def create_app(
                 body=form.get("body"),
                 author=form.get("author") or None,
                 tags=parse_tags(form) if "tags" in form else None,
-                channel_text=parse_channel_text(form),
+                channel_text=parse_channel_text(form, existing),
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Announcement not found.") from None

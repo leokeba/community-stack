@@ -32,10 +32,11 @@
   {% endif %}
   {% if custom_channels %}
   <details {% if custom_channels|selectattr("value")|list %}open{% endif %}>
-    <summary>Custom text per channel (optional)</summary>
-    <p class="muted">Leave empty to send the title and message, shortened with a link if they are too long.</p>
+    <summary>Platform variants (generated and editable)</summary>
+    <p class="muted">Generated copy refreshes with the announcement until you save an override. Limits marked unverified are not guessed.</p>
     {% for channel in custom_channels %}
-    <label for="channel-text-{{ channel.name }}">{{ channel.label }} (up to {{ channel.limit }} characters)</label>
+    <label for="channel-text-{{ channel.name }}">{{ channel.label }}{% if channel.limit %} ({{ channel.limit }} characters){% elif channel.limit_verified %} (no declared limit){% else %} (character limit unverified){% endif %}</label>
+    {% if channel.is_generated %}<p class="muted">Generated default. Edit to save a custom version.</p>{% endif %}
     <textarea id="channel-text-{{ channel.name }}" name="channel_text:{{ channel.name }}" maxlength="5000" rows="4">{{ channel.value }}</textarea>
     {% endfor %}
   </details>

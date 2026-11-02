@@ -11,6 +11,7 @@ from community_stack.announcements.adapters.social import MastodonAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.formatting import render_html, to_plain_text
 from community_stack.announcements.models import Announcement
+from community_stack.announcements.platforms import PLATFORMS
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 from fastapi.testclient import TestClient
@@ -110,7 +111,9 @@ def csrf(response) -> str:
 def test_preview_endpoint_returns_rendered_html_and_channel_text(console):
     _, client = console
     editor = client.get("/admin/announcements/new")
-    assert "Custom text per channel" in editor.text
+    assert "Platform variants (generated and editable)" in editor.text
+    assert "TikTok" in editor.text
+    assert "character limit unverified" in editor.text
     assert "/admin/static/editor.js" in editor.text
     assert client.get("/admin/static/editor.js").status_code == 200
 
@@ -126,7 +129,8 @@ def test_preview_endpoint_returns_rendered_html_and_channel_text(console):
     data = preview.json()
     assert data["html"].startswith("<p>")
     mastodon = next(channel for channel in data["channels"] if channel["name"] == "mastodon")
-    assert mastodon["shortened"] and len(mastodon["preview"]) == 500
+    assert len(mastodon["preview"]) <= PLATFORMS["mastodon"].capabilities.max_text_length
+    assert "https://community.example.org/connect/" in mastodon["preview"]
 
     assert client.post("/admin/preview", data={"title": "x"}).status_code == 403
 
@@ -158,3 +162,37 @@ def test_editor_saves_custom_text_and_detail_shows_formatting(console):
         data={"csrf_token": csrf(edit), "title": "Weekly update", "body": BODY},
     )
     assert app.state.storage.get_announcement(announcement_id).channel_text == {}
+
+
+def test_publisher_delivers_generated_platform_copy(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    feed = WebFeedAdapter(
+        output_dir=tmp_path / "feed",
+        storage=storage,
+        base_url="https://community.example.org",
+    )
+    payloads = []
+    mastodon = MastodonAdapter(
+        "https://social.example",
+        "token-12345678",
+        transport=lambda method, url, headers, payload: (
+            payloads.append(payload) or (200, {"id": "m-1"})
+        ),
+    )
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        adapters=[feed, mastodon],
+        config_path=tmp_path / "missing.yaml",
+        feed_dir=tmp_path / "feed",
+    )
+    draft = publisher.create_draft("Food drive", "Bring **canned food**.", tags=["mutualaid"])
+    expected = next(
+        check.preview for check in publisher.channel_checks(draft) if check.name == "mastodon"
+    )
+
+    publisher.publish_draft(draft.id)
+
+    assert payloads[0]["status"] == expected
+    assert "Bring canned food" in expected
+    assert "https://community.example.org/feed/announcements/" in expected
+    assert "#mutualaid" in expected
