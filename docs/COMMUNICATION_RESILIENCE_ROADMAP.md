@@ -60,7 +60,10 @@ After each phase, report:
 ## 3. Where the repository stands
 
 This status is based on the code and tests, not on live acceptance of external
-accounts. CR0.1 still requires a complete audit and recorded baseline.
+accounts. The CR0.1 code, configuration, deployment and Ansible audit is complete.
+The documented baseline `uv run pytest --cov=community_stack --cov-report=term-missing`
+passes 555 tests, skips 8 and reports 86% coverage. This does not establish live
+connector or production failover acceptance.
 
 | Area | What exists | Remaining gap |
 | --- | --- | --- |
@@ -75,21 +78,22 @@ accounts. CR0.1 still requires a complete audit and recorded baseline.
 
 ### Findings that shape the remaining work
 
-1. **CR0.1 is still open.** Complete and record the full code/deployment audit
-   and test baseline; this status page is not a substitute for that task.
-2. **Automatic connector behavior is not live-verified.** Pixelfed is a distinct
+1. **Automatic connector behavior is not live-verified.** Pixelfed is a distinct
    connector and can be switched independently from Instagram, but its API
    behavior and instance-specific limits still need acceptance against a real
    community account.
-3. **D3 legal review is complete.** The notice and consent wording was approved
+2. **D3 legal review is complete.** The notice and consent wording was approved
    by John Doe on 2026-11-02. The review flag is enabled; email sign-up still
    depends on a working SMTP connection.
-4. **The remaining roadmap work is chiefly manual social publishing and
+3. **The remaining roadmap work is chiefly manual social publishing and
    continuity operations.** Do not treat connected automatic adapters as a
    replacement for CR3's manual workflow or CR4's outage plan.
-5. **There is no database migration framework.** New tables and columns still
+4. **There is no database migration framework.** New tables and columns still
    follow the existing `_init_db` pattern using `CREATE TABLE IF NOT EXISTS`,
    `PRAGMA table_info` and `ALTER TABLE`.
+5. **Production behavior remains a separate acceptance step.** The code audit
+   verifies Compose and Ansible configuration, but does not prove live routing,
+   real provider delivery or standby failover.
 
 ## 4. Design decisions
 
@@ -148,10 +152,11 @@ CR2 and CR3 can run in parallel once CR1 is reviewed.
 
 **Goal:** replace assumptions with verified facts and agree the design.
 
-- [ ] **CR0.1 Verify the audit.** Check section 3 against the code and record a
-  `uv run pytest` baseline. Cover the announcement lifecycle and storage, portal
-  and feed generation, Matrix and other adapters, subscribers and consent, backups
-  and offline archives, CLI and config conventions, and deployment and Ansible.
+- [x] **CR0.1 Verify the audit.** Checked section 3 against the code, tests,
+  configuration, deployment and Ansible. The documented baseline
+  `uv run pytest --cov=community_stack --cov-report=term-missing` passed 555 tests,
+  skipped 8 and reported 86% coverage on 2026-11-02. This is not live-service or
+  production failover acceptance.
 - [x] **CR0.2 List documentation discrepancies.** Note where the README and docs
   differ from the code, and correct anything that misleads operators, starting
   with `docs/accessible-channels.md`.
