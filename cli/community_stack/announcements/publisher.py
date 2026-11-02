@@ -214,20 +214,30 @@ class AnnouncementPublisher:
                     logger.warning("Skipping the email connection: its saved settings are invalid.")
                 continue
             if kind == "sms":
-                adapters.append(
-                    SmsGatewayAdapter(
-                        values["base_url"],
-                        values["username"],
-                        values["password"],
-                        SubscriberManager(self.storage.db_path.parent / "subscribers.db"),
-                        stop_url=f"{self.base_url}/subscribe/stop",
+                try:
+                    adapters.append(
+                        SmsGatewayAdapter(
+                            values["base_url"],
+                            values["username"],
+                            values["password"],
+                            SubscriberManager(self.storage.db_path.parent / "subscribers.db"),
+                            stop_url=f"{self.base_url}/subscribe/stop",
+                        )
                     )
-                )
+                except (KeyError, ValueError):
+                    logger.warning(
+                        "Skipping the %s connection: its saved settings are invalid.", kind
+                    )
                 continue
             if kind == "fediverse":
-                adapters.append(
-                    FediverseAdapter(Fediverse(self.storage, self.base_url, values["username"]))
-                )
+                try:
+                    adapters.append(
+                        FediverseAdapter(Fediverse(self.storage, self.base_url, values["username"]))
+                    )
+                except (KeyError, ValueError):
+                    logger.warning(
+                        "Skipping the %s connection: its saved settings are invalid.", kind
+                    )
                 continue
             try:
                 adapters.append(connector.build(values))

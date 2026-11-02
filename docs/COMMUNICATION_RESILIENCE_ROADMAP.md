@@ -1,8 +1,8 @@
 # Communication Resilience Roadmap
 
-Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.7
-work, which has not been deployed. Live connector acceptance remains open.
+The deployed baseline is commit `6d44b7e`; local commits include the later CR1.7,
+CR0.1, and CR3.1–CR3.8 work, which has not been deployed. Live connector
+acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
 Communities should keep the reach of proprietary social networks and still be
@@ -67,27 +67,29 @@ connector or production failover acceptance.
 
 | Area | What exists | Remaining gap |
 | --- | --- | --- |
-| Announcements | Canonical lifecycle, review, urgent publishing, templates, scheduling, media, per-channel text and retrying jobs | No manual publication states or workflow (CR3) |
+| Announcements | Canonical lifecycle, review, urgent publishing, templates, scheduling, media, per-channel text, retrying jobs and manual publication outcomes | Live provider acceptance remains open |
 | Public site | Generated `/connect`, HTML feed, RSS, Atom and JSON Feed, served by nginx | No continuity notice or continuity-mode controls (CR4) |
 | Community identity | Optional YAML profile, console editing through the agent, sanitized logo and cover uploads, QR codes and offline identity package | Verify the new upload flow on a deployed instance |
-| Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads, Pixelfed and a native fediverse actor | Pixelfed and other third-party connectors need live account acceptance; CI uses fakes |
+| Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads, Pixelfed and a native fediverse actor | No external provider has live acceptance recorded; CI uses fakes |
 | Email and subscribers | Native SMTP connector, double opt-in, consent records, per-recipient unsubscribe, preferences, administration, CLI and backup support | Validate real-provider delivery; legal review approved 2026-11-02 |
 | Offline | Checksummed archive plus identity page, channel details, QR codes and `community.json` | No offline continuity guide (CR4.6) |
 | Continuity | Static `/connect` and archive foundations | No channel states, activation workflow or drills (CR4–CR5) |
-| Social publishing | Automatic connectors and per-channel content | No manual publishing preparation and outcome tracking (CR3) |
+| Social publishing | Automatic connectors, per-channel content, manual publishing kits, outcomes and edit/withdraw follow-up tasks | Live provider acceptance and continuity operations remain |
 
 ### Findings that shape the remaining work
 
-1. **Automatic connector behavior is not live-verified.** Pixelfed is a distinct
-   connector and can be switched independently from Instagram, but its API
-   behavior and instance-specific limits still need acceptance against a real
-   community account.
+1. **Automatic connector behavior is not live-verified.** The connector audit
+   confirms per-channel configuration, isolated dispatch, guarded retries, and
+   declared capabilities and setup caveats. WhatsApp intentionally shares Matrix
+   authentication and the bridge; Signal remains experimental. Live acceptance
+   is pending for every external provider: Matrix, ActivityPub/fediverse, Mastodon,
+   Pixelfed, Bluesky, Facebook, Instagram, Threads, Telegram, WhatsApp, Discord,
+   Slack, SMTP/email, listmonk, SMS Gateway and Signal.
 2. **D3 legal review is complete.** The notice and consent wording was approved
    by John Doe on 2026-11-02. The review flag is enabled; email sign-up still
    depends on a working SMTP connection.
-3. **The remaining roadmap work is chiefly manual social publishing and
-   continuity operations.** Do not treat connected automatic adapters as a
-   replacement for CR3's manual workflow or CR4's outage plan.
+3. **The remaining roadmap work is chiefly continuity operations.** Connected
+   automatic adapters do not replace CR4's outage plan or CR5's drills.
 4. **There is no database migration framework.** New tables and columns still
    follow the existing `_init_db` pattern using `CREATE TABLE IF NOT EXISTS`,
    `PRAGMA table_info` and `ALTER TABLE`.
@@ -420,10 +422,15 @@ Start with manual publishing. Do not try to automate every platform.
   as the console; a responsible actor is required, and Published/Updated require
   a valid HTTPS post URL. CLI publication output distinguishes prepared manual
   work from completed channel deliveries.
-- [ ] **CR3.8 Review automatic adapters.** Confirm each one is independently
+- [x] **CR3.8 Review automatic adapters.** Confirm each one is independently
   configurable, fails without affecting others, retries appropriately, declares its
   capabilities and limitations, and is never needed for core functions. Record its
-  live-acceptance status. Add no new automatic adapters in this phase.
+  live-acceptance status. Add no new automatic adapters in this phase. Dispatch
+  isolates channel failures; retries require both a retryable result and an
+  idempotent operation. Optional adapters are not required for canonical storage
+  or the web feed. Malformed saved SMS and fediverse settings are skipped with a
+  warning rather than preventing core feed startup. No external provider was
+  live-tested; all provider acceptance listed in section 3 remains pending.
 
 Use official APIs only. Scraping, browser automation that violates platform terms,
 and unofficial APIs must never be core dependencies.

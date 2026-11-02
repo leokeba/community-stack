@@ -1,9 +1,9 @@
 # Communication Resilience: Architecture
 
-Status snapshot: 2026-11-02. CR0.1 code/configuration/deployment audit and
-coverage baseline are complete; live acceptance remains open. CR1 is implemented in the current working tree,
-including CR1.7 image uploads, which are not yet deployed. CR2.1–CR2.14 are
-implemented, and D3 was approved by John Doe on 2026-11-02. Full plan:
+CR0.1's code/configuration/deployment audit and coverage baseline are complete.
+Local commits include CR1, CR2.1–CR2.14, and CR3.1–CR3.8 beyond deployed
+baseline `6d44b7e`; these changes have not been deployed. Live acceptance remains
+open, and D3 was approved by John Doe on 2026-11-02. Full plan:
 [COMMUNICATION_RESILIENCE_ROADMAP.md](COMMUNICATION_RESILIENCE_ROADMAP.md).
 Decisions: [ADR 0008](decisions/0008-communication-resilience.md).
 
@@ -66,7 +66,7 @@ flowchart LR
 | CR1 `/connect`, QR codes, identity package | Implemented, including console profile editing and tested logo/cover uploads; deployment acceptance is pending |
 | CR2.1–CR2.14 subscriptions | Implemented and tested; legal review approved 2026-11-02 |
 | Pixelfed connector | Implemented separately from Instagram; live-instance acceptance is pending |
-| CR3 | Platform catalogue, generated editable copy, per-platform media, manual outcomes, publishing kits, edit/withdraw follow-up tasks, and CLI workflow (CR3.1–CR3.7) implemented; CR3.8 remains |
+| CR3 | CR3.1–CR3.8 implemented and tested; automatic adapter live acceptance remains pending for every external provider |
 | CR4–CR6 | Not started |
 
 ## Dependencies between phases

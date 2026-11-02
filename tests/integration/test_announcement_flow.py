@@ -3,9 +3,11 @@
 from pathlib import Path
 
 import pytest
+from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.models import AnnouncementStatus
+from community_stack.announcements.platforms import PLATFORMS
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 
@@ -236,6 +238,47 @@ def test_adapter_failure_isolation(tmp_path):
     history = storage.get_delivery_attempts(ann.id, "matrix_room")
     assert [attempt["status"] for attempt in history] == ["failed", "delivered"]
     assert [attempt["attempt_number"] for attempt in history] == [1, 2]
+
+
+def test_mixed_automatic_and_manual_channels_isolate_automatic_failure(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    web_feed = WebFeedAdapter(output_dir=tmp_path / "feed", storage=storage)
+    matrix = MatrixRoomAdapter(
+        transport=lambda method, path, headers, payload: (503, {"error": "temporarily down"})
+    )
+    manual = ManualChannelAdapter(PLATFORMS["instagram"])
+    publisher = AnnouncementPublisher(storage=storage, adapters=[web_feed, matrix, manual])
+
+    announcement, results = publisher.publish("Community update", "A short announcement.")
+
+    assert results["web_feed"].success
+    assert not results["matrix_room"].success
+    assert results["instagram"].success and results["instagram"].prepared
+    assert {
+        state["adapter_name"]: state["status"]
+        for state in storage.get_delivery_states(announcement.id)
+    } == {
+        "web_feed": "delivered",
+        "matrix_room": "failed",
+        "instagram": "prepared",
+    }
+
+
+@pytest.mark.parametrize("kind", ["sms", "fediverse"])
+def test_invalid_saved_optional_connection_does_not_block_web_feed(tmp_path, caplog, kind):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    storage.save_connection(kind, {}, None)
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        config_path=tmp_path / "missing.yaml",
+        feed_dir=tmp_path / "feed",
+    )
+
+    assert [adapter.name for adapter in publisher.adapters] == ["web_feed"]
+    _, results = publisher.publish("Community update", "The public feed remains available.")
+
+    assert results["web_feed"].success
+    assert f"Skipping the {kind} connection" in caplog.text
 
 
 def test_disabled_adapter_is_skipped_without_affecting_enabled_delivery(tmp_path):
