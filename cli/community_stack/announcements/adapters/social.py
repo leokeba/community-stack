@@ -19,6 +19,7 @@ from community_stack.announcements.adapters.base import (
 from community_stack.announcements.models import Announcement
 
 MASTODON_MAX_CHARACTERS = 500
+PIXELFED_MAX_CHARACTERS = 2000
 BLUESKY_MAX_CHARACTERS = 300
 BLUESKY_MAX_IMAGE_BYTES = 1_000_000
 MASTODON_MEDIA_POLLS = 10
@@ -88,7 +89,8 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
         if status not in (200, 202) or not media_id:
             return DeliveryResult(
                 success=False,
-                error=f"Mastodon image upload failed: {http.error_text(status, body)}",
+                error=f"{self.capabilities.label} image upload failed: "
+                f"{http.error_text(status, body)}",
                 retryable=http.retryable(status),
                 idempotent=True,
             )
@@ -107,7 +109,7 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
             )
         return DeliveryResult(
             success=False,
-            error=f"Mastodon {action} failed: {http.error_text(status, body)}",
+            error=f"{self.capabilities.label} {action} failed: {http.error_text(status, body)}",
             retryable=http.retryable(status),
             idempotent=idempotent,
         )
@@ -156,7 +158,65 @@ class MastodonAdapter(http.ShortTextChannel, ChannelAdapter):
         status, body = self._call("GET", "/api/v1/accounts/verify_credentials")
         if status == 200:
             return HealthResult(ok=True, details=f"Connected as @{body.get('acct', '?')}.")
-        return HealthResult(ok=False, details=f"Mastodon refused: {http.error_text(status, body)}")
+        return HealthResult(
+            ok=False,
+            details=f"{self.capabilities.label} refused: {http.error_text(status, body)}",
+        )
+
+
+class PixelfedAdapter(MastodonAdapter):
+    """Posts public announcements to a Pixelfed account through its client API."""
+
+    max_characters = PIXELFED_MAX_CHARACTERS
+
+    @property
+    def name(self) -> str:
+        return "pixelfed"
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        return ChannelCapabilities(
+            label="Pixelfed",
+            max_text_length=self.max_characters,
+            supports_media=True,
+            shortens_long_text=True,
+            custom_text=True,
+            update_mode=UpdateMode.IN_PLACE,
+            withdraw_mode=WithdrawMode.DELETE,
+        )
+
+    def health_check(self) -> HealthResult:
+        config_status, config = self._call("GET", "/api/v2.1/config")
+        limits = config.get("limits", {}) if isinstance(config, dict) else {}
+        statuses = limits.get("statuses", {}) if isinstance(limits, dict) else {}
+        max_characters = statuses.get("max_characters") if isinstance(statuses, dict) else None
+        if isinstance(max_characters, int) and not isinstance(max_characters, bool):
+            if max_characters > 0:
+                self.max_characters = max_characters
+                limit_note = f" This server allows {max_characters} caption characters."
+            else:
+                limit_note = " This server did not report a usable caption limit."
+        else:
+            limit_note = (
+                f" This server did not report its caption limit; previews use the "
+                f"{PIXELFED_MAX_CHARACTERS}-character default."
+            )
+        if config_status != 200:
+            limit_note = (
+                f" Pixelfed server limits could not be read; previews use the "
+                f"{PIXELFED_MAX_CHARACTERS}-character default."
+            )
+
+        status, body = self._call("GET", "/api/v1/accounts/verify_credentials")
+        if status == 200 and isinstance(body, dict):
+            return HealthResult(
+                ok=True,
+                details=f"Connected to Pixelfed as @{body.get('acct', '?')}.{limit_note}",
+            )
+        return HealthResult(
+            ok=False,
+            details=f"Pixelfed refused: {http.error_text(status, body)}",
+        )
 
 
 def deterministic_tid(announcement: Announcement) -> str:

@@ -19,9 +19,11 @@ from community_stack.announcements.adapters.messaging import (
 from community_stack.announcements.adapters.social import (
     BlueskyAdapter,
     MastodonAdapter,
+    PixelfedAdapter,
     deterministic_tid,
 )
-from community_stack.announcements.connectors import CONNECTORS
+from community_stack.announcements.connectors import CONNECTORS, build_connector
+from community_stack.announcements.media import MediaImage
 from community_stack.announcements.models import Announcement
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
@@ -117,6 +119,99 @@ def test_mastodon_server_errors_are_retryable_and_auth_errors_are_not():
     assert busy.retryable and busy.idempotent
     assert not denied.retryable
     assert "access token is invalid" in denied.error
+
+
+def test_pixelfed_connector_validates_and_builds_adapter(monkeypatch):
+    monkeypatch.setattr(http, "resolve", lambda host: ["93.184.216.34"])
+    values = {
+        "instance_url": "https://pixelfed.example/",
+        "access_token": "pixelfed-access-token",
+    }
+
+    assert CONNECTORS["pixelfed"].validate(values) == {
+        "instance_url": "https://pixelfed.example",
+        "access_token": "pixelfed-access-token",
+    }
+    adapter = build_connector("pixelfed", values)
+    assert isinstance(adapter, PixelfedAdapter)
+    assert adapter.name == "pixelfed"
+
+
+def test_pixelfed_connector_rejects_non_https_server():
+    with pytest.raises(http.UnsafeURLError, match="https"):
+        CONNECTORS["pixelfed"].validate(
+            {"instance_url": "http://pixelfed.example", "access_token": "token-value"}
+        )
+
+
+def test_pixelfed_reads_server_limit_and_publishes_announcement_image(tmp_path):
+    image_path = tmp_path / "announcement.jpg"
+    image_path.write_bytes(b"image-bytes")
+    ann = announcement()
+    ann.image = MediaImage(
+        id="img_test_1234567890123456",
+        path=image_path,
+        alt="Volunteers cleaning the park",
+        content_type="image/jpeg",
+        width=1200,
+        height=800,
+    )
+    ann.channel_text["pixelfed"] = "Join the park cleanup."
+    transport = FakeTransport(
+        [
+            ("GET", "/api/v2.1/config", 200, {"limits": {"statuses": {"max_characters": 1800}}}),
+            (
+                "GET",
+                "/api/v1/accounts/verify_credentials",
+                200,
+                {"acct": "community"},
+            ),
+            ("POST", "/api/v2/media", 200, {"id": "media-1"}),
+            ("POST", "/api/v1/statuses", 200, {"id": "status-1"}),
+        ]
+    )
+    adapter = PixelfedAdapter(
+        "https://pixelfed.example", "pixelfed-access-token", transport=transport
+    )
+
+    health = adapter.health_check()
+    published = adapter.publish(ann)
+
+    assert health.ok and "1800 caption characters" in health.details
+    assert adapter.capabilities.max_text_length == 1800
+    assert published.success and published.external_id == "status-1"
+    media_payload = transport.calls[2][3]
+    assert isinstance(media_payload, http.Multipart)
+    assert media_payload.fields == {"description": "Volunteers cleaning the park"}
+    assert media_payload.files[0][1:] == (
+        "announcement.jpg",
+        "image/jpeg",
+        b"image-bytes",
+    )
+    status_payload = transport.calls[3][3]
+    assert status_payload["status"] == "Join the park cleanup."
+    assert status_payload["visibility"] == "public"
+    assert status_payload["media_ids"] == ["media-1"]
+
+
+def test_pixelfed_updates_and_withdraws_by_remote_status_id():
+    transport = FakeTransport(
+        [
+            ("PUT", "/api/v1/statuses/status-1", 200, {"id": "status-1"}),
+            ("DELETE", "/api/v1/statuses/status-1", 404, {}),
+        ]
+    )
+    adapter = PixelfedAdapter(
+        "https://pixelfed.example", "pixelfed-access-token", transport=transport
+    )
+
+    updated = adapter.update_post(announcement(), "status-1")
+    withdrawn = adapter.withdraw_post("ann_1", "status-1")
+
+    assert updated.success and updated.external_id == "status-1"
+    assert withdrawn.success
+    assert adapter.capabilities.update_mode.value == "in_place"
+    assert adapter.capabilities.withdraw_mode.value == "delete"
 
 
 def test_bluesky_uses_a_stable_record_key_and_link_facets():
@@ -321,6 +416,50 @@ def test_console_connects_tests_and_publishes_to_a_channel(console):
     actions = [event["action"] for event in app.state.auth_store.list_events()]
     assert {"channel.connected", "channel.tested"} <= set(actions)
     assert all("secret-token-value" not in str(e) for e in app.state.auth_store.list_events())
+
+
+def test_console_connects_and_tests_pixelfed(console):
+    app, client, transport = console
+    page = client.get("/admin/channels")
+    assert "Pixelfed" in page.text and "Not connected" in page.text
+
+    token = "pixelfed-secret-token"
+    saved = client.post(
+        "/admin/channels/pixelfed/save",
+        data={
+            "csrf_token": csrf(page),
+            "instance_url": "https://pixelfed.example/",
+            "access_token": token,
+        },
+    )
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/admin/channels#channel-pixelfed"
+    assert token not in client.get("/admin/channels").text
+
+    transport.replies.extend(
+        [
+            (
+                "GET",
+                "/api/v2.1/config",
+                200,
+                {"limits": {"statuses": {"max_characters": 1800}}},
+            ),
+            (
+                "GET",
+                "/api/v1/accounts/verify_credentials",
+                200,
+                {"acct": "community"},
+            ),
+        ]
+    )
+    tested = client.post(
+        "/admin/channels/pixelfed/test", data={"csrf_token": csrf(page)}
+    )
+    assert tested.status_code == 303
+    channels_page = client.get("/admin/channels")
+    assert "Connected to Pixelfed as @community." in channels_page.text
+    assert "1800 caption characters" in channels_page.text
+    assert token not in str(app.state.auth_store.list_events())
 
 
 def test_meta_connectors_are_available_and_testable_in_admin(console):

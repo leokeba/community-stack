@@ -22,7 +22,11 @@ from community_stack.announcements.adapters.meta import (
     ThreadsAdapter,
 )
 from community_stack.announcements.adapters.signal import SignalAdapter
-from community_stack.announcements.adapters.social import BlueskyAdapter, MastodonAdapter
+from community_stack.announcements.adapters.social import (
+    BlueskyAdapter,
+    MastodonAdapter,
+    PixelfedAdapter,
+)
 from community_stack.subscriptions.email_transport import SmtpTransport
 from community_stack.subscriptions.manager import SubscriberManager
 from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
@@ -63,6 +67,15 @@ def _validate_mastodon(values: dict[str, str]) -> dict[str, str]:
     url = values.get("instance_url", "").strip().rstrip("/")
     http.assert_public_https(url)
     return {"instance_url": url, "access_token": _token(values, "access_token", "The token")}
+
+
+def _validate_pixelfed(values: dict[str, str]) -> dict[str, str]:
+    url = values.get("instance_url", "").strip().rstrip("/")
+    http.assert_public_https(url)
+    return {
+        "instance_url": url,
+        "access_token": _token(values, "access_token", "The Pixelfed access token"),
+    }
 
 
 def _validate_bluesky(values: dict[str, str]) -> dict[str, str]:
@@ -294,6 +307,26 @@ CONNECTORS: dict[str, ConnectorType] = {
             ),
             validate=_validate_mastodon,
             build=lambda c: MastodonAdapter(c["instance_url"], c["access_token"]),
+        ),
+        ConnectorType(
+            kind="pixelfed",
+            label="Pixelfed",
+            steps=(
+                "Sign in to the community's Pixelfed account and open its application or developer settings.",
+                "Create an application with read:accounts, write:statuses, and write:media permissions.",
+                "Copy the account's access token, then enter the Pixelfed server address and token below.",
+            ),
+            fields=(
+                ConnectorField(
+                    "instance_url", "Pixelfed server address", placeholder="https://pixelfed.social"
+                ),
+                ConnectorField("access_token", "Access token", secret=True),
+            ),
+            validate=_validate_pixelfed,
+            build=lambda c: PixelfedAdapter(c["instance_url"], c["access_token"]),
+            caveat="Posts are public. The server's caption limit is read during connection testing; "
+            "images and alt text use the announcement's shared media.",
+            setup_page=("Pixelfed API documentation", "https://developers.pixelfed.org/api"),
         ),
         ConnectorType(
             kind="bluesky",

@@ -12,7 +12,7 @@ At present, the default announcement publisher generates local public HTML, RSS,
 |---|---|
 | **Working and covered by automated tests** | Public HTML archive, stable announcement pages, RSS, Atom, JSON Feed, the `/connect` contact page and its QR codes |
 | **Implemented; staging verification required** | Matrix public-room adapter (opt-in). Email through the organizer's own mail server, with double opt-in sign-up, signed one-click unsubscribe and per-person delivery tracking. Text alerts through an Android SMS gateway |
-| **Implemented; not yet verified against a live service** | ActivityPub actor and follower delivery. Email delivery through a real SMTP relay (CI uses fake sessions; run `subscribers test-email` before relying on it) |
+| **Implemented; not yet verified against a live service** | ActivityPub actor and follower delivery. Pixelfed account publishing through its Mastodon-compatible API. Email delivery through a real SMTP relay (CI uses fake sessions; run `subscribers test-email` before relying on it) |
 | **Planned** | Voice/IVR delivery |
 
 ---
@@ -38,9 +38,32 @@ The `ActivityPubAdapter` translates canonical announcements into ActivityStreams
 - **Privacy:** Public by design. No private community rooms are federated over ActivityPub.
 - **Withdrawal:** Emits an ActivityStreams `Delete(Note)` activity if an announcement is retracted.
 
+## 3. Pixelfed Account
+
+The Pixelfed connector publishes announcements directly from a connected
+Pixelfed account. This is separate from the ActivityPub actor above: Pixelfed
+users can already follow that actor, while this connector posts as the
+community's Pixelfed account.
+
+- **Setup:** Enter the Pixelfed server URL and an account access token with
+  `read:accounts`, `write:statuses`, and `write:media` permissions on **Admin →
+  Channels → Pixelfed**.
+- **Publishing:** Posts are public. The announcement's shared image and alt
+  text are uploaded to Pixelfed; channel-specific caption text is supported.
+- **Limits:** The connection test reads the server's reported caption limit.
+  When the server does not report one, previews use a 2,000-character default.
+- **Switching:** Connect Pixelfed and Instagram independently, then enable or
+  disable either destination in publishing settings. This changes future
+  deliveries; it does not migrate followers or previously published posts.
+- **Live verification:** CI covers the API contract with a fake transport.
+  Verify token scopes and publishing against the community's chosen Pixelfed
+  instance before relying on it.
+
+The API is instance-specific; see the [Pixelfed API documentation](https://developers.pixelfed.org/api).
+
 ---
 
-## 3. Email Delivery & Newsletter
+## 4. Email Delivery & Newsletter
 
 Email remains the most ubiquitous open communications medium.
 
@@ -59,7 +82,7 @@ Email remains the most ubiquitous open communications medium.
 
 ---
 
-## 4. SMS Delivery Evaluation
+## 5. SMS Delivery Evaluation
 
 SMS enables critical emergency outreach when mobile data networks are throttled or down.
 
@@ -80,7 +103,7 @@ SMS enables critical emergency outreach when mobile data networks are throttled 
 
 ---
 
-## 5. Voice Information Line Evaluation
+## 6. Voice Information Line Evaluation
 
 A voice information line allows anyone with a basic landline or feature phone to dial a local phone number and hear the latest recorded announcement.
 
@@ -91,7 +114,7 @@ A voice information line allows anyone with a basic landline or feature phone to
 
 ---
 
-## 6. Subscriber Management & Privacy
+## 7. Subscriber Management & Privacy
 
 Subscriber records can be managed via `community-stack subscribers`. This does not mean announcement email delivery is operational: the email adapter's default transport is a mock/local success path and is not enabled by the default publisher.
 - Storage: Dedicated local SQLite database (`data/subscriptions/subscribers.db`).
