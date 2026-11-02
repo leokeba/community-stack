@@ -452,9 +452,7 @@ def test_console_connects_and_tests_pixelfed(console):
             ),
         ]
     )
-    tested = client.post(
-        "/admin/channels/pixelfed/test", data={"csrf_token": csrf(page)}
-    )
+    tested = client.post("/admin/channels/pixelfed/test", data={"csrf_token": csrf(page)})
     assert tested.status_code == 303
     channels_page = client.get("/admin/channels")
     assert "Connected to Pixelfed as @community." in channels_page.text
