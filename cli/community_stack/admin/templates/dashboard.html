@@ -77,7 +77,7 @@
         {% for announcement in announcements %}
         {% set states = deliveries[announcement.id] %}
         <tr>
-          <td><a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
+          <td>{% if announcement.id.startswith("ann_drill_") %}{{ badge("warning", "SIMULATION", "warning") }} {% endif %}<a href="/admin/announcements/{{ announcement.id }}">{{ announcement.title }}</a></td>
           <td>{{ badge(announcement.status) }}</td>
           <td>
             {% if states %}

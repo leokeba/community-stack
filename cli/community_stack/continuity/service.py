@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import secrets
 import string
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from community_stack.announcements.models import (
 from community_stack.announcements.platforms import PLATFORMS
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
-from community_stack.community import INDEPENDENT_KEYS, load_community
+from community_stack.community import INDEPENDENT_KEYS, load_community, resolve_independent
 from community_stack.continuity.connect_page import (
     build_site,
     load_identity,
@@ -422,6 +423,7 @@ class ContinuityService:
             "events": self.store.list_events(),
             "steps": self.store.list_steps(current["event_id"]) if current else [],
             "guide_available": self.guide_path.is_file(),
+            "exercises": self.store.list_exercises(),
         }
 
     def set_channel_state(self, channel: str, status: str, reason: str, actor: str) -> None:
@@ -431,3 +433,73 @@ class ContinuityService:
             raise ValueError("Choose operational, degraded, unavailable or retired.")
         self.store.set_channel_state(channel, status, reason, actor)
         self._refresh_public_pages()
+
+    def drill_channels(self) -> list[tuple[str, str]]:
+        profile, config = load_community(self.config_path)
+        resolution = resolve_independent(profile, self.storage.list_connections(), config)
+        adapters = {adapter.name for adapter in self.publisher.adapters}
+        settings = self.storage.get_channel_settings()
+        return sorted(
+            (channel.key, channel.label)
+            for channel in resolution.shown
+            if (adapter := INDEPENDENT_ADAPTERS[channel.key]) in adapters
+            and settings.get(adapter, True)
+        )
+
+    def start_drill(self, actor: str, scenario: str, channels: list[str]) -> dict[str, Any]:
+        if self.store.active_notice():
+            raise ValueError("End active continuity mode before starting a migration drill.")
+        available = dict(self.drill_channels())
+        selected = sorted({channel.strip() for channel in channels if channel.strip()})
+        if not selected:
+            raise ValueError("Choose at least one active independent channel for the drill.")
+        unknown = set(selected) - set(available)
+        if unknown:
+            raise ValueError(f"Unavailable independent channel(s): {', '.join(sorted(unknown))}.")
+        targets = sorted({INDEPENDENT_ADAPTERS[channel] for channel in selected})
+        exercise_id = f"ex_{secrets.token_hex(10)}"
+        announcement_id = f"ann_drill_{exercise_id.removeprefix('ex_')}"
+        normalized_scenario = " ".join(scenario.split())[:500]
+        if not normalized_scenario:
+            raise ValueError("Describe the simulated outage scenario.")
+        self.store.create_exercise(
+            exercise_id, announcement_id, actor, normalized_scenario, selected
+        )
+        announcement = Announcement(
+            id=announcement_id,
+            title="Community communication drill",
+            body=(
+                f"Simulated scenario: {normalized_scenario}\n\n"
+                "Please check that this message is accessible on this channel. "
+                "This exercise does not indicate a real outage."
+            ),
+            author=actor,
+            tags=["continuity-exercise"],
+            channels=targets,
+            status=AnnouncementStatus.DRAFT,
+        )
+        try:
+            self.storage.save_announcement(announcement)
+            _published, results = self.publisher.publish_draft(announcement_id)
+        except Exception as exc:
+            logger.exception("Continuity drill publication failed for %s", exercise_id)
+            self.store.finish_exercise(exercise_id, {}, failed=True)
+            raise RuntimeError(f"The drill announcement could not be published: {exc}") from exc
+        delivery = {
+            channel: (
+                "prepared" if result.prepared else "delivered" if result.success else "failed"
+            )
+            for channel, result in results.items()
+        }
+        self.store.finish_exercise(exercise_id, delivery)
+        result = self.store.get_exercise(exercise_id)
+        if result is None:
+            raise RuntimeError("The continuity drill report could not be loaded.")
+        return result
+
+    def review_drill(
+        self, exercise_id: str, reviewer: str, access_verified: bool, problems: str
+    ) -> dict[str, Any]:
+        if not access_verified and not problems.strip():
+            raise ValueError("Describe the problem found when access could not be verified.")
+        return self.store.review_exercise(exercise_id, reviewer, access_verified, problems)

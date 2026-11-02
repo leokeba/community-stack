@@ -9,7 +9,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from community_stack.announcements.formatting import render_html
+from community_stack.announcements.formatting import render_html, with_simulation_label
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 
@@ -129,7 +129,7 @@ class OfflineArchiveExporter:
         announcements = self.storage.list_announcements(status=None, limit=200)
         # Only what is public: drafts and scheduled announcements must never leak.
         active = [
-            a
+            with_simulation_label(a)
             for a in announcements
             if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
         ]

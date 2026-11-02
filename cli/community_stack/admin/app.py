@@ -93,6 +93,7 @@ from community_stack.continuity.connect_page import (
     store_profile_image,
 )
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
+from community_stack.continuity.readiness import build_readiness_report
 from community_stack.continuity.service import DEFAULT_ENGLISH_TEMPLATE, ContinuityService
 from community_stack.subscriptions.email_signup import (
     EMAIL_CONSENT_TEXT,
@@ -3390,6 +3391,96 @@ def create_app(
             continuity_service.guide_path,
             media_type="application/zip",
             filename="continuity-guide.zip",
+        )
+
+    @app.get("/admin/continuity/readiness")
+    async def continuity_readiness(request: Request) -> Response:
+        session = require(request, "settings")
+        report = await run_in_threadpool(
+            build_readiness_report,
+            storage,
+            publisher,
+            config_path,
+            continuity_service.guide_path,
+        )
+        status = continuity_service.status()
+        return render(
+            request,
+            "continuity_readiness.html",
+            page(
+                session,
+                report=report,
+                drill_channels=continuity_service.drill_channels(),
+                exercises=status["exercises"],
+            ),
+        )
+
+    @app.post("/admin/continuity/drill/start")
+    async def continuity_drill_start(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        if not await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("password", "")
+        ):
+            raise HTTPException(status_code=403, detail="Password confirmation failed.")
+        submitted = await request.form()
+        try:
+            exercise = await run_in_threadpool(
+                continuity_service.start_drill,
+                session["username"],
+                form.get("scenario", ""),
+                submitted.getlist("channel"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "continuity.drill_started",
+            exercise["exercise_id"],
+            channels=exercise["channels"],
+            delivery=exercise["delivery"],
+        )
+        failed = [name for name, result in exercise["delivery"].items() if result == "failed"]
+        return redirect_with(
+            request,
+            "/admin/continuity/readiness",
+            flash(
+                "Simulation published. Verify each selected channel and record the results.",
+                "warning" if failed else "success",
+                failed,
+            ),
+        )
+
+    @app.post("/admin/continuity/drill/review")
+    async def continuity_drill_review(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        if not await run_in_threadpool(
+            auth_store.verify_password, session["username"], form.get("password", "")
+        ):
+            raise HTTPException(status_code=403, detail="Password confirmation failed.")
+        try:
+            exercise = await run_in_threadpool(
+                continuity_service.review_drill,
+                form.get("exercise_id", ""),
+                session["username"],
+                form.get("access_verified") == "yes",
+                form.get("problems", ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        audit(
+            request,
+            session["username"],
+            "continuity.drill_reviewed",
+            exercise["exercise_id"],
+            status=exercise["status"],
+            access_verified=exercise["access_verified"],
+            problems=exercise["problems"],
+        )
+        return redirect_with(
+            request,
+            "/admin/continuity/readiness",
+            flash(f"Exercise review recorded: {exercise['status']}."),
         )
 
     @app.get("/admin/backups/offline-archive.zip")

@@ -295,6 +295,18 @@ class SubscriberManager:
                 )
         return results
 
+    def count_confirmed_active(self, channel: str | None = None) -> int:
+        """Return an aggregate count only; never load subscriber destinations."""
+        query = (
+            "SELECT COUNT(*) FROM subscribers WHERE status = 'active' AND confirmed_at IS NOT NULL"
+        )
+        parameters: tuple[str, ...] = ()
+        if channel:
+            query += " AND channel = ?"
+            parameters = (channel,)
+        with self._get_conn() as conn:
+            return int(conn.execute(query, parameters).fetchone()[0])
+
     # Lifecycle (CR2.3). Sign-ups stay pending until the person confirms by link.
 
     @staticmethod

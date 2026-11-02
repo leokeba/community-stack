@@ -480,6 +480,38 @@ class AnnouncementStorage:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def independent_delivery_metrics(self, adapter_names: set[str]) -> dict[str, int | str | None]:
+        """Return aggregate public-announcement distribution data without recipient details."""
+        with self._get_connection() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM announcements "
+                "WHERE status IN ('published', 'updated') AND audience = 'public' "
+                "AND substr(id, 1, 10) != 'ann_drill_'"
+            ).fetchone()[0]
+            if not adapter_names:
+                return {"total": total, "distributed": 0, "last_success_at": None}
+            placeholders = ",".join("?" for _ in adapter_names)
+            parameters = tuple(sorted(adapter_names))
+            distributed = conn.execute(
+                "SELECT COUNT(DISTINCT a.id) FROM announcements a "
+                "JOIN delivery_states d ON d.announcement_id = a.id "
+                "WHERE a.status IN ('published', 'updated') AND a.audience = 'public' "
+                "AND substr(a.id, 1, 10) != 'ann_drill_' "
+                f"AND d.adapter_name IN ({placeholders}) "
+                "AND d.status IN ('delivered', 'updated')",
+                parameters,
+            ).fetchone()[0]
+            last_success = conn.execute(
+                "SELECT MAX(d.last_attempt_at) FROM announcements a "
+                "JOIN delivery_states d ON d.announcement_id = a.id "
+                "WHERE a.status IN ('published', 'updated') AND a.audience = 'public' "
+                "AND substr(a.id, 1, 10) != 'ann_drill_' "
+                f"AND d.adapter_name IN ({placeholders}) "
+                "AND d.status IN ('delivered', 'updated')",
+                parameters,
+            ).fetchone()[0]
+        return {"total": total, "distributed": distributed, "last_success_at": last_success}
+
     def get_failed_deliveries(self) -> list[dict]:
         """Return all failed deliveries that require retry."""
         with self._get_connection() as conn:

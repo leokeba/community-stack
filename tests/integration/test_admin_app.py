@@ -473,3 +473,50 @@ def test_continuity_console_reconfirms_password_and_audits_activation_and_deacti
     actions = [event["action"] for event in client.app.state.auth_store.list_events()]
     assert "continuity.activated" in actions
     assert "continuity.deactivated" in actions
+
+
+def test_readiness_console_drill_is_labeled_and_never_activates_continuity(tmp_path):
+    client, feed_dir = make_client(tmp_path)
+    setup_admin(client)
+    page = client.get("/admin/continuity/readiness")
+    assert page.status_code == 200
+    csrf_token = extract_csrf(page)
+    states_before = client.app.state.continuity.store.list_channel_states()
+
+    started = client.post(
+        "/admin/continuity/drill/start",
+        data={
+            "csrf_token": csrf_token,
+            "scenario": "The community website is being tested.",
+            "channel": "website",
+            "password": "a-long-safe-test-password",
+        },
+    )
+    assert started.status_code == 303
+    [exercise] = client.app.state.continuity.store.list_exercises()
+    report_page = client.get("/admin/continuity/readiness")
+    assert report_page.status_code == 200
+    assert exercise["exercise_id"] in report_page.text
+    assert "Choose outcome" in report_page.text
+    label = "[SIMULATION EXERCISE - NOT A REAL EMERGENCY]"
+    assert label in (feed_dir / "announcements.html").read_text(encoding="utf-8")
+    assert client.app.state.continuity.store.list_channel_states() == states_before
+    assert client.app.state.continuity.store.active_notice() is None
+
+    reviewed = client.post(
+        "/admin/continuity/drill/review",
+        data={
+            "csrf_token": csrf_token,
+            "exercise_id": exercise["exercise_id"],
+            "access_verified": "yes",
+            "problems": "",
+            "password": "a-long-safe-test-password",
+        },
+    )
+    assert reviewed.status_code == 303
+    assert client.app.state.continuity.store.get_exercise(exercise["exercise_id"])["status"] == (
+        "verified"
+    )
+    actions = [event["action"] for event in client.app.state.auth_store.list_events()]
+    assert "continuity.drill_started" in actions
+    assert "continuity.drill_reviewed" in actions

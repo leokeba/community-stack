@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from community_stack.announcements.formatting import with_simulation_label
 from community_stack.announcements.models import AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.continuity.connect_page import build_bundle, load_identity
@@ -39,7 +40,7 @@ def build_continuity_package(
         notice,
     )
     public_announcements = [
-        item
+        with_simulation_label(item)
         for item in storage.list_announcements(status=None, limit=200)
         if item.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
     ]

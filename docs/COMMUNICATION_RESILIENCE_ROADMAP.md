@@ -73,7 +73,7 @@ connector or production failover acceptance.
 | Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads, Pixelfed and a native fediverse actor | No external provider has live acceptance recorded; CI uses fakes |
 | Email and subscribers | Native SMTP connector, double opt-in, consent records, per-recipient unsubscribe, preferences, administration, CLI and backup support | Validate real-provider delivery; legal review approved 2026-11-02 |
 | Offline | Checksummed archive plus identity page, channel details, QR codes and `community.json` | Continuity guide is now available; keep advance distribution current (CR4.6, CR4.9) |
-| Continuity | Manual channel states, append-only events, resumable activation, public notice, offline guide and operator runbook | Staging acceptance remains; adoption metrics and drills are CR5 |
+| Continuity | Manual channel states, append-only events, resumable activation, public notice, offline guide, operator runbook, readiness findings and safe drills | Staging acceptance remains |
 | Social publishing | Automatic connectors, per-channel content, manual publishing kits, outcomes and edit/withdraw follow-up tasks | Live provider acceptance and continuity operations remain |
 
 ### Findings that shape the remaining work
@@ -525,20 +525,20 @@ taking its social accounts offline.
 
 ### Tasks
 
-- [ ] **CR5.1 Add aggregate metrics.** Show confirmed independent subscribers, active
+- [x] **CR5.1 Add aggregate metrics.** Show confirmed independent subscribers, active
   independent channels, percentage of announcements distributed independently, last
   successful independent publication, and announcements in the offline archive. Do not
   track individuals across platforms or estimate follower counts by scraping.
-- [ ] **CR5.2 Add the readiness check.** Add `continuity check` and
+- [x] **CR5.2 Add the readiness check.** Add `continuity check` and
   `continuity report`, with a console view. Find missing stable URLs, missing independent channels,
   missing or untested subscription workflows, channels with no recent successful
   publication, incomplete offline archives, and missing emergency instructions. Give a
   specific recommendation for each finding, with no overall score.
-- [ ] **CR5.3 Add migration drills.** Add a `continuity_exercises` table and drill
+- [x] **CR5.3 Add migration drills.** Add a `continuity_exercises` table and drill
   commands with console equivalents. A drill generates a simulated outage announcement,
   publishes it to selected independent channels, asks administrators to verify access,
   records the date and results, and produces a short report of problems found.
-- [ ] **CR5.4 Keep drills safe.** Apply the simulation label in the renderer on every
+- [x] **CR5.4 Keep drills safe.** Apply the simulation label in the renderer on every
   output, so that it cannot be edited out. Drills never change channel states or activate
   continuity mode.
 
@@ -563,6 +563,12 @@ of fragile social network connectors.
 
 Accept an integration only with a written case covering actual demand, API stability,
 maintenance burden, and its effect on community autonomy.
+
+**Current review: deferred.** CR0–CR5 have local implementation and automated
+coverage, but live provider acceptance and staging continuity drills are still
+open. No additional candidate has a written demand/API/maintenance/autonomy case
+that clears the gate, so no CR6 integration is authorized yet. Revisit after
+the outstanding acceptance work and a qualifying community request.
 
 | Candidate | Starting point |
 | --- | --- |

@@ -68,8 +68,35 @@ flowchart LR
 | Pixelfed connector | Implemented separately from Instagram; live-instance acceptance is pending |
 | CR3 | CR3.1–CR3.8 implemented and tested; automatic adapter live acceptance remains pending for every external provider |
 | CR4 continuity mode | Implemented: manual channel states, audited activation/deactivation, resumable migration steps, public notice, offline guide and operator runbook; staging acceptance is pending |
-| CR5 adoption and exercises | Not started |
-| CR6 integration intake | Deferred pending a qualifying demand and acceptance case |
+| CR5 adoption and exercises | Implemented: aggregate readiness metrics/findings and simulation drills; operational drill acceptance remains pending |
+| CR6 integration intake | Deferred: CR0–CR5 still need live acceptance, and no new candidate has a qualifying written demand case |
+
+## Continuity readiness and drills
+
+Run `community-stack continuity check` for an actionable readiness check (exit
+status 1 means findings remain), or `community-stack continuity report` to
+review the same metrics without treating findings as a command failure. The
+console exposes both at **Readiness and drills**. Metrics are aggregate only;
+they do not expose subscriber destinations or estimate social-network followers.
+
+The report includes confirmed subscribers, enabled independent channels,
+independent distribution coverage, the latest successful independent delivery,
+and the announcement count in a verified offline guide. A channel with no
+successful publication in 90 days is flagged for a public test post. Missing
+or stale URLs, an untested subscription workflow, missing emergency
+instructions, and an incomplete guide each include a specific recommendation.
+There is no combined readiness score.
+
+Run a drill with `community-stack continuity drill start --actor <name>
+--scenario "<scenario>" --channel <key> --confirm`; repeat `--channel` to select more than
+one independent channel. The command publishes a simulation, notifies no
+social-network channels, and stores delivery outcomes. Verify the message is
+accessible, then record the result with
+`community-stack continuity drill review <exercise-id> --actor <name>
+--access-verified yes|no [--problems "<findings>"]`. The console offers the same
+workflow. Every renderer applies a permanent simulation label based on the
+announcement's reserved ID, including feeds, `/connect`, and offline archives.
+Drills do not change channel states or activate continuity mode.
 
 ## Dependencies between phases
 CR2 depends on CR1 for the sign-up links and channel explanations. CR4 depends

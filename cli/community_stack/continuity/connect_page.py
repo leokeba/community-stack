@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import segno
+from community_stack.announcements.formatting import with_simulation_label
 from community_stack.announcements.media import MediaError, process_image
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
@@ -181,6 +182,7 @@ def render_page(
 ) -> str:
     """Return the complete page. Every profile value is escaped, and nothing is loaded from elsewhere."""
     channel_states = channel_states or {}
+    announcements = [with_simulation_label(item) for item in announcements]
     channels = "".join(
         f'<li><a href="{_e(ch.url)}">{_e(ch.label)}</a><br>'
         f'<span class="muted">{_e(ch.description)}</span>{_channel_state(channel_states, ch.key)}</li>'

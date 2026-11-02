@@ -18,7 +18,11 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
-from community_stack.announcements.formatting import render_html, to_plain_text
+from community_stack.announcements.formatting import (
+    render_html,
+    to_plain_text,
+    with_simulation_label,
+)
 from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.storage import AnnouncementStorage
 
@@ -73,7 +77,7 @@ class WebFeedAdapter(ChannelAdapter):
     def _regenerate_all(self, announcements: list[Announcement]) -> None:
         """Regenerate HTML, Atom, RSS, and JSON feed files."""
         active = [
-            a
+            with_simulation_label(a)
             for a in announcements
             if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
             and a.audience == "public"

@@ -77,6 +77,23 @@ class ContinuityStore:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY (event_id, step)
                 );
+                CREATE TABLE IF NOT EXISTS continuity_exercises (
+                    exercise_id TEXT PRIMARY KEY,
+                    announcement_id TEXT NOT NULL UNIQUE,
+                    actor TEXT NOT NULL,
+                    scenario TEXT NOT NULL,
+                    channels_json TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('publishing', 'awaiting_verification', 'verified',
+                                   'needs_attention', 'failed')
+                    ),
+                    delivery_json TEXT NOT NULL DEFAULT '{}',
+                    access_verified INTEGER,
+                    reviewer TEXT,
+                    problems TEXT NOT NULL DEFAULT ''
+                );
                 """)
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(continuity_current)")}
             if "notice_translations_json" not in columns:
@@ -325,3 +342,105 @@ class ContinuityStore:
                 (event_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def _exercise(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        item = dict(row)
+        item["channels"] = json.loads(item.pop("channels_json"))
+        item["delivery"] = json.loads(item.pop("delivery_json"))
+        if item["access_verified"] is not None:
+            item["access_verified"] = bool(item["access_verified"])
+        return item
+
+    def create_exercise(
+        self,
+        exercise_id: str,
+        announcement_id: str,
+        actor: str,
+        scenario: str,
+        channels: list[str],
+    ) -> dict[str, Any]:
+        actor = actor.strip()[:100]
+        scenario = " ".join(scenario.split())[:500]
+        if not actor or not scenario or not channels:
+            raise ValueError("An actor, scenario and at least one channel are required.")
+        with self._connection() as conn:
+            conn.execute(
+                "INSERT INTO continuity_exercises "
+                "(exercise_id, announcement_id, actor, scenario, channels_json, started_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'publishing')",
+                (
+                    exercise_id,
+                    announcement_id,
+                    actor,
+                    scenario,
+                    json.dumps(sorted(set(channels))),
+                    _now(),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM continuity_exercises WHERE exercise_id = ?", (exercise_id,)
+            ).fetchone()
+        exercise = self._exercise(row)
+        if exercise is None:
+            raise RuntimeError("The continuity exercise was not saved.")
+        return exercise
+
+    def finish_exercise(
+        self, exercise_id: str, delivery: dict[str, str], failed: bool = False
+    ) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE continuity_exercises SET completed_at = ?, status = ?, delivery_json = ? "
+                "WHERE exercise_id = ? AND status = 'publishing'",
+                (
+                    _now(),
+                    "failed" if failed else "awaiting_verification",
+                    json.dumps(delivery, sort_keys=True),
+                    exercise_id,
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError("This exercise is not awaiting a publishing result.")
+
+    def review_exercise(
+        self, exercise_id: str, reviewer: str, access_verified: bool, problems: str
+    ) -> dict[str, Any]:
+        reviewer = reviewer.strip()[:100]
+        problems = " ".join(problems.split())[:2000]
+        if not reviewer:
+            raise ValueError("A reviewer is required.")
+        status = "verified" if access_verified and not problems else "needs_attention"
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE continuity_exercises SET status = ?, access_verified = ?, "
+                "reviewer = ?, problems = ? WHERE exercise_id = ? "
+                "AND status IN ('awaiting_verification', 'needs_attention', 'verified')",
+                (status, int(access_verified), reviewer, problems, exercise_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM continuity_exercises WHERE exercise_id = ?", (exercise_id,)
+            ).fetchone()
+        if cursor.rowcount != 1:
+            raise ValueError("This exercise is unknown or has not been published yet.")
+        exercise = self._exercise(row)
+        if exercise is None:
+            raise RuntimeError("The reviewed continuity exercise could not be loaded.")
+        return exercise
+
+    def get_exercise(self, exercise_id: str) -> dict[str, Any] | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM continuity_exercises WHERE exercise_id = ?", (exercise_id,)
+            ).fetchone()
+        return self._exercise(row)
+
+    def list_exercises(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM continuity_exercises ORDER BY started_at DESC, rowid DESC LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [exercise for row in rows if (exercise := self._exercise(row)) is not None]

@@ -27,6 +27,7 @@ from community_stack.announcements.connectors import (
     build_email_adapter,
 )
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
+from community_stack.announcements.formatting import with_simulation_label
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
 from community_stack.announcements.platform_content import generate_platform_text
 from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
@@ -306,21 +307,21 @@ class AnnouncementPublisher:
 
     def channel_variant(self, announcement: Announcement, channel_name: str) -> Announcement:
         """Return an announcement copy with generated text and channel media applied."""
+        variant = with_simulation_label(announcement)
         platform = PLATFORMS.get(channel_name)
         has_media_override = channel_name in announcement.channel_media
-        if not has_media_override and (
-            platform is None or channel_name in announcement.channel_text
-        ):
-            return announcement
-        variant = copy(announcement)
+        if not has_media_override and (platform is None or channel_name in variant.channel_text):
+            return variant
+        if variant is announcement:
+            variant = copy(announcement)
         if has_media_override:
             variant.image = announcement.channel_media[channel_name]
             variant.image_id = announcement.channel_media_ids[channel_name]
-        if platform is not None and channel_name not in announcement.channel_text:
+        if platform is not None and channel_name not in variant.channel_text:
             variant.channel_text = dict(announcement.channel_text)
             variant.channel_text[channel_name] = generate_platform_text(
-                title=announcement.title,
-                body=announcement.body,
+                title=variant.title,
+                body=variant.body,
                 canonical_url=self.canonical_url_for(announcement),
                 tags=announcement.tags,
                 connect_url=self.connect_url,

@@ -216,3 +216,52 @@ def test_continuity_package_is_verified_and_excludes_subscriber_addresses(tmp_pa
         contents = b"".join(archive.read(name) for name in names)
     assert b"Public update" in contents
     assert b"private-subscriber@example.org" not in contents
+
+
+def test_drill_labels_every_public_renderer_without_changing_continuity_state(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+    feed_dir = tmp_path / "feed"
+    publisher = AnnouncementPublisher(
+        storage=storage,
+        adapters=[WebFeedAdapter(output_dir=feed_dir, storage=storage)],
+        config_path=tmp_path / "missing.yaml",
+        feed_dir=feed_dir,
+    )
+    service = ContinuityService(storage, publisher, tmp_path / "missing.yaml")
+    states_before = service.store.list_channel_states()
+
+    exercise = service.start_drill(
+        "olga", "The primary social account is temporarily unavailable.", ["website"]
+    )
+
+    label = "[SIMULATION EXERCISE - NOT A REAL EMERGENCY]"
+    announcement = storage.get_announcement(exercise["announcement_id"])
+    assert announcement is not None
+    assert announcement.title == "Community communication drill"
+    assert label in (feed_dir / "announcements.html").read_text(encoding="utf-8")
+    assert label in (feed_dir / "rss.xml").read_text(encoding="utf-8")
+    assert label in (feed_dir / "atom.xml").read_text(encoding="utf-8")
+    assert label in (feed_dir / "feed.json").read_text(encoding="utf-8")
+    assert label in (tmp_path / "connect" / "index.html").read_text(encoding="utf-8")
+    archive_path = OfflineArchiveExporter(storage=storage).export_archive(
+        tmp_path / "drill-archive.zip"
+    )
+    guide_path = build_continuity_package(
+        tmp_path / "missing.yaml", storage, tmp_path / "guide.zip"
+    )
+    for path in (archive_path, guide_path):
+        with zipfile.ZipFile(path) as archive:
+            contents = b"".join(archive.read(name) for name in archive.namelist())
+        assert label.encode() in contents
+    assert service.store.list_channel_states() == states_before
+    assert service.store.active_notice() is None
+
+    announcement.title = "An edited drill announcement"
+    announcement.body = "The original label is not stored in these fields."
+    storage.save_announcement(announcement)
+    publisher.adapters[0].rebuild()
+    assert label in (feed_dir / "announcements.html").read_text(encoding="utf-8")
+
+    reviewed = service.review_drill(exercise["exercise_id"], "pat", True, "")
+    assert reviewed["status"] == "verified"
+    assert service.store.get_current() is None

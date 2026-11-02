@@ -6,6 +6,7 @@
 <div class="page-heading">
   <div>
     <h1>{{ announcement.title }}</h1>
+    {% if announcement.id.startswith("ann_drill_") %}<p class="notice">SIMULATION EXERCISE — NOT A REAL EMERGENCY. This label is applied automatically to every published output.</p>{% endif %}
     <p class="muted">{{ badge(announcement.status) }}{% if announcement.author %} · {{ announcement.author }}{% endif %}</p>
   </div>
   {% if perms.edit and status != "withdrawn" %}<a class="button-link" href="/admin/announcements/{{ announcement.id }}/edit">Edit announcement</a>{% endif %}

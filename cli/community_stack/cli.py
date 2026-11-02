@@ -424,6 +424,48 @@ def create_parser() -> argparse.ArgumentParser:
         "-c", "--config", default="community-stack.yaml", help="Path to config file"
     )
 
+    for action, description in (
+        ("check", "Check continuity readiness; exit nonzero when findings exist"),
+        ("report", "Print aggregate continuity metrics and recommendations"),
+    ):
+        p_readiness = continuity_subs.add_parser(action, help=description)
+        p_readiness.add_argument("--actor", default="local operator", help="Responsible operator")
+        p_readiness.add_argument(
+            "-c", "--config", default="community-stack.yaml", help="Path to config file"
+        )
+
+    p_drill = continuity_subs.add_parser("drill", help="Run and review a simulated outage drill")
+    drill_subs = p_drill.add_subparsers(dest="continuity_drill_action", help="Drill actions")
+    p_drill_start = drill_subs.add_parser(
+        "start", help="Publish a clearly labeled simulation to independent channels"
+    )
+    p_drill_start.add_argument("--actor", required=True, help="Responsible administrator")
+    p_drill_start.add_argument("--scenario", required=True, help="Short simulated outage scenario")
+    p_drill_start.add_argument(
+        "--channel", action="append", required=True, help="Independent channel key (repeatable)"
+    )
+    p_drill_start.add_argument(
+        "--confirm", action="store_true", help="Confirm that the simulation will be publicly sent"
+    )
+    p_drill_start.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    p_drill_review = drill_subs.add_parser(
+        "review", help="Record whether members could access the drill message"
+    )
+    p_drill_review.add_argument("exercise_id", help="Exercise identifier returned by start")
+    p_drill_review.add_argument("--actor", required=True, help="Administrator recording results")
+    p_drill_review.add_argument(
+        "--access-verified", choices=("yes", "no"), required=True, help="Was access verified?"
+    )
+    p_drill_review.add_argument(
+        "--problems", default="", help="Brief description of problems or follow-up needed"
+    )
+
+    p_drill_report = drill_subs.add_parser("report", help="Show a drill and its recorded results")
+    p_drill_report.add_argument("exercise_id", help="Exercise identifier")
+
     return parser
 
 

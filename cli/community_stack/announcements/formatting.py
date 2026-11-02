@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+from copy import copy
+
+from community_stack.announcements.models import Announcement
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+
+SIMULATION_ID_PREFIX = "ann_drill_"
+SIMULATION_LABEL = "[SIMULATION EXERCISE - NOT A REAL EMERGENCY]"
 
 # Raw HTML is off, so organizers cannot inject markup; markdown-it also refuses
 # javascript: and similar link targets. Line breaks are kept as typed, which is
 # how announcements were displayed before Markdown support. Images go through
 # the media library instead, where a description is required.
 _markdown = MarkdownIt("commonmark", {"html": False, "breaks": True}).disable("image")
+
+
+def with_simulation_label(announcement: Announcement) -> Announcement:
+    """Apply the immutable drill label at render time, based on the reserved ID prefix."""
+    if not announcement.id.startswith(SIMULATION_ID_PREFIX):
+        return announcement
+    result = copy(announcement)
+    if not result.title.startswith(SIMULATION_LABEL):
+        result.title = f"{SIMULATION_LABEL} {result.title}"
+    if not result.body.startswith(f"**{SIMULATION_LABEL}**"):
+        result.body = f"**{SIMULATION_LABEL}**\n\n{result.body}"
+    result.channel_text = {
+        channel: text if text.startswith(SIMULATION_LABEL) else f"{SIMULATION_LABEL} {text}"
+        for channel, text in result.channel_text.items()
+    }
+    return result
 
 
 def render_html(body: str) -> str:

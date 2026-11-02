@@ -12,6 +12,7 @@ from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 from community_stack.continuity.package import DEFAULT_GUIDE, build_continuity_package
+from community_stack.continuity.readiness import build_readiness_report, format_readiness_report
 from community_stack.continuity.service import ContinuityService
 from community_stack.continuity.store import ContinuityStore
 
@@ -105,6 +106,11 @@ def run_continuity(args: argparse.Namespace) -> int:
     service = ContinuityService(storage, publisher, config_path)
 
     try:
+        if action in ("check", "report"):
+            report = build_readiness_report(storage, publisher, config_path, service.guide_path)
+            print(format_readiness_report(report))
+            _audit(storage, getattr(args, "actor", "local operator"), f"continuity.{action}")
+            return 1 if action == "check" and report["findings"] else 0
         if action == "plan":
             actor = args.actor
             plan = service.plan(args.reason, args.affected, _translations(args.translations))
@@ -171,7 +177,72 @@ def run_continuity(args: argparse.Namespace) -> int:
             )
             print(f"{args.channel} is now marked {args.status}.")
             return 0
-    except (KeyError, ValueError, OSError) as exc:
+        if action == "drill":
+            drill_action = getattr(args, "continuity_drill_action", None)
+            if drill_action == "start":
+                if not args.confirm:
+                    raise ValueError(
+                        "A drill is sent to live channels; repeat the command with --confirm."
+                    )
+                exercise = service.start_drill(args.actor, args.scenario, args.channel)
+                _audit(
+                    storage,
+                    args.actor,
+                    "continuity.drill_started",
+                    exercise["exercise_id"],
+                    {"channels": exercise["channels"], "delivery": exercise["delivery"]},
+                )
+                print(
+                    f"Exercise {exercise['exercise_id']} published; "
+                    "verify access on each selected channel, then record the review with "
+                    "`continuity drill review`."
+                )
+                for channel, status in exercise["delivery"].items():
+                    print(f"  {status.upper():<10} {channel}")
+                return 1 if "failed" in exercise["delivery"].values() else 0
+            if drill_action == "review":
+                exercise = service.review_drill(
+                    args.exercise_id,
+                    args.actor,
+                    args.access_verified == "yes",
+                    args.problems,
+                )
+                _audit(
+                    storage,
+                    args.actor,
+                    "continuity.drill_reviewed",
+                    exercise["exercise_id"],
+                    {
+                        "status": exercise["status"],
+                        "access_verified": exercise["access_verified"],
+                        "problems": exercise["problems"],
+                    },
+                )
+                print(
+                    f"Exercise {exercise['exercise_id']}: {exercise['status']}. "
+                    f"Problems: {exercise['problems'] or 'none recorded'}"
+                )
+                return 0
+            if drill_action == "report":
+                exercise = service.store.get_exercise(args.exercise_id)
+                if exercise is None:
+                    raise ValueError(f"Unknown continuity exercise: {args.exercise_id}.")
+                _audit(
+                    storage,
+                    "local operator",
+                    "continuity.drill_report",
+                    exercise["exercise_id"],
+                )
+                print(f"Exercise: {exercise['exercise_id']} ({exercise['status']})")
+                print(f"Scenario: {exercise['scenario']}")
+                print(f"Channels: {', '.join(exercise['channels'])}")
+                print(f"Started: {exercise['started_at']}")
+                print(f"Delivery: {json.dumps(exercise['delivery'], sort_keys=True)}")
+                print(f"Access verified: {exercise['access_verified']}")
+                print(f"Problems: {exercise['problems'] or 'none recorded'}")
+                return 0
+            raise ValueError("Choose drill start, review or report.")
+    except (KeyError, ValueError, OSError, RuntimeError) as exc:
         print(f"[ERROR] {exc}")
         return 1
 

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Readiness and drills{% endblock %}
+{% block content %}
+<h1>Continuity readiness</h1>
+<p class="page-intro">Aggregate communication-resilience evidence and operator recommendations. No follower estimates or cross-platform individual tracking are collected.</p>
+
+<section class="card">
+  <h2>Metrics</h2>
+  <dl>
+    <dt>Confirmed independent subscribers</dt>
+    <dd>{{ report.metrics.confirmed_independent_subscribers }}</dd>
+    <dt>Active independent channels</dt>
+    <dd>{{ report.metrics.active_independent_channels }}{% if report.metrics.active_channel_labels %} — {{ report.metrics.active_channel_labels|join(", ") }}{% endif %}</dd>
+    <dt>Announcements distributed independently</dt>
+    <dd>{{ report.metrics.independently_distributed_announcements }} of {{ report.metrics.public_announcements }} ({{ report.metrics.independent_distribution_percent }}%)</dd>
+    <dt>Last successful independent publication</dt>
+    <dd>{{ report.metrics.last_successful_independent_publication or "Never recorded" }}</dd>
+    <dt>Announcements in verified offline guide</dt>
+    <dd>{{ report.metrics.announcements_in_offline_archive }}</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>Findings and recommendations</h2>
+  {% if report.findings %}
+  <ul>
+    {% for finding in report.findings %}
+    <li class="card">
+      <h3>{{ finding.title }}</h3>
+      <p>{{ finding.detail }}</p>
+      <p><strong>Recommendation:</strong> {{ finding.recommendation }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No readiness findings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Run a migration drill</h2>
+  <p class="notice">The message is permanently labeled as a simulation and will be sent to the selected independent channels. Subscribers may receive it. A drill never changes channel status or activates continuity mode.</p>
+  {% if drill_channels %}
+  <form method="post" action="/admin/continuity/drill/start" data-confirm="Publish a clearly labeled simulation to the selected live channels? Subscribers may receive the message." data-confirm-label="Publish simulation">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="drill-scenario">Simulated scenario</label>
+    <input id="drill-scenario" name="scenario" maxlength="500" required placeholder="For example: primary social account is temporarily unavailable">
+    <fieldset>
+      <legend>Independent channels</legend>
+      {% for key, label in drill_channels %}
+      <label class="check-row"><input type="checkbox" name="channel" value="{{ key }}"> {{ label }}</label>
+      {% endfor %}
+    </fieldset>
+    <label for="drill-password">Confirm your password</label>
+    <input id="drill-password" name="password" type="password" autocomplete="current-password" required>
+    <p><button class="danger" type="submit">Publish simulation drill</button></p>
+  </form>
+  {% else %}
+  <p>No enabled independent channels are available for a drill. Configure one before running an exercise.</p>
+  {% endif %}
+</section>
+
+{% if exercises %}
+<section>
+  <h2>Exercise reports</h2>
+  {% for exercise in exercises %}
+  <article class="card">
+    <h3>{{ exercise.exercise_id }} · {{ badge(exercise.status) }}</h3>
+    <p><strong>Scenario:</strong> {{ exercise.scenario }}</p>
+    <p><strong>Started:</strong> {{ exercise.started_at }}</p>
+    <p><strong>Channels:</strong> {{ exercise.channels|join(", ") }}</p>
+    <p><strong>Delivery outcomes:</strong> {{ exercise.delivery }}</p>
+    <p><strong>Access verified:</strong> {{ exercise.access_verified if exercise.access_verified is not none else "Not reviewed" }}</p>
+    <p><strong>Problems:</strong> {{ exercise.problems or "None recorded" }}</p>
+    {% if exercise.status in ("awaiting_verification", "needs_attention", "verified") %}
+    <form method="post" action="/admin/continuity/drill/review">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="exercise_id" value="{{ exercise.exercise_id }}">
+      <label for="review-{{ exercise.exercise_id }}">Result</label>
+      <select id="review-{{ exercise.exercise_id }}" name="access_verified" required>
+        <option value="" disabled {% if exercise.access_verified is none %}selected{% endif %}>Choose outcome</option>
+        <option value="yes" {% if exercise.access_verified %}selected{% endif %}>Access verified</option>
+        <option value="no" {% if exercise.access_verified is not none and not exercise.access_verified %}selected{% endif %}>Access not verified</option>
+      </select>
+      <label for="problems-{{ exercise.exercise_id }}">Problems found or follow-up</label>
+      <textarea id="problems-{{ exercise.exercise_id }}" name="problems" rows="2">{{ exercise.problems }}</textarea>
+      <label for="review-password-{{ exercise.exercise_id }}">Confirm your password</label>
+      <input id="review-password-{{ exercise.exercise_id }}" name="password" type="password" autocomplete="current-password" required>
+      <p><button type="submit">Record drill review</button></p>
+    </form>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

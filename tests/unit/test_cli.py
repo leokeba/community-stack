@@ -105,6 +105,44 @@ def test_cli_plan_invalid_config(tmp_path, capsys):
     assert "Error loading configuration" in captured.out
 
 
+def test_cli_continuity_check_and_report(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    check_result = main(["continuity", "check", "-c", str(tmp_path / "missing.yaml")])
+    assert check_result == 1
+    check_output = capsys.readouterr().out
+    assert "Readiness findings" in check_output
+    assert "Recommendation:" in check_output
+    assert "score" not in check_output.lower()
+
+    report_result = main(["continuity", "report", "-c", str(tmp_path / "missing.yaml")])
+    assert report_result == 0
+    assert "Confirmed independent subscribers" in capsys.readouterr().out
+
+
+def test_cli_continuity_drill_requires_explicit_publication_confirmation(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+
+    result = main(
+        [
+            "continuity",
+            "drill",
+            "start",
+            "--actor",
+            "organizer",
+            "--scenario",
+            "Primary social account unavailable",
+            "--channel",
+            "website",
+        ]
+    )
+
+    assert result == 1
+    assert "--confirm" in capsys.readouterr().out
+
+
 def test_cli_doctor_command(tmp_path, capsys):
     main(["init", "--dir", str(tmp_path)])
     config_file = tmp_path / "community-stack.yaml"
