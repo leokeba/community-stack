@@ -11,8 +11,8 @@ At present, the default announcement publisher generates local public HTML, RSS,
 | Status | Destinations |
 |---|---|
 | **Working and covered by automated tests** | Public HTML archive, stable announcement pages, RSS, Atom, JSON Feed, the `/connect` contact page and its QR codes |
-| **Implemented; staging verification required** | Matrix public-room adapter (opt-in). Email through the organizer's own mail server, with double opt-in sign-up, signed one-click unsubscribe and per-person delivery tracking. Text alerts through an Android SMS gateway |
-| **Implemented; not yet verified against a live service** | ActivityPub actor and follower delivery. Pixelfed account publishing through its Mastodon-compatible API. Email delivery through a real SMTP relay (CI uses fake sessions; run `subscribers test-email` before relying on it) |
+| **Implemented; staging verification required** | Matrix public-room adapter (opt-in). Email through SMTP or Mailgun, with double opt-in sign-up, signed one-click unsubscribe and per-person delivery tracking. Text alerts through an Android SMS gateway |
+| **Implemented; not yet verified against a live service** | ActivityPub actor and follower delivery. Pixelfed account publishing through its Mastodon-compatible API. Email delivery through a real SMTP relay or Mailgun API (CI uses fake transports; test credentials before relying on them) |
 | **Planned** | Voice/IVR delivery |
 
 ---
@@ -74,6 +74,11 @@ Email remains the most ubiquitous open communications medium.
 2. **Dedicated Privacy-Respecting Relays (e.g. Migadu, Postmark, AWS SES):**
    - *Pros:* High deliverability out-of-the-box, reliable TLS transmission.
    - *Cons:* Small operational cost, dependency on relay account.
+3. **Mailgun API:**
+   - Configure the verified sending domain, private API key and US or EU region on the Channels page.
+   - Sends one API request per active subscriber, preserving the existing delivery ledger and one-click unsubscribe headers.
+   - Open and click tracking are explicitly disabled on each API request.
+   - The connection test checks the Mailgun domain credentials without sending an email.
 
 ### Legal & Deliverability Compliance
 - Mandatory double opt-in verification.

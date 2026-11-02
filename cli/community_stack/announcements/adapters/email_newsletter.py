@@ -203,8 +203,15 @@ class EmailNewsletterAdapter(ChannelAdapter):
     def health_check(self) -> HealthResult:
         if not self.enabled:
             return HealthResult(ok=True, details="Email newsletter adapter disabled.")
+        try:
+            provider_details = self.transport.verify()
+        except TransportError as exc:
+            return HealthResult(ok=False, details=str(exc))
         recipients_count = len(self.subscriber_manager.get_active_recipients(channel="email"))
+        details = f"From: {self.from_address}, Active subscribers: {recipients_count}"
+        if provider_details:
+            details = f"{provider_details} {details}"
         return HealthResult(
             ok=True,
-            details=f"From: {self.from_address}, Active subscribers: {recipients_count}",
+            details=details,
         )

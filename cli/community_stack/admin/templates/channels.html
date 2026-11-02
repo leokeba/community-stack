@@ -38,7 +38,13 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           {% for field in connector.fields %}
           <label for="{{ connector.kind }}-{{ field.name }}">{{ field.label }}</label>
-          {% if field.secret %}
+          {% if field.options %}
+          <select id="{{ connector.kind }}-{{ field.name }}" name="{{ field.name }}">
+            {% for value, label in field.options %}
+            <option value="{{ value }}" {% if item["values"][field.name] == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {% elif field.secret %}
           <input id="{{ connector.kind }}-{{ field.name }}" name="{{ field.name }}" type="password" autocomplete="off" {% if item.connected %}placeholder="Saved; leave blank to keep"{% elif field.required %}required{% endif %}>
           {% else %}
           <input id="{{ connector.kind }}-{{ field.name }}" name="{{ field.name }}" type="text" value="{{ item["values"][field.name] }}" placeholder="{{ field.placeholder }}" {% if field.required %}required{% endif %}>

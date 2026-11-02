@@ -27,7 +27,7 @@ from community_stack.announcements.adapters.social import (
     MastodonAdapter,
     PixelfedAdapter,
 )
-from community_stack.subscriptions.email_transport import SmtpTransport
+from community_stack.subscriptions.email_transport import MailgunTransport, SmtpTransport
 from community_stack.subscriptions.manager import SubscriberManager
 from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
 
@@ -41,6 +41,7 @@ class ConnectorField:
     secret: bool = False
     required: bool = True
     placeholder: str = ""
+    options: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,32 @@ def _validate_listmonk(values: dict[str, str]) -> dict[str, str]:
 
 
 def _validate_email(values: dict[str, str]) -> dict[str, str]:
+    provider = values.get("provider", "smtp").strip().lower() or "smtp"
+    if provider not in {"smtp", "mailgun"}:
+        raise ValueError("Choose SMTP or Mailgun as the email provider.")
+    from_address = values.get("from_address", "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}", from_address):
+        raise ValueError("Enter the address announcements are sent from.")
+    public_url = http.assert_public_https(values.get("public_url", "").strip().rstrip("/"))
+    common = {"provider": provider, "from_address": from_address, "public_url": public_url}
+    if provider == "mailgun":
+        domain = values.get("mailgun_domain", "").strip().lower()
+        if not re.fullmatch(
+            r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+",
+            domain,
+        ):
+            raise ValueError("Enter the Mailgun sending domain, such as mg.example.org.")
+        api_key = _token(values, "mailgun_api_key", "The Mailgun API key")
+        region = values.get("mailgun_region", "us").strip().lower() or "us"
+        if region not in {"us", "eu"}:
+            raise ValueError("Choose the US or EU Mailgun region.")
+        return {
+            **common,
+            "mailgun_domain": domain,
+            "mailgun_api_key": api_key,
+            "mailgun_region": region,
+        }
+
     host = values.get("host", "").strip().lower()
     if not re.fullmatch(
         r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+", host
@@ -207,26 +234,33 @@ def _validate_email(values: dict[str, str]) -> dict[str, str]:
         raise ValueError("The port must be a number, usually 587 or 465.") from exc
     if not 1 <= port <= 65535:
         raise ValueError("The port must be between 1 and 65535.")
-    from_address = values.get("from_address", "").strip()
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}", from_address):
-        raise ValueError("Enter the address announcements are sent from.")
-    public_url = http.assert_public_https(values.get("public_url", "").strip().rstrip("/"))
     username = values.get("username", "").strip()
     password = values.get("password", "")
     return {
+        **common,
         "host": host,
         "port": str(port),
         "username": username,
         "password": password,
-        "from_address": from_address,
-        "public_url": public_url,
     }
 
 
 def build_email_adapter(
     values: dict[str, str], subscribers: SubscriberManager, unsubscribe_secret: bytes | None
 ) -> EmailNewsletterAdapter:
-    """Email to confirmed subscribers, sent through the organizer's own mail server."""
+    """Email to confirmed subscribers through SMTP or Mailgun."""
+    if values.get("provider") == "mailgun":
+        return EmailNewsletterAdapter(
+            subscriber_manager=subscribers,
+            from_address=values["from_address"],
+            public_base_url=values["public_url"],
+            unsubscribe_secret=unsubscribe_secret,
+            transport=MailgunTransport(
+                domain=values["mailgun_domain"],
+                api_key=values["mailgun_api_key"],
+                region=values.get("mailgun_region", "us"),
+            ),
+        )
     return EmailNewsletterAdapter(
         subscriber_manager=subscribers,
         from_address=values["from_address"],
@@ -494,17 +528,47 @@ CONNECTORS: dict[str, ConnectorType] = {
         ),
         ConnectorType(
             kind="email",
-            label="Email (your own mail server)",
+            label="Email newsletter",
             steps=(
-                "Use an SMTP account from your email provider, for example the one that sends your organisation's mail.",
-                "Create or copy a sending address for announcements and its password.",
-                "Enter the address your public website uses, so unsubscribe links point there.",
+                "Choose SMTP or Mailgun. For Mailgun, create a sending domain and use its private API key.",
+                "Use a verified sending address on that domain.",
+                "Enter your public website address so personal unsubscribe links point to your site.",
             ),
             fields=(
-                ConnectorField("host", "Mail server", placeholder="smtp.example.org"),
-                ConnectorField("port", "Port", required=False, placeholder="587"),
-                ConnectorField("username", "User name", required=False),
-                ConnectorField("password", "Password", secret=True, required=False),
+                ConnectorField(
+                    "provider",
+                    "Email provider",
+                    options=(("smtp", "SMTP"), ("mailgun", "Mailgun")),
+                ),
+                ConnectorField(
+                    "host",
+                    "SMTP server (SMTP only)",
+                    required=False,
+                    placeholder="smtp.example.org",
+                ),
+                ConnectorField("port", "SMTP port (SMTP only)", required=False, placeholder="587"),
+                ConnectorField("username", "SMTP user name (SMTP only)", required=False),
+                ConnectorField(
+                    "password", "SMTP password (SMTP only)", secret=True, required=False
+                ),
+                ConnectorField(
+                    "mailgun_domain",
+                    "Mailgun sending domain (Mailgun only)",
+                    required=False,
+                    placeholder="mg.example.org",
+                ),
+                ConnectorField(
+                    "mailgun_api_key",
+                    "Mailgun private API key (Mailgun only)",
+                    secret=True,
+                    required=False,
+                ),
+                ConnectorField(
+                    "mailgun_region",
+                    "Mailgun region (Mailgun only)",
+                    required=False,
+                    options=(("us", "US"), ("eu", "EU")),
+                ),
                 ConnectorField(
                     "from_address", "Sent from", placeholder="announcements@example.org"
                 ),
@@ -515,7 +579,8 @@ CONNECTORS: dict[str, ConnectorType] = {
             validate=_validate_email,
             build=lambda c: build_email_adapter(c, SubscriberManager(), None),
             caveat="Each person gets their own message. If sending is interrupted, a retry "
-            "continues with the people who have not yet received it.",
+            "continues with the people who have not yet received it. Mailgun requests use its "
+            "HTTPS API and preserve the personal one-click unsubscribe headers.",
         ),
         ConnectorType(
             kind="listmonk",

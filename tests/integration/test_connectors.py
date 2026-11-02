@@ -383,8 +383,8 @@ def csrf(response) -> str:
     return re.search(r'name="csrf_token" value="([^"]+)"', response.text).group(1)
 
 
-def test_console_connects_tests_and_publishes_to_a_channel(console):
-    app, client, transport = console
+def test_console_connects_and_tests_mastodon(console):
+    _app, client, transport = console
     page = client.get("/admin/channels")
     assert "Mastodon" in page.text and "Not connected" in page.text
 
@@ -408,6 +408,61 @@ def test_console_connects_tests_and_publishes_to_a_channel(console):
     assert tested.status_code == 303
     assert "Connected as @community." in client.get("/admin/channels").text
 
+
+def test_console_connects_and_checks_mailgun_email(console):
+    _app, client, transport = console
+    transport.replies.append(
+        (
+            "GET",
+            "/v3/mg.example.org/domains/mg.example.org",
+            200,
+            {"domain": {"name": "mg.example.org"}},
+        )
+    )
+    page = client.get("/admin/channels")
+    assert 'id="email-provider"' in page.text
+    assert 'value="mailgun"' in page.text
+
+    saved = client.post(
+        "/admin/channels/email/save",
+        data={
+            "csrf_token": csrf(page),
+            "provider": "mailgun",
+            "mailgun_domain": "mg.example.org",
+            "mailgun_api_key": "key-mailgun-api-secret",
+            "mailgun_region": "us",
+            "from_address": "announcements@mg.example.org",
+            "public_url": "https://community.example.org",
+        },
+    )
+    assert saved.status_code == 303
+    page = client.get("/admin/channels")
+    assert "key-mailgun-api-secret" not in page.text
+
+    tested = client.post("/admin/channels/email/test", data={"csrf_token": csrf(page)})
+    assert tested.status_code == 303
+    assert (
+        "Connected to Mailgun sending domain mg.example.org." in client.get("/admin/channels").text
+    )
+    assert transport.calls[-1][0:2] == (
+        "GET",
+        "https://api.mailgun.net/v3/mg.example.org/domains/mg.example.org",
+    )
+
+
+def test_console_publishes_to_a_connected_channel(console):
+    app, client, transport = console
+    page = client.get("/admin/channels")
+    client.post(
+        "/admin/channels/mastodon/save",
+        data={
+            "csrf_token": csrf(page),
+            "instance_url": "https://social.example/",
+            "access_token": "secret-token-value",
+        },
+    )
+    transport.replies.append(("GET", "verify_credentials", 200, {"acct": "community"}))
+    client.post("/admin/channels/mastodon/test", data={"csrf_token": csrf(page)})
     transport.replies.append(("POST", "/api/v1/statuses", 200, {"id": "5"}))
     _, results = app.state.publisher.publish("Hello fediverse", "First post")
     assert results["mastodon"].success
