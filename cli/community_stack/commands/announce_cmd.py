@@ -50,8 +50,11 @@ def run_announce(
         try:
             ann, results = publisher.publish(title=title, body=body, author=author, tags=tags)
             failures = sum(not result.success for result in results.values())
+            prepared = sum(result.success and result.prepared for result in results.values())
             if failures:
                 print("  [PARTIAL] Announcement saved; one or more channel deliveries failed.")
+            elif prepared:
+                print("  [PARTIAL] Announcement saved; manual publication is still required.")
             elif results:
                 print("  [SUCCESS] Announcement created and dispatched!")
             else:
@@ -61,8 +64,18 @@ def run_announce(
             print(f"            Published At: {ann.published_at}")
             print("\n  Channel Delivery Results:")
             for adapter_name, res in results.items():
-                status_glyph = "[OK]  " if res.success else "[FAIL]"
-                detail = res.external_id or res.error or "completed"
+                status_glyph = (
+                    "[MANUAL]"
+                    if res.success and res.prepared
+                    else "[OK]  "
+                    if res.success
+                    else "[FAIL]"
+                )
+                detail = (
+                    "Prepared; manual action required"
+                    if res.success and res.prepared
+                    else res.external_id or res.error or "completed"
+                )
                 print(f"    {status_glyph} {adapter_name:<14} -> {detail}")
             return 1 if failures or not results else 0
         except ModelValidationError as exc:
@@ -108,11 +121,19 @@ def run_announce(
         try:
             ann, results = publisher.publish_draft(ann_id)
             failed = sum(not result.success for result in results.values())
-            print(
-                f"Announcement '{ann.id}' published to {len(results) - failed}/{len(results)} channels."
-            )
+            prepared = sum(result.success and result.prepared for result in results.values())
+            published = sum(result.success and not result.prepared for result in results.values())
+            print(f"Announcement '{ann.id}' published to {published}/{len(results)} channels.")
+            if prepared:
+                print(f"{prepared} channel(s) are prepared for manual publication.")
             for adapter_name, result in results.items():
-                outcome = "OK" if result.success else f"FAILED: {result.error}"
+                outcome = (
+                    "PREPARED: manual publication required"
+                    if result.success and result.prepared
+                    else "OK"
+                    if result.success
+                    else f"FAILED: {result.error}"
+                )
                 print(f"  - {adapter_name}: {outcome}")
             return 1 if failed else 0
         except (KeyError, ValueError) as exc:
@@ -176,6 +197,70 @@ def run_announce(
             )
         return 0
 
+    elif action == "deliveries":
+        ann_id = getattr(args, "id", None)
+        ann = storage.get_announcement(ann_id)
+        if ann is None:
+            print(f"[ERROR] Announcement '{ann_id}' not found.")
+            return 1
+
+        states = storage.get_delivery_states(ann_id)
+        if not states:
+            print(f"No channel publications recorded for '{ann_id}'.")
+            return 0
+
+        status_labels = {
+            "prepared": "Prepared",
+            "delivered": "Published",
+            "updated": "Updated",
+            "withdrawn": "Withdrawn",
+            "failed": "Failed",
+            "unknown": "Unknown",
+        }
+        print(f"CHANNEL PUBLICATIONS: {ann.id}")
+        for state in states:
+            operation = state["operation"].replace("manual_", "manual ").replace("_", " ")
+            label = status_labels.get(state["status"], state["status"].capitalize())
+            print(
+                f"  {state['adapter_name']}: {label} ({operation}; "
+                f"{state['attempts']} attempt(s); last {state['last_attempt_at']})"
+            )
+            if state["recorded_by"]:
+                print(f"    Recorded by: {state['recorded_by']}")
+            if state["post_url"]:
+                print(f"    Post URL: {state['post_url']}")
+
+        attempts = storage.get_delivery_attempts(ann_id)
+        if attempts:
+            print("ATTEMPT HISTORY:")
+            for attempt in attempts:
+                operation = attempt["operation"].replace("manual_", "manual ").replace("_", " ")
+                label = status_labels.get(attempt["status"], attempt["status"].capitalize())
+                actor = f"; recorded by {attempt['recorded_by']}" if attempt["recorded_by"] else ""
+                print(
+                    f"  {attempt['adapter_name']} #{attempt['attempt_number']}: "
+                    f"{operation} -> {label} at {attempt['attempted_at']}{actor}"
+                )
+        return 0
+
+    elif action == "outcome":
+        try:
+            manual_action, outcome, recorded_post_url = publisher.record_manual_outcome(
+                args.id,
+                args.channel,
+                args.outcome,
+                recorded_by=args.actor,
+                post_url=args.post_url,
+                note=args.note,
+            )
+        except (KeyError, ValueError) as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        print(f"[SUCCESS] Recorded manual {manual_action} as {outcome} for {args.channel}.")
+        if recorded_post_url:
+            print(f"Post URL: {recorded_post_url}")
+        return 0
+
     elif action == "update":
         ann_id = getattr(args, "id", None)
         title = getattr(args, "title", None)
@@ -189,11 +274,21 @@ def run_announce(
         try:
             ann, results = publisher.update(ann_id, title=title, body=body, author=author)
             failures = sum(not result.success for result in results.values())
+            prepared = sum(result.success and result.prepared for result in results.values())
             print(f"  [{'PARTIAL' if failures else 'SUCCESS'}] Announcement '{ann.id}' updated.")
+            if prepared:
+                print(f"{prepared} channel(s) require manual follow-up.")
             for adapter_name, res in results.items():
-                status_glyph = "[OK]  " if res.success else "[FAIL]"
+                status_glyph = (
+                    "[MANUAL]"
+                    if res.success and res.prepared
+                    else "[OK]  "
+                    if res.success
+                    else "[FAIL]"
+                )
                 print(
-                    f"    {status_glyph} {adapter_name:<14} -> {res.external_id or res.error or 'ok'}"
+                    f"    {status_glyph} {adapter_name:<14} -> "
+                    f"{'Manual action required' if res.success and res.prepared else res.external_id or res.error or 'ok'}"
                 )
             return 1 if failures else 0
         except KeyError as exc:
@@ -215,12 +310,22 @@ def run_announce(
         try:
             ann, results = publisher.withdraw(ann_id)
             failures = sum(not result.success for result in results.values())
+            prepared = sum(result.success and result.prepared for result in results.values())
             print(
                 f"  [{'PARTIAL' if failures else 'SUCCESS'}] "
                 f"Announcement '{ann.id}' marked WITHDRAWN."
             )
+            if prepared:
+                print(f"{prepared} channel(s) require manual withdrawal.")
             for adapter_name, res in results.items():
-                print(f"    - {adapter_name:<14}: {'Withdrawn' if res.success else res.error}")
+                outcome = (
+                    "Manual withdrawal required"
+                    if res.success and res.prepared
+                    else "Withdrawn"
+                    if res.success
+                    else res.error
+                )
+                print(f"    - {adapter_name:<14}: {outcome}")
             return 1 if failures else 0
         except KeyError as exc:
             print(f"[ERROR] {exc}")

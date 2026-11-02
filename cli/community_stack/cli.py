@@ -170,6 +170,25 @@ def create_parser() -> argparse.ArgumentParser:
     p_ann_show = announce_subs.add_parser("show", help="Show announcement details")
     p_ann_show.add_argument("id", help="Announcement ID")
 
+    p_ann_deliveries = announce_subs.add_parser(
+        "deliveries", help="List channel publication states and attempt history"
+    )
+    p_ann_deliveries.add_argument("id", help="Announcement ID")
+
+    p_ann_outcome = announce_subs.add_parser(
+        "outcome", help="Record a manual publication, update, or withdrawal result"
+    )
+    p_ann_outcome.add_argument("id", help="Announcement ID")
+    p_ann_outcome.add_argument("channel", help="Platform identifier, e.g. instagram")
+    p_ann_outcome.add_argument(
+        "outcome",
+        choices=["published", "updated", "withdrawn", "failed", "unknown"],
+        help="What happened to the manual post",
+    )
+    p_ann_outcome.add_argument("--actor", required=True, help="Name of the person recording it")
+    p_ann_outcome.add_argument("--post-url", help="HTTPS URL for a published or updated post")
+    p_ann_outcome.add_argument("--note", help="Optional explanation for a failed or unknown result")
+
     p_ann_update = announce_subs.add_parser("update", help="Update an announcement")
     p_ann_update.add_argument("id", help="Announcement ID to update")
     p_ann_update.add_argument("-t", "--title", help="New title")

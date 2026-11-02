@@ -1,7 +1,7 @@
 # Communication Resilience Roadmap
 
 Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
-the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.6
+the current working tree includes the later CR1.7, CR0.1, and CR3.1–CR3.7
 work, which has not been deployed. Live connector acceptance remains open.
 Audience: maintainers and the coding agents implementing this work.
 
@@ -414,8 +414,12 @@ Start with manual publishing. Do not try to automate every platform.
   or Unknown with an actor and timestamp. Confirmed update URLs are kept, and a
   removed post no longer appears as live. Failed initial manual publications do
   not create follow-up tasks.
-- [ ] **CR3.7 Add the CLI.** Add commands to list publications for an announcement
-  and record an outcome.
+- [x] **CR3.7 Add the CLI.** `announce deliveries <id>` lists current channel
+  states and attempt history. `announce outcome <id> <channel> <outcome>` records
+  Published, Updated, Withdrawn, Failed or Unknown results using the same validation
+  as the console; a responsible actor is required, and Published/Updated require
+  a valid HTTPS post URL. CLI publication output distinguishes prepared manual
+  work from completed channel deliveries.
 - [ ] **CR3.8 Review automatic adapters.** Confirm each one is independently
   configurable, fails without affecting others, retries appropriately, declares its
   capabilities and limitations, and is never needed for core functions. Record its

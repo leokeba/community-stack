@@ -17,7 +17,7 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
@@ -78,7 +78,7 @@ from community_stack.announcements.models import (
 )
 from community_stack.announcements.platform_content import generate_platform_text
 from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
-from community_stack.announcements.publisher import AnnouncementPublisher
+from community_stack.announcements.publisher import AnnouncementPublisher, ManualOutcomeConflict
 from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
 from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.community import SOCIAL_PLATFORMS, connection_warnings, load_community
@@ -1833,108 +1833,24 @@ def create_app(
         session, form = await checked_form(request, "edit")
         if channel not in PLATFORMS:
             raise HTTPException(status_code=404)
-        announcement = announcement_or_404(announcement_id)
-        adapter = next(
-            (
-                item
-                for item in publisher.adapters
-                if item.name == channel and isinstance(item, ManualChannelAdapter)
-            ),
-            None,
-        )
-        delivery = next(
-            (
-                item
-                for item in storage.get_delivery_states(announcement_id)
-                if item["adapter_name"] == channel
-            ),
-            None,
-        )
-        if delivery is None or delivery["status"] not in ("prepared", "failed", "unknown"):
-            raise HTTPException(
-                status_code=409, detail="This manual delivery is not awaiting an outcome."
-            )
-
-        operation = delivery["operation"]
-        manual_action = {
-            "manual_publish": "publish",
-            "manual_update": "update",
-            "manual_withdraw": "withdraw",
-        }.get(operation)
-        if manual_action is None and adapter is not None:
-            manual_action = operation if operation in ("publish", "update", "withdraw") else None
-        if manual_action is None or (adapter is None and not operation.startswith("manual_")):
-            raise HTTPException(
-                status_code=409, detail="This platform is not set up for manual posting."
-            )
-        if manual_action == "withdraw":
-            valid_announcement_state = announcement.status == AnnouncementStatus.WITHDRAWN
-        else:
-            valid_announcement_state = announcement.status in (
-                AnnouncementStatus.PUBLISHED,
-                AnnouncementStatus.UPDATED,
-            )
-        if not valid_announcement_state:
-            raise HTTPException(
-                status_code=409, detail="This manual action does not match the announcement state."
-            )
-
         outcome = form.get("outcome", "")
-        outcome_statuses = {
-            "publish": {"published": "delivered", "failed": "failed", "unknown": "unknown"},
-            "update": {"updated": "updated", "failed": "failed", "unknown": "unknown"},
-            "withdraw": {"withdrawn": "withdrawn", "failed": "failed", "unknown": "unknown"},
-        }
-        status_by_outcome = outcome_statuses[manual_action]
-        if outcome not in status_by_outcome:
-            choices = ", ".join(label.capitalize() for label in status_by_outcome)
-            raise HTTPException(status_code=400, detail=f"Choose {choices}.")
-        post_url = form.get("post_url", "").strip()
-        note = " ".join(form.get("note", "").split())[:1000]
-        if outcome in ("published", "updated"):
-            try:
-                parsed_url = urlsplit(post_url)
-                valid_url = (
-                    len(post_url) <= 2048
-                    and not any(character.isspace() for character in post_url)
-                    and parsed_url.scheme == "https"
-                    and parsed_url.hostname is not None
-                    and parsed_url.path not in ("", "/")
-                    and parsed_url.username is None
-                    and parsed_url.password is None
-                )
-                _ = parsed_url.port
-            except ValueError:
-                valid_url = False
-            if not valid_url:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Enter the HTTPS URL of the published or updated post.",
-                )
-            recorded_post_url = post_url
-            error = None
-        else:
-            recorded_post_url = (
-                delivery["post_url"]
-                if manual_action in ("update", "withdraw") and outcome in ("failed", "unknown")
-                else None
+        try:
+            manual_action, outcome, recorded_post_url = publisher.record_manual_outcome(
+                announcement_id,
+                channel,
+                outcome,
+                recorded_by=session["username"],
+                post_url=form.get("post_url"),
+                note=form.get("note"),
             )
-            action_label = "post" if manual_action == "publish" else manual_action
-            error = note or (
-                f"Administrator recorded that the manual {action_label} failed."
-                if outcome == "failed"
-                else f"Administrator could not confirm whether the manual {action_label} was completed."
-            )
-
-        storage.record_delivery(
-            announcement_id,
-            channel,
-            status_by_outcome[outcome],
-            error=error,
-            operation=f"manual_{manual_action}",
-            recorded_by=session["username"],
-            post_url=recorded_post_url,
-        )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Announcement or platform not found."
+            ) from None
+        except ManualOutcomeConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         audit(
             request,
             session["username"],

@@ -8,7 +8,7 @@ from copy import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from community_stack.announcements.adapters.base import (
@@ -44,6 +44,10 @@ DEFAULT_MAX_ATTEMPTS = 5
 JOB_LEASE = timedelta(minutes=5)
 RETRY_BASE_DELAY = timedelta(seconds=30)
 RETRY_MAX_DELAY = timedelta(hours=1)
+
+
+class ManualOutcomeConflict(ValueError):
+    """A manual publication result does not match the current delivery task."""
 
 
 def retry_delay(attempts: int) -> timedelta:
@@ -595,6 +599,118 @@ class AnnouncementPublisher:
         ann.scheduled_at = None
         self.storage.save_announcement(ann)
         return (ann, {}) if was_draft else (ann, self._dispatch(ann, "withdraw"))
+
+    def record_manual_outcome(
+        self,
+        announcement_id: str,
+        channel: str,
+        outcome: str,
+        recorded_by: str,
+        post_url: str | None = None,
+        note: str | None = None,
+    ) -> tuple[str, str, str | None]:
+        """Record a manual publish, update, or withdrawal result."""
+        if channel not in PLATFORMS:
+            raise KeyError(f"Unknown platform '{channel}'.")
+        recorded_by = recorded_by.strip()
+        if not recorded_by:
+            raise ValueError("The person recording the outcome is required.")
+
+        announcement = self.preview(announcement_id)
+        adapter = next(
+            (
+                item
+                for item in self.adapters
+                if item.name == channel and isinstance(item, ManualChannelAdapter)
+            ),
+            None,
+        )
+        delivery = next(
+            (
+                item
+                for item in self.storage.get_delivery_states(announcement_id)
+                if item["adapter_name"] == channel
+            ),
+            None,
+        )
+        if delivery is None or delivery["status"] not in ("prepared", "failed", "unknown"):
+            raise ManualOutcomeConflict("This manual delivery is not awaiting an outcome.")
+
+        operation = delivery["operation"]
+        manual_action = {
+            "manual_publish": "publish",
+            "manual_update": "update",
+            "manual_withdraw": "withdraw",
+        }.get(operation)
+        if manual_action is None and adapter is not None:
+            manual_action = operation if operation in ("publish", "update", "withdraw") else None
+        if manual_action is None or (adapter is None and not operation.startswith("manual_")):
+            raise ManualOutcomeConflict("This platform is not set up for manual posting.")
+
+        if manual_action == "withdraw":
+            valid_announcement_state = announcement.status == AnnouncementStatus.WITHDRAWN
+        else:
+            valid_announcement_state = announcement.status in (
+                AnnouncementStatus.PUBLISHED,
+                AnnouncementStatus.UPDATED,
+            )
+        if not valid_announcement_state:
+            raise ManualOutcomeConflict("This manual action does not match the announcement state.")
+
+        outcome_statuses = {
+            "publish": {"published": "delivered", "failed": "failed", "unknown": "unknown"},
+            "update": {"updated": "updated", "failed": "failed", "unknown": "unknown"},
+            "withdraw": {"withdrawn": "withdrawn", "failed": "failed", "unknown": "unknown"},
+        }
+        status_by_outcome = outcome_statuses[manual_action]
+        if outcome not in status_by_outcome:
+            choices = ", ".join(label.capitalize() for label in status_by_outcome)
+            raise ValueError(f"Choose {choices}.")
+
+        post_url = (post_url or "").strip()
+        note = " ".join((note or "").split())[:1000]
+        if outcome in ("published", "updated"):
+            try:
+                parsed_url = urlsplit(post_url)
+                valid_url = (
+                    len(post_url) <= 2048
+                    and not any(character.isspace() for character in post_url)
+                    and parsed_url.scheme == "https"
+                    and parsed_url.hostname is not None
+                    and parsed_url.path not in ("", "/")
+                    and parsed_url.username is None
+                    and parsed_url.password is None
+                )
+                _ = parsed_url.port
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                raise ValueError("Enter the HTTPS URL of the published or updated post.")
+            recorded_post_url = post_url
+            error = None
+        else:
+            recorded_post_url = (
+                delivery["post_url"]
+                if manual_action in ("update", "withdraw") and outcome in ("failed", "unknown")
+                else None
+            )
+            action_label = "post" if manual_action == "publish" else manual_action
+            error = note or (
+                f"Administrator recorded that the manual {action_label} failed."
+                if outcome == "failed"
+                else f"Administrator could not confirm whether the manual {action_label} was completed."
+            )
+
+        self.storage.record_delivery(
+            announcement_id,
+            channel,
+            status_by_outcome[outcome],
+            error=error,
+            operation=f"manual_{manual_action}",
+            recorded_by=recorded_by,
+            post_url=recorded_post_url,
+        )
+        return manual_action, outcome, recorded_post_url
 
     def retry_failed(self, announcement_id: str | None = None) -> dict[str, DeliveryResult]:
         """Retry previously failed, safely repeatable deliveries now."""

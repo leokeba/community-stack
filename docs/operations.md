@@ -19,6 +19,8 @@ This handbook is written for volunteer infrastructure operators managing a live 
 | Safe upgrade | `uv run community-stack upgrade matrix` | Takes backup, pulls image, restarts |
 | Draft announcement | `uv run community-stack announce draft -t "Title" -b "Body"` | Saves privately without dispatch |
 | Preview/publish | `uv run community-stack announce preview <id>` then `announce publish <id>` | Default output is local public HTML and feeds |
+| Review channel deliveries | `uv run community-stack announce deliveries <id>` | Shows current publication states and attempt history |
+| Record a manual result | `uv run community-stack announce outcome <id> instagram published --post-url "https://www.instagram.com/p/..." --actor "Organizer"` | Use `updated` or `withdrawn` for follow-up tasks; HTTPS post URLs are required for published/updated |
 | Schedule a draft | `uv run community-stack announce schedule <id> --at "2026-11-02 09:30"` | Time is in `project.timezone`; `announce unschedule <id>` cancels |
 | Run due retries | `uv run community-stack announce worker --once` | Runs queued deliveries now; the admin app also does this every 15 s |
 | Export offline bundle | `uv run community-stack archive export` | Creates zero-dependency offline archive |

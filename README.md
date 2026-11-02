@@ -117,7 +117,7 @@ Backup & Recovery:
   restore       Safely restore a snapshot to an isolated directory (--confirm required)
 
 Broadcast & Channels:
-  announce      Draft, preview, publish, list, update, and retract announcements
+  announce      Draft, preview, publish, list, update, retract, and track announcements
   subscribers   Manage opt-in email and SMS lists: export, erase, test-send, instant opt-out
   connect       Show the stable /connect contact page, QR codes and identity package
   bridge        Inspect WhatsApp bridge health or trigger the emergency killswitch
@@ -138,6 +138,20 @@ uv run community-stack announce publish ann_...
 ```
 
 `community-stack announce create` remains available as a compatibility shortcut that creates and immediately publishes. The default enabled destination is the local public web archive and its RSS, Atom, and JSON feeds; no live external channel delivery is implied.
+
+For configured social platforms without an active connector, publication prepares
+the post for a person to publish. Inspect channel states and their attempt history
+with `uv run community-stack announce deliveries <id>`, then record what happened, for example:
+
+```bash
+uv run community-stack announce outcome ann_... instagram published \
+  --post-url "https://www.instagram.com/p/..." \
+  --actor "Organizer name"
+```
+
+Use `updated` or `withdrawn` when recording follow-up tasks. Published and updated
+outcomes require an HTTPS post URL; every outcome requires the responsible
+person's name.
 
 The authenticated organizer interface is deployed at `https://community.example.org/admin`. Configure `COMMUNITY_STACK_ADMIN_SETUP_TOKEN` in the protected `.env` file before the first deployment, visit `/admin/setup` once, and remove the setup token after creating the administrator. The interface does not provide infrastructure administration or shell access.
 
