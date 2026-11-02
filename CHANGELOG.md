@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Facebook, Instagram and Threads requests send the access token in the `Authorization` header instead of the URL query string or form body.
+- Delivery errors are redacted before they are stored, so tokens echoed by an adapter or a `Bearer` header are not kept in the announcement history.
+
 ### Added
 - **Communication resilience, phase CR1 (contact page):**
   - Optional `community:` configuration block: name, description, canonical URL, logo, contact, emergency instructions, social accounts and independent channel switches. Schema-validated; older configurations still work.

@@ -32,14 +32,17 @@ class _MetaAdapter(ChannelAdapter):
         raise NotImplementedError
 
     def _call(self, method: str, path: str, fields: dict[str, str] | None = None):
-        values = {**(fields or {}), "access_token": self.access_token}
+        # The token travels in the Authorization header so it never appears in URLs or logs.
+        values = dict(fields or {})
         url = f"{self.graph_url}{path}"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
         if method in {"GET", "DELETE"}:
-            url = f"{url}?{urlencode(values)}"
+            if values:
+                url = f"{url}?{urlencode(values)}"
             payload = None
         else:
             payload = http.Form(values)
-        return self._transport(method, url, {}, payload)
+        return self._transport(method, url, headers, payload)
 
     def _error(self, status: int, body) -> str:
         error = body.get("error") if isinstance(body, dict) else None

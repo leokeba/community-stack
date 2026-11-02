@@ -210,3 +210,21 @@ def test_cli_worker_once_runs_due_jobs(tmp_path, monkeypatch, capsys):
     assert exit_code == 0
     assert "Ran 1 due delivery job(s)." in capsys.readouterr().out
     assert len(calls) == 2
+
+
+def test_adapter_exception_text_is_redacted_before_it_is_stored(tmp_path):
+    storage = AnnouncementStorage(db_path=tmp_path / "announcements.db")
+
+    def leaky_transport(method, path, headers, payload):
+        raise RuntimeError(f"connection failed for {path}?access_token=SECRET-TOKEN-123")
+
+    matrix = MatrixRoomAdapter(transport=leaky_transport)
+    publisher = AnnouncementPublisher(storage=storage, adapters=[matrix])
+
+    announcement, results = publisher.publish("Notice", "Body")
+
+    error = results["matrix_room"].error
+    [state] = storage.get_delivery_states(announcement.id)
+    assert "SECRET-TOKEN-123" not in error
+    assert "SECRET-TOKEN-123" not in state["last_error"]
+    assert "access_token=[REDACTED]" in state["last_error"]

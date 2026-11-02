@@ -68,4 +68,5 @@ def redact_text(text: str, known_secrets: Iterable[str]) -> str:
         r"\1\2\3" + REDACTED_PLACEHOLDER + r"\5",
         result,
     )
-    return result
+    # Authorization headers quoted in error messages, e.g. "Bearer abc123"
+    return re.sub(r"(?i)\b(bearer)(\s+)\S+", r"\1\2" + REDACTED_PLACEHOLDER, result)

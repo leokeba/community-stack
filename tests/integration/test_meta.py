@@ -1,7 +1,7 @@
 """Meta social publishing and connector validation."""
 
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs
 
 import pytest
 from community_stack.announcements.adapters import http
@@ -138,9 +138,9 @@ def test_facebook_publishes_edits_and_withdraws_page_posts():
     assert withdrawn.success
     post = transport.calls[0][3]
     assert isinstance(post, http.Form)
-    assert form_fields(post) == {"message": "Custom post", "access_token": TOKEN}
+    assert form_fields(post) == {"message": "Custom post"}
     assert transport.calls[1][3].fields["message"] == "Cleanup day\n\nBring water and snacks."
-    assert parse_qs(urlsplit(transport.calls[2][1]).query)["access_token"] == [TOKEN]
+    assert transport.calls[2][2] == {"Authorization": f"Bearer {TOKEN}"}
     assert adapter.capabilities.update_mode.value == "in_place"
 
 
@@ -198,7 +198,7 @@ def test_threads_publishes_text_and_images_then_deletes_post():
             ("POST", "/123456789/threads_publish", 200, {"id": "threads-post-1"}),
             ("POST", "/123456789/threads", 200, {"id": "image-container"}),
             ("POST", "/123456789/threads_publish", 200, {"id": "threads-post-2"}),
-            ("DELETE", "/threads-post-2?", 200, {"success": True}),
+            ("DELETE", "/threads-post-2", 200, {"success": True}),
             ("GET", "/me?", 200, {"id": "123456789", "username": "community"}),
         ]
     )
@@ -274,3 +274,24 @@ def test_meta_health_checks_reject_a_token_for_another_account(
 
     assert not health.ok
     assert message in health.details
+
+
+def test_meta_requests_send_the_token_in_the_header_not_the_url():
+    transport = FakeTransport(
+        [
+            ("GET", "/me?", 200, {"id": "123456789"}),
+            ("DELETE", "/post-1", 200, {"success": True}),
+            ("POST", "/123456789/feed", 200, {"id": "post-1"}),
+        ]
+    )
+    adapter = FacebookPageAdapter("123456789", TOKEN, transport=transport)
+
+    adapter._call("GET", "/me", {"fields": "id"})
+    adapter._call("DELETE", "/post-1")
+    adapter._call("POST", "/123456789/feed", {"message": "Hi"})
+
+    for method, url, headers, payload in transport.calls:
+        assert TOKEN not in url, method
+        assert headers == {"Authorization": f"Bearer {TOKEN}"}, method
+        if isinstance(payload, http.Form):
+            assert TOKEN not in payload.encode()[0].decode()

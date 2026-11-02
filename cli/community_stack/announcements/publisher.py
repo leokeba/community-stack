@@ -36,6 +36,7 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.config import load_config
 from community_stack.continuity.connect_page import build_site, load_identity, write_files
 from community_stack.continuity.store import ContinuityStore
+from community_stack.redact import redact_text
 from community_stack.secrets import parse_env_file
 from community_stack.subscriptions.email_signup import new_secret
 from community_stack.subscriptions.manager import SubscriberManager
@@ -495,6 +496,9 @@ class AnnouncementPublisher:
                 res = adapter.withdraw_post(ann.id, external_id)
         except Exception as exc:
             res = DeliveryResult(success=False, error=str(exc), retryable=False)
+        # Adapter errors can echo request URLs or headers; scrub them before they are stored or shown.
+        if res.error:
+            res.error = redact_text(res.error, [])
 
         previous_manual_state = (
             next(

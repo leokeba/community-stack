@@ -44,3 +44,15 @@ def test_redact_text():
     cleaned = redact_text(log_line, known_secrets=[secret])
     assert secret not in cleaned
     assert "[REDACTED]" in cleaned
+
+
+def test_redact_text_masks_tokens_in_urls_and_authorization_headers():
+    message = (
+        "Request https://graph.example/feed?access_token=abc123xyz failed; "
+        "sent header Authorization: Bearer qwerty987"
+    )
+    redacted = redact_text(message, [])
+
+    assert "abc123xyz" not in redacted
+    assert "qwerty987" not in redacted
+    assert "Request https://graph.example/feed?access_token=[REDACTED] failed" in redacted
