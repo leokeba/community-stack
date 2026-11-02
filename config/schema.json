@@ -348,7 +348,12 @@
         "logo": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\\.(png|jpe?g|webp)$",
-          "description": "Logo file name, kept next to community-stack.yaml"
+          "description": "Logo file name, kept next to community-stack.yaml or uploaded by an administrator"
+        },
+        "cover": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\\.(png|jpe?g|webp)$",
+          "description": "Cover image file name, kept next to community-stack.yaml or uploaded by an administrator"
         },
         "contact": {
           "type": "object",
@@ -389,6 +394,7 @@
                   "whatsapp",
                   "telegram",
                   "mastodon",
+                  "pixelfed",
                   "bluesky",
                   "discord",
                   "signal",

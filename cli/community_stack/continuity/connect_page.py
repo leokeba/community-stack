@@ -7,10 +7,12 @@ packages, and QR codes point at the page's stable address.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import io
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,7 +25,7 @@ from community_stack.community import (
     ChannelResolution,
     CommunityProfile,
     load_community,
-    logo_path,
+    profile_image_path,
     resolve_independent,
 )
 from community_stack.config import ConfigError
@@ -34,8 +36,10 @@ PAGE_CSS = """
 :root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.55; color: #17212b; background: #f7f8f9; }
 body { margin: 0; }
 main, header, footer { max-width: 42rem; margin: 0 auto; padding: 1rem; }
-header { display: flex; gap: 1rem; align-items: center; padding-top: 1.5rem; }
-header img { width: 4.5rem; height: 4.5rem; object-fit: contain; flex: none; }
+header { padding-top: 1.5rem; }
+.cover img { display: block; width: 100%; max-height: 12rem; object-fit: cover; border-radius: .5rem; }
+.identity { display: flex; gap: 1rem; align-items: center; padding-top: .75rem; }
+.identity img { width: 4.5rem; height: 4.5rem; object-fit: contain; flex: none; }
 h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
 h2 { font-size: 1.2rem; margin: 0 0 .5rem; }
 section { background: #fff; border: 1px solid #d5dde2; border-radius: .5rem; padding: 1rem 1.2rem; margin: 1rem 0; }
@@ -77,16 +81,63 @@ def recent_announcements(storage: AnnouncementStorage) -> list[Announcement]:
 
 def prepare_logo(path: Path) -> tuple[str, bytes]:
     """Re-encode the logo so that metadata such as GPS location is removed."""
+    return prepare_profile_image(path, "logo")
+
+
+def prepare_cover(path: Path) -> tuple[str, bytes]:
+    """Re-encode the cover image so that metadata such as GPS location is removed."""
+    return prepare_profile_image(path, "cover")
+
+
+def prepare_profile_image(path: Path, kind: str) -> tuple[str, bytes]:
+    if kind not in {"logo", "cover"}:
+        raise ValueError(f"Unknown profile image type: {kind}.")
     if not path.is_file():
-        raise ConnectError(f"The logo file {path.name} was not found next to the configuration.")
+        raise ConnectError(f"The {kind} file {path.name} was not found.")
     data = path.read_bytes()
     if len(data) > MAX_LOGO_BYTES:
-        raise ConnectError("The logo must be 2 MB or smaller.")
+        raise ConnectError(f"The {kind} must be 2 MB or smaller.")
     try:
         processed = process_image(data)
     except MediaError as exc:
-        raise ConnectError(f"The logo could not be used: {exc}") from exc
-    return f"logo.{processed.extension}", processed.content
+        raise ConnectError(f"The {kind} could not be used: {exc}") from exc
+    return f"{kind}.{processed.extension}", processed.content
+
+
+def store_profile_image(data: bytes, kind: str, directory: Path) -> tuple[str, Path, bool]:
+    """Sanitize and persist a console-uploaded image in the backed-up media directory."""
+    if kind not in {"logo", "cover"}:
+        raise ValueError(f"Unknown profile image type: {kind}.")
+    if len(data) > MAX_LOGO_BYTES:
+        raise ConnectError(f"The {kind} must be 2 MB or smaller.")
+    try:
+        processed = process_image(data)
+    except MediaError as exc:
+        raise ConnectError(f"The {kind} could not be used: {exc}") from exc
+    if len(processed.content) > MAX_LOGO_BYTES:
+        raise ConnectError(f"The processed {kind} must be 2 MB or smaller.")
+
+    digest = hashlib.sha256(processed.content).hexdigest()[:16]
+    filename = f"{kind}-{digest}.{processed.extension}"
+    target = directory / filename
+    existed = target.is_file()
+    if existed:
+        return filename, target, False
+
+    temporary: Path | None = None
+    try:
+        directory.mkdir(mode=0o750, parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=f".{kind}-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(processed.content)
+        temporary.chmod(0o640)
+        os.replace(temporary, target)
+    except OSError as exc:
+        raise ConnectError(f"The {kind} could not be saved.") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return filename, target, True
 
 
 def render_page(
@@ -95,6 +146,7 @@ def render_page(
     announcements: list[Announcement],
     logo_name: str | None,
     generated_at: str,
+    cover_name: str | None = None,
 ) -> str:
     """Return the complete page. Every profile value is escaped, and nothing is loaded from elsewhere."""
     channels = "".join(
@@ -141,6 +193,9 @@ def render_page(
         if logo_name
         else ""
     )
+    cover_html = (
+        f'<div class="cover"><img src="{_e(cover_name)}" alt=""></div>' if cover_name else ""
+    )
     description_html = f"<p>{_e(profile.description)}</p>" if profile.description else ""
     contact_html = (
         f'<p>Contact: <a href="mailto:{_e(profile.contact_email)}">{_e(profile.contact_email)}</a></p>'
@@ -167,11 +222,14 @@ def render_page(
 </head>
 <body>
   <header>
-    {logo_html}
-    <div>
-      <h1>{_e(profile.name)}</h1>
-      {description_html}
-      {contact_html}
+    {cover_html}
+    <div class="identity">
+      {logo_html}
+      <div>
+        <h1>{_e(profile.name)}</h1>
+        {description_html}
+        {contact_html}
+      </div>
     </div>
   </header>
   <main>
@@ -233,13 +291,23 @@ def build_site(
     announcements: list[Announcement],
     logo: tuple[str, bytes] | None,
     generated_at: str | None = None,
+    cover: tuple[str, bytes] | None = None,
 ) -> dict[str, bytes]:
     """The files the live site needs: the page and its logo."""
     stamp = generated_at or datetime.now(timezone.utc).isoformat()
-    page = render_page(profile, resolution, announcements, logo[0] if logo else None, stamp)
+    page = render_page(
+        profile,
+        resolution,
+        announcements,
+        logo[0] if logo else None,
+        stamp,
+        cover[0] if cover else None,
+    )
     files = {"index.html": page.encode("utf-8")}
     if logo:
         files[logo[0]] = logo[1]
+    if cover:
+        files[cover[0]] = cover[1]
     return files
 
 
@@ -249,10 +317,11 @@ def build_bundle(
     announcements: list[Announcement],
     logo: tuple[str, bytes] | None,
     generated_at: str | None = None,
+    cover: tuple[str, bytes] | None = None,
 ) -> dict[str, bytes]:
     """Everything for an identity package: page, logo, QR codes and machine-readable data."""
     stamp = generated_at or datetime.now(timezone.utc).isoformat()
-    files = build_site(profile, resolution, announcements, logo, stamp)
+    files = build_site(profile, resolution, announcements, logo, stamp, cover)
     data: dict[str, Any] = {
         "format": "community-stack/connect",
         "format_version": 1,
@@ -262,6 +331,7 @@ def build_bundle(
         "url": profile.url,
         "connect_url": profile.connect_url,
         "logo": logo[0] if logo else None,
+        "cover": cover[0] if cover else None,
         "contact_email": profile.contact_email,
         "emergency_instructions": profile.emergency_instructions,
         "social": [
@@ -282,27 +352,34 @@ def build_bundle(
 def load_identity(
     config_path: Path | str,
     storage: AnnouncementStorage,
-    require_logo: bool = False,
-) -> tuple[CommunityProfile, ChannelResolution, list[Announcement], tuple[str, bytes] | None]:
+    require_images: bool = False,
+) -> tuple[
+    CommunityProfile,
+    ChannelResolution,
+    list[Announcement],
+    tuple[str, bytes] | None,
+    tuple[str, bytes] | None,
+]:
     """Everything the page needs, read from the configuration and the canonical store.
 
-    A logo that cannot be read (for example, the announcements container cannot see a file on
-    the host) is left out, so the page still updates. The command-line tools pass
-    ``require_logo=True`` so the operator is told.
+    Images that cannot be read are left out of the page, so it still updates. The command-line
+    tools pass ``require_images=True`` so the operator is told.
     """
     profile, config = load_community(config_path)
     connections = storage.list_connections()
     resolution = resolve_independent(profile, connections, config)
     announcements = recent_announcements(storage)
-    logo = None
-    path = logo_path(config_path, profile)
-    if path is not None:
+    images: dict[str, tuple[str, bytes] | None] = {"logo": None, "cover": None}
+    for kind in images:
+        path = profile_image_path(config_path, getattr(profile, kind))
+        if path is None:
+            continue
         try:
-            logo = prepare_logo(path)
+            images[kind] = prepare_profile_image(path, kind)
         except ConnectError:
-            if require_logo:
+            if require_images:
                 raise
-    return profile, resolution, announcements, logo
+    return profile, resolution, announcements, images["logo"], images["cover"]
 
 
 def offline_connect_files(
@@ -310,10 +387,10 @@ def offline_connect_files(
 ) -> tuple[dict[str, bytes] | None, str | None]:
     """Identity files for an offline archive. A problem here returns a warning, never fails the archive."""
     try:
-        profile, resolution, announcements, logo = load_identity(config_path, storage)
+        profile, resolution, announcements, logo, cover = load_identity(config_path, storage)
     except (ConfigError, ConnectError) as exc:
         return None, f"Community contacts were left out of the archive: {exc}"
-    return build_bundle(profile, resolution, announcements, logo), None
+    return build_bundle(profile, resolution, announcements, logo, cover=cover), None
 
 
 def write_files(directory: Path | str, files: dict[str, bytes]) -> None:
@@ -325,6 +402,7 @@ def write_files(directory: Path | str, files: dict[str, bytes]) -> None:
         temp = target / f".{name}.tmp"
         temp.write_bytes(content)
         os.replace(temp, final)
-    for stale in target.glob("logo.*"):
-        if stale.name not in files:
-            stale.unlink(missing_ok=True)
+    for kind in ("logo", "cover"):
+        for stale in target.glob(f"{kind}.*"):
+            if stale.name not in files:
+                stale.unlink(missing_ok=True)

@@ -22,6 +22,8 @@
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if not available and step != "privacy" %}
   <p>Email updates are not available yet.</p>
+  {% elif step == "form" and not reviewed %}
+  <p>Email sign-ups are not available until the privacy and consent wording has been reviewed. <a href="/subscribe/email/privacy">Read the draft notice</a>.</p>
   {% elif step == "form" %}
   <p>Get public announcements in your inbox. We send a confirmation link to your address first, so nobody can sign you up without access to it.</p>
   <form method="post" action="/subscribe/email">

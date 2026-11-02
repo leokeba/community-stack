@@ -165,7 +165,16 @@ announcement archive remains unauthenticated at `/feed/announcements.html`.
 The app's SQLite database is mounted from `data/announcements`; generated public
 files are shared read-only with the landing service from `data/landing/feed`.
 
-The contact page (`/connect`) is shared the same way from `data/landing/connect`. `scripts/deploy-vps.sh` creates that folder with the owner the announcements container needs (UID 1000), recreates the landing service so it attaches the folder, and renders the page once the announcements container is healthy. The page is rebuilt after every delivery. Known limitation: the announcements container cannot read a logo file kept on the host, so a configured logo is left out of pages it rebuilds. Until that is fixed, use a logo only after checking the result with `community-stack connect show`.
+The contact page (`/connect`) is shared the same way from `data/landing/connect`. `scripts/deploy-vps.sh` creates that folder with the owner the announcements container needs (UID 1000), recreates the landing service so it attaches the folder, and renders the page once the announcements container is healthy. The page is rebuilt after every delivery and profile change.
+
+Upload the community logo and optional cover image from **Admin → Community
+profile**. Uploads accept raster images up to 2 MB; the app re-encodes them to
+remove metadata and stores them in `data/announcements/media/community`, which
+is part of the announcements data volume and backups. This is the recommended
+path because the announcements container cannot read arbitrary files from the
+host. YAML-managed images can still be placed beside `community-stack.yaml`
+when that file is accessible to the container. After changing images, check the
+generated page at `/connect`.
 The app runs as UID/GID `1000:1000` by default so it can write those host
 directories without root privileges. If the deployment account owns them under
 different IDs, set `COMMUNITY_STACK_UID` and `COMMUNITY_STACK_GID` in `.env`

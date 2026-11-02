@@ -2,9 +2,9 @@
 
 ## Status
 Accepted for decisions D1 and D2 (2026-11-01), on the recommended options, as
-the basis for phase CR1 and CR2. Decision D3 (legal review of consent wording)
-is open and must be owned by a named person before any public subscription
-form ships. See [COMMUNICATION_RESILIENCE_ROADMAP.md](../COMMUNICATION_RESILIENCE_ROADMAP.md).
+the basis for phase CR1 and CR2. D3 (legal review of consent and privacy
+wording) was approved by John Doe on 2026-11-02. See
+[COMMUNICATION_RESILIENCE_ROADMAP.md](../COMMUNICATION_RESILIENCE_ROADMAP.md).
 
 ## Context
 Communities should stay reachable when a proprietary network restricts them or
@@ -23,8 +23,8 @@ external dependency, but it can be replaced.
 **D2. English first.** Public pages use one text catalogue, so French can be
 added without rework. Full interface translation is out of scope.
 
-**D3. Legal review.** Open. Engineering does not sign off consent or privacy
-wording on its own.
+**D3. Legal review.** Completed 2026-11-02. John Doe approved the consent and
+privacy wording. Engineering does not sign off this wording on its own.
 
 **Identity lives in YAML; runtime state lives in SQLite.** The `community:`
 block holds the profile. Channel states and continuity history go in

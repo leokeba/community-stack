@@ -1,7 +1,9 @@
 # Communication Resilience Roadmap
 
-As of 2026-11-01, audited against commit `7928382`. Audience: maintainers and
-the coding agents implementing this work.
+Status snapshot: 2026-11-02. The deployed baseline is commit `6d44b7e`;
+this update also reflects the CR1.7 image-upload work in the current, not-yet-
+deployed working tree. Live connector acceptance remains open. Audience:
+maintainers and the coding agents implementing this work.
 
 Communities should keep the reach of proprietary social networks and still be
 able to contact their members if a network goes down, restricts access, changes
@@ -57,53 +59,37 @@ After each phase, report:
 
 ## 3. Where the repository stands
 
-This audit comes from reading the code, not from testing live services. CR0.1
-must confirm it.
+This status is based on the code and tests, not on live acceptance of external
+accounts. CR0.1 still requires a complete audit and recorded baseline.
 
-| Area | What exists | Gap |
+| Area | What exists | Remaining gap |
 | --- | --- | --- |
-| Announcements | Full lifecycle, review, urgent publishing, templates, scheduling, media, per-channel text (`channel_text`), job queue with retries (`announcements/publisher.py`, `storage.py`) | One image per announcement; no manual publication states |
-| Public site | Generated HTML, RSS, Atom and JSON Feed under `/feed` (`adapters/web_feed.py`), served by nginx | No `/connect`; `index.html` and `lite.html` are fixed files with no community identity |
-| Community identity | `project.name` (a lowercase slug) and `domain.web` | No display name or profile; public pages print the slug |
-| Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads and a native fediverse actor (`connectors.py`, `fediverse.py`) | Tested against recorded API behaviour, mostly not live accounts |
-| Email | Delivery through listmonk only | No native sending and no public email sign-up |
-| Subscribers | `SubscriberManager` with status and topics; public `/subscribe` flow for SMS only | No consent record, export, deletion or console page |
-| Offline | `OfflineArchiveExporter` zip with checksums; `archive export` and `verify` | No identity, channel instructions or QR codes |
-| Continuity | The `continuity/` package holds only the exporter | No channel states, continuity mode, or drills |
-| Audit | Console and agent audit logs (`record_event`) | Only `admin` CLI commands write to it; `announce` and `subscribers` do not |
+| Announcements | Canonical lifecycle, review, urgent publishing, templates, scheduling, media, per-channel text and retrying jobs | No manual publication states or workflow (CR3) |
+| Public site | Generated `/connect`, HTML feed, RSS, Atom and JSON Feed, served by nginx | No continuity notice or continuity-mode controls (CR4) |
+| Community identity | Optional YAML profile, console editing through the agent, sanitized logo and cover uploads, QR codes and offline identity package | Verify the new upload flow on a deployed instance |
+| Automatic channels | Mastodon, Bluesky, Telegram, Matrix, Discord, Slack, listmonk, SMS, Signal, WhatsApp bridge, Facebook, Instagram, Threads, Pixelfed and a native fediverse actor | Pixelfed and other third-party connectors need live account acceptance; CI uses fakes |
+| Email and subscribers | Native SMTP connector, double opt-in, consent records, per-recipient unsubscribe, preferences, administration, CLI and backup support | Validate real-provider delivery; legal review approved 2026-11-02 |
+| Offline | Checksummed archive plus identity page, channel details, QR codes and `community.json` | No offline continuity guide (CR4.6) |
+| Continuity | Static `/connect` and archive foundations | No channel states, activation workflow or drills (CR4–CR5) |
+| Social publishing | Automatic connectors and per-channel content | No manual publishing preparation and outcome tracking (CR3) |
 
-### Findings that shape the plan
+### Findings that shape the remaining work
 
-1. **Native email is not usable.** `EmailNewsletterAdapter` is not wired to any
-   connector and has no SMTP code. Without a test transport it reports success
-   and sends nothing. It also sends one message to all recipients, so it cannot
-   carry a per-person unsubscribe link.
-2. **The CLI and publisher use different subscriber databases.** The CLI opens
-   `data/subscriptions/subscribers.db`. The publisher and SMS sign-up use
-   `data/announcements/subscribers.db`. Fix this first in CR2.
-3. **Consent is not provable.** `add_subscriber` activates and reactivates
-   addresses immediately and stores no consent timestamp or text. The CLI command
-   `subscribers add` bypasses confirmation entirely.
-4. **Automatic adapters are ahead of the original plan.** Meta, Mastodon and a
-   native ActivityPub actor already exist. The remaining work is live acceptance,
-   not new adapters.
-5. **Manual publishing does not exist.** Delivery records only know `delivered`,
-   `failed` and `withdrawn`. WhatsApp has no official publishing API here, so the
-   target scenario in section 15 depends on manual publishing.
-6. **The console's config path handles scalars only.** `config_edit.set_value`
-   and the `Setting` catalogue cannot write lists or free text, and the
-   announcements container mounts the YAML read-only. Profile editing needs a new
-   agent operation.
-7. **There is no migration framework.** Tables are created with
-   `CREATE TABLE IF NOT EXISTS` and evolved with `PRAGMA table_info` plus
-   `ALTER TABLE` in `_init_db`. New tables and columns follow that pattern.
-8. **Backups copy `subscribers.db` as a live file.** Only `announcements.db` gets
-   a consistent SQLite snapshot in `backup.py`.
-9. **Some public claims and docs are wrong.** The offline archive footer says
-   "Cryptographically Verified", but it only has SHA-256 checksums inside the same
-   zip. `docs/accessible-channels.md` still describes SMS as planned and ActivityPub
-   as an unwired prototype. The `emergency-banner` in `index.html` is hidden and
-   nothing can show it.
+1. **CR0.1 is still open.** Complete and record the full code/deployment audit
+   and test baseline; this status page is not a substitute for that task.
+2. **Automatic connector behavior is not live-verified.** Pixelfed is a distinct
+   connector and can be switched independently from Instagram, but its API
+   behavior and instance-specific limits still need acceptance against a real
+   community account.
+3. **D3 legal review is complete.** The notice and consent wording was approved
+   by John Doe on 2026-11-02. The review flag is enabled; email sign-up still
+   depends on a working SMTP connection.
+4. **The remaining roadmap work is chiefly manual social publishing and
+   continuity operations.** Do not treat connected automatic adapters as a
+   replacement for CR3's manual workflow or CR4's outage plan.
+5. **There is no database migration framework.** New tables and columns still
+   follow the existing `_init_db` pattern using `CREATE TABLE IF NOT EXISTS`,
+   `PRAGMA table_info` and `ALTER TABLE`.
 
 ## 4. Design decisions
 
@@ -113,7 +99,7 @@ CR0 finds a reason to change them.
 - **`/connect` is a generated static page.** It is written to
   `data/landing/connect/` and served by the landing nginx, so it stays up when the
   announcements app is down. Caddy's default route already reaches nginx, so no
-  new route should be needed. CR0.1 confirms this against production.
+  new route should be needed. CR0.1 still needs to verify this against production.
 - **All dynamic public routes stay under `/subscribe*`.** That route already
   exists, and `scripts/deploy-vps.sh` preserves the production Caddyfile and
   patches it surgically. Avoiding new routes avoids new patching.
@@ -245,11 +231,13 @@ community:
 - [x] **CR1.6 Add rebuild triggers.** Rebuild after publish, update and withdraw,
   after a profile save, and at worker start. Trigger from the publisher so the page
   does not depend on the `web_feed` channel being enabled.
-- [ ] **CR1.7 Handle images.** Process logo and cover uploads through
-  `announcements/media.py`, which strips metadata. Accept raster formats only until
-  SVG sanitising exists, because the page shares an origin with `/admin`.
-  Open: the logo is re-encoded, but the announcements container cannot read it
-  from the host, so it is left out of pages the container rebuilds (see deployment.md).
+- [x] **CR1.7 Handle images.** Process logo and cover uploads through
+  `announcements/media.py`, which strips metadata. Store console uploads in
+  `data/announcements/media/community`, which is persistent and backed up. Accept
+  raster formats only until SVG sanitising exists, because the page shares an
+  origin with `/admin`. Unit and console integration tests cover sanitization and
+  rebuilds. Verify uploads on a deployed instance before treating deployment
+  acceptance as complete.
 - [x] **CR1.8 Add console editing.** Add a Community profile page and a structured
   agent operation that validates against the schema, backs up, rewrites only the
   `community:` block, and writes an audit event. Require the `settings` permission.
@@ -345,10 +333,10 @@ announcements in under a minute, without creating an account.
   both connected, since members could be mailed twice.
 - [x] **CR2.13 Help with deliverability.** Add a test-send button and SPF, DKIM and
   DMARC guidance. Send no tracking pixels.
-- [ ] **CR2.14 Write the privacy wording.** Publish a notice that names the community
+- [x] **CR2.14 Write the privacy wording.** Publish a notice that names the community
   from its profile, states what is stored and why, and explains how to leave. Have the
   consent and notice text reviewed against GDPR and French electronic communications
-  rules.
+  rules. Approved by John Doe on 2026-11-02.
 
 ### Tests
 
@@ -634,18 +622,19 @@ Run this scenario on a staging instance as the final acceptance test.
 
 ## 16. Open decisions and risks
 
-Resolve these in CR0.
+Decisions D1 and D2 were accepted in ADR 0008. D3 was approved on 2026-11-02.
 
-- [ ] **D1. Email engine.** Recommendation: build native double opt-in and SMTP
+- [x] **D1. Email engine.** Build native double opt-in and SMTP
   sending, and keep listmonk as an optional connector. Consent then stays in the
   community's own data, and `/subscribe` works with no extra service. This changes the
   listmonk-first plan in [ROADMAP.md](ROADMAP.md), so maintainers need to approve it.
   A relay account remains an external dependency, but it can be swapped.
-- [ ] **D2. Public page languages.** Recommendation: keep public text in one catalogue
+- [x] **D2. Public page languages.** Keep public text in one catalogue
   from CR1 and ship English first. Decide whether French must ship in CR1 for the first
   communities. Full interface translation stays out of scope.
-- [ ] **D3. Legal review.** Decide who reviews the consent and privacy wording in
-  CR2.14. Engineering cannot sign this off alone.
+- [x] **D3. Legal review.** The consent and privacy wording in CR2.14 was
+  reviewed and approved by John Doe on 2026-11-02. Engineering did not sign this
+  off.
 
 | Risk | Mitigation |
 | --- | --- |

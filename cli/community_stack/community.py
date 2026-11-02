@@ -25,6 +25,7 @@ SOCIAL_PLATFORMS: dict[str, str] = {
     "whatsapp": "WhatsApp",
     "telegram": "Telegram",
     "mastodon": "Mastodon",
+    "pixelfed": "Pixelfed",
     "bluesky": "Bluesky",
     "discord": "Discord",
     "signal": "Signal",
@@ -57,6 +58,7 @@ class CommunityProfile:
     base_domain: str
     description: str = ""
     logo: str | None = None
+    cover: str | None = None
     contact_email: str | None = None
     emergency_instructions: str = ""
     social: tuple[SocialAccount, ...] = ()
@@ -113,6 +115,7 @@ def load_profile(config: dict[str, Any], domain_web: str | None = None) -> Commu
         base_domain=base_domain,
         description=community.get("description", ""),
         logo=community.get("logo"),
+        cover=community.get("cover"),
         contact_email=contact.get("email"),
         emergency_instructions=community.get("emergency_instructions", ""),
         social=social,
@@ -129,11 +132,28 @@ def load_community(config_path: Path | str) -> tuple[CommunityProfile, dict[str,
     return load_profile(config), config
 
 
-def logo_path(config_path: Path | str, profile: CommunityProfile) -> Path | None:
-    """The logo file, resolved next to the configuration file. Never outside it."""
-    if not profile.logo:
+def profile_image_path(config_path: Path | str, filename: str | None) -> Path | None:
+    """Resolve a profile image beside the config or in the persistent uploaded-image store."""
+    if not filename:
         return None
-    return Path(config_path).parent / profile.logo
+    if Path(filename).name != filename or filename in {".", ".."}:
+        raise ProfileError("Profile images must be file names, not paths.")
+    root = Path(config_path).parent
+    configured = root / filename
+    if configured.is_file():
+        return configured
+    uploaded = root / "data" / "announcements" / "media" / "community" / filename
+    return uploaded if uploaded.is_file() else configured
+
+
+def logo_path(config_path: Path | str, profile: CommunityProfile) -> Path | None:
+    """The logo file, whether supplied by the operator or uploaded in the console."""
+    return profile_image_path(config_path, profile.logo)
+
+
+def cover_path(config_path: Path | str, profile: CommunityProfile) -> Path | None:
+    """The cover image, whether supplied by the operator or uploaded in the console."""
+    return profile_image_path(config_path, profile.cover)
 
 
 def address_warnings(url: str, profile: CommunityProfile) -> list[str]:

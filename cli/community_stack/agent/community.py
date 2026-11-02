@@ -12,7 +12,12 @@ from typing import Any
 
 import yaml
 
-from community_stack.community import INDEPENDENT_KEYS, SOCIAL_PLATFORMS
+from community_stack.community import (
+    INDEPENDENT_KEYS,
+    SOCIAL_PLATFORMS,
+    load_profile,
+    profile_image_path,
+)
 from community_stack.config import validate_config
 from community_stack.config_edit import write_in_place
 
@@ -21,6 +26,7 @@ ALLOWED = {
     "description",
     "url",
     "logo",
+    "cover",
     "contact_email",
     "emergency_instructions",
     "social",
@@ -50,7 +56,7 @@ def build_block(values: dict[str, Any]) -> dict[str, Any]:
         raise CommunityError("The community needs a name.")
 
     block: dict[str, Any] = {"name": name}
-    for key in ("description", "url", "logo", "emergency_instructions"):
+    for key in ("description", "url", "logo", "cover", "emergency_instructions"):
         value = _text(values, key)
         if value:
             block[key] = value
@@ -121,12 +127,14 @@ def apply(context: Any, values: dict[str, Any]) -> dict[str, Any]:
     if errors:
         raise CommunityError("The profile is not valid: " + "; ".join(errors))
 
-    logo = block.get("logo")
-    if logo and not (context.config_path.parent / logo).is_file():
-        raise CommunityError(
-            f"The logo file '{logo}' was not found next to community-stack.yaml. "
-            "Copy it there first."
-        )
+    profile = load_profile(parsed)
+    for key, label in (("logo", "logo"), ("cover", "cover image")):
+        image_path = profile_image_path(context.config_path, getattr(profile, key))
+        if image_path and not image_path.is_file():
+            raise CommunityError(
+                f"The {label} file '{block[key]}' was not found. Upload it on the "
+                "Community profile page or copy it next to community-stack.yaml."
+            )
 
     steps: list[str] = []
     engine = context.backup_engine()

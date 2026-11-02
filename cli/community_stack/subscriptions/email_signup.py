@@ -1,8 +1,4 @@
-"""Helpers for email sign-up: consent wording, signed unsubscribe links and confirmation mail.
-
-The consent wording below is provisional. Decision D3 (legal review) is open, and the
-text must be approved before a public form is offered to people.
-"""
+"""Email sign-up helpers: consent wording, signed unsubscribe links and confirmation mail."""
 
 from __future__ import annotations
 
@@ -12,8 +8,8 @@ import hmac
 import secrets
 from email.message import EmailMessage
 
-# Set to True only after decision D3 (legal review) has signed off the wording below.
-PRIVACY_NOTICE_REVIEWED = False
+# D3 review approved the notice and consent wording on 2026-11-02.
+PRIVACY_NOTICE_REVIEWED = True
 EMAIL_CONSENT_VERSION = "2026-11-email"
 EMAIL_CONSENT_TEXT = (
     "I agree to receive public announcements from this community by email. "

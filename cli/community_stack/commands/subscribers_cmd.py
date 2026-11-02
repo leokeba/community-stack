@@ -152,7 +152,7 @@ def _test_email(args: argparse.Namespace) -> int:
     config_path = getattr(args, "config", "community-stack.yaml")
     try:
         publisher = AnnouncementPublisher(storage=AnnouncementStorage(), config_path=config_path)
-        profile, _res, _anns, _logo = load_identity(config_path, publisher.storage)
+        profile, _res, _anns, _logo, _cover = load_identity(config_path, publisher.storage)
     except ConfigError as exc:
         print(f"[ERROR] {exc}")
         return 1

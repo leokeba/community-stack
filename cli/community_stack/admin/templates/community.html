@@ -4,7 +4,7 @@
 <h1>Community profile</h1>
 <p class="page-intro">This is what people see on the <a href="/connect/">contact page</a>: who you are, how to reach you, and where to find you. Saving it updates the page and the offline package. Changes are backed up first.</p>
 {% if flash_error %}<p class="flash error" role="alert">{{ flash_error }}</p>{% endif %}
-<form class="card" method="post" action="/admin/community">
+<form class="card" method="post" action="/admin/community" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <h2>Who you are</h2>
   <label for="name">Community name</label>
@@ -14,9 +14,16 @@
   <label for="url">Main web address (https)</label>
   <input id="url" name="url" type="url" maxlength="200" placeholder="https://community.example.org" value="{{ v.url }}">
   <p class="muted">Leave empty to use the web address this server answers on.</p>
-  <label for="logo">Logo file name</label>
+  <label for="logo_upload">Upload logo</label>
+  <input id="logo_upload" name="logo_upload" type="file" accept="image/png,image/jpeg,image/webp">
+  <label for="logo">Logo file name (optional)</label>
   <input id="logo" name="logo" type="text" maxlength="90" placeholder="logo.png" value="{{ v.logo }}">
-  <p class="muted">Copy the image next to community-stack.yaml on the server first. PNG, JPEG or WebP.</p>
+  <p class="muted">Uploading replaces the current logo. PNG, JPEG or WebP, up to 2 MB. You can also copy a file next to community-stack.yaml and enter its name.</p>
+  <label for="cover_upload">Upload cover image</label>
+  <input id="cover_upload" name="cover_upload" type="file" accept="image/png,image/jpeg,image/webp">
+  <label for="cover">Cover image file name (optional)</label>
+  <input id="cover" name="cover" type="text" maxlength="90" placeholder="cover.jpg" value="{{ v.cover }}">
+  <p class="muted">Uploading replaces the current cover image. PNG, JPEG or WebP, up to 2 MB.</p>
   <label for="contact_email">Contact email</label>
   <input id="contact_email" name="contact_email" type="email" maxlength="254" value="{{ v.contact_email }}">
   <label for="emergency_instructions">If social networks are unavailable</label>

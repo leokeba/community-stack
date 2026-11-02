@@ -70,7 +70,7 @@ def sign_in(client, username):
     )
 
 
-def test_owner_sees_masked_records_counts_and_the_review_warning(site):
+def test_owner_sees_masked_records_counts_without_a_review_warning(site):
     build_client, _root, _sent, _db = site
     client = build_client()
     sign_in(client, "olga")
@@ -80,7 +80,7 @@ def test_owner_sees_masked_records_counts_and_the_review_warning(site):
     assert "r***@example.org" in page.text
     visible = re.sub(r'value="[^"]*"', "", page.text)
     assert "resident@example.org" not in visible
-    assert "not yet been reviewed" in page.text
+    assert "not yet been reviewed" not in page.text
 
 
 def test_publishers_cannot_open_the_subscribers_page(site):
@@ -169,12 +169,12 @@ def test_test_send_mails_once_and_subscribes_nobody(site):
     assert [r["destination"] for r in records] == ["resident@example.org"]
 
 
-def test_privacy_notice_is_public_and_marked_as_a_draft(site):
+def test_privacy_notice_is_public_and_approved(site):
     build_client, _root, _sent, _db = site
     client = build_client(connected=True)
     page = client.get("/subscribe/email/privacy")
     assert page.status_code == 200
     assert "How we use your email address" in page.text
-    assert "not yet been reviewed" in page.text
+    assert "not yet been reviewed" not in page.text
     assert "CNIL" in page.text
     assert "/subscribe/email/privacy" in client.get("/subscribe/email").text

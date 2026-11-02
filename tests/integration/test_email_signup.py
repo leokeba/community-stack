@@ -3,6 +3,7 @@
 import re
 from email.message import EmailMessage
 
+import community_stack.admin.app as admin_app
 import pytest
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
@@ -33,7 +34,8 @@ def mail(monkeypatch):
 
 
 @pytest.fixture
-def site(tmp_path, mail):
+def site(tmp_path, mail, monkeypatch):
+    monkeypatch.setattr(admin_app, "PRIVACY_NOTICE_REVIEWED", True)
     db = tmp_path / "announcements.db"
     AdminStore(db).create_admin("olga", "a-long-safe-test-password")
     AnnouncementStorage(db).save_connection("email", dict(CONNECTION), None)
@@ -240,6 +242,25 @@ def test_without_a_mail_server_the_page_says_so_and_refuses_sign_ups(tmp_path, m
     # Without a mail server there is no form, so a forged POST is refused outright.
     refused = client.post("/subscribe/email", data={"email": "a@example.org", "consent": "yes"})
     assert refused.status_code in (403, 404)
+    assert mail == []
+
+
+def test_signup_stays_closed_until_privacy_notice_is_reviewed(site, monkeypatch):
+    _app, client, mail, _db = site
+    monkeypatch.setattr(admin_app, "PRIVACY_NOTICE_REVIEWED", False)
+    page = client.get("/subscribe/email")
+    assert "not available until the privacy and consent wording has been reviewed" in page.text
+    assert '<form method="post" action="/subscribe/email">' not in page.text
+
+    response = client.post(
+        "/subscribe/email",
+        data={
+            "csrf_token": client.cookies.get(admin_app.PREAUTH_CSRF_COOKIE),
+            "email": "ann@example.org",
+            "consent": "yes",
+        },
+    )
+    assert response.status_code == 404
     assert mail == []
 
 

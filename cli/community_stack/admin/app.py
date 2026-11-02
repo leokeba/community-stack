@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from community_stack.admin import totp
@@ -80,7 +81,14 @@ from community_stack.announcements.storage import AnnouncementStorage
 from community_stack.community import SOCIAL_PLATFORMS, connection_warnings, load_community
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
-from community_stack.continuity.connect_page import offline_connect_files
+from community_stack.continuity.connect_page import (
+    MAX_LOGO_BYTES as MAX_PROFILE_IMAGE_BYTES,
+)
+from community_stack.continuity.connect_page import (
+    ConnectError,
+    offline_connect_files,
+    store_profile_image,
+)
 from community_stack.continuity.offline_exporter import OfflineArchiveExporter
 from community_stack.subscriptions.email_signup import (
     EMAIL_CONSENT_TEXT,
@@ -636,7 +644,7 @@ def create_app(
         form = await submitted_form(request)
         preauth_csrf_or_forbidden(request, form)
         adapter = email_adapter()
-        if adapter is None or adapter.unsubscribe_secret is None:
+        if adapter is None or adapter.unsubscribe_secret is None or not PRIVACY_NOTICE_REVIEWED:
             raise HTTPException(status_code=404)
         # Bots fill in every field, including this invisible one. They get the same answer as people.
         if form.get("website"):
@@ -1823,6 +1831,7 @@ def create_app(
             "description": form.get("description", ""),
             "url": form.get("url", ""),
             "logo": form.get("logo", ""),
+            "cover": form.get("cover", ""),
             "contact_email": form.get("contact_email", ""),
             "emergency_instructions": form.get("emergency_instructions", ""),
             "social": social,
@@ -1844,6 +1853,7 @@ def create_app(
             "description": raw.get("description", ""),
             "url": raw.get("url", ""),
             "logo": raw.get("logo", ""),
+            "cover": raw.get("cover", ""),
             "contact_email": (raw.get("contact") or {}).get("email", ""),
             "emergency_instructions": raw.get("emergency_instructions", ""),
             "social": social,
@@ -1889,8 +1899,41 @@ def create_app(
 
     @app.post("/admin/community")
     async def community_profile_save(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
+        session = require(request, "settings")
+        raw_form = await request.form()
+        form = {key: value for key, value in raw_form.items() if isinstance(value, str)}
+        csrf_or_forbidden(request, session, form)
         values = community_form_values(form)
+        image_directory = (
+            Path(config_path).parent / "data" / "announcements" / "media" / "community"
+        )
+        try:
+            for kind in ("logo", "cover"):
+                upload = raw_form.get(f"{kind}_upload")
+                if not isinstance(upload, StarletteUploadFile) or not upload.filename:
+                    continue
+                try:
+                    data = await upload.read(MAX_PROFILE_IMAGE_BYTES + 1)
+                finally:
+                    await upload.close()
+                if len(data) > MAX_PROFILE_IMAGE_BYTES:
+                    raise ConnectError(f"The {kind} must be 2 MB or smaller.")
+                filename, _path, _created = await run_in_threadpool(
+                    store_profile_image, data, kind, image_directory
+                )
+                values[kind] = filename
+        except ConnectError as exc:
+            audit(request, session["username"], "community.updated", outcome="invalid_image")
+            return community_page(request, session, values, str(exc), 400)
+        except OSError:
+            audit(request, session["username"], "community.updated", outcome="image_read_failed")
+            return community_page(
+                request,
+                session,
+                values,
+                "The uploaded image could not be read or saved.",
+                400,
+            )
         try:
             await run_in_threadpool(
                 agent.call, "community.apply", session["username"], {"community": values}

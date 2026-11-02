@@ -1,6 +1,9 @@
 # Communication Resilience: Architecture
 
-Status: CR0 design, with CR1 implemented and CR2.1 done. Full plan:
+Status snapshot: 2026-11-02. CR0 design decisions D1 and D2 are accepted;
+CR0.1 audit remains open. CR1 is implemented in the current working tree,
+including CR1.7 image uploads, which are not yet deployed. CR2.1–CR2.14 are
+implemented, and D3 was approved by John Doe on 2026-11-02. Full plan:
 [COMMUNICATION_RESILIENCE_ROADMAP.md](COMMUNICATION_RESILIENCE_ROADMAP.md).
 Decisions: [ADR 0008](decisions/0008-communication-resilience.md).
 
@@ -38,7 +41,7 @@ flowchart LR
 | Profile and channel switches | `community-stack.yaml` | Yes, shown on `/connect` |
 | Announcements and delivery history | `data/announcements/announcements.db` | Published items only |
 | Subscribers (phone numbers, addresses) | `data/announcements/subscribers.db` | Never |
-| Logo | Next to the config file, re-encoded without metadata | Yes |
+| Logo and cover | Config directory or `data/announcements/media/community`; uploads are re-encoded without metadata | Yes |
 | Offline package | `backups/`, built on demand | Public data only |
 
 ## Security and privacy
@@ -46,8 +49,12 @@ flowchart LR
   archives. A test enforces the last one.
 - The page has no JavaScript and loads nothing from outside the stack.
   All profile text is HTML-escaped.
-- Logos are re-encoded to remove metadata such as GPS location. SVG is not
-  accepted, because the page shares an origin with `/admin`.
+- Logos and covers are re-encoded to remove metadata such as GPS location.
+  Console uploads are limited to 2 MB and stored in the backed-up data volume.
+  SVG is not accepted, because the page shares an origin with `/admin`.
+- The email privacy and consent wording was approved by a named reviewer on
+  2026-11-02. The approval flag enables sign-up when an SMTP connection is
+  configured; unsubscribe remains available independently.
 - The page is rebuilt from validated configuration. A broken configuration
   leaves the last good page in place and logs a warning. Delivery is unaffected.
 
@@ -55,10 +62,11 @@ flowchart LR
 
 | Phase | State |
 | --- | --- |
-| CR0 design | This document and ADR 0008. D1 and D2 accepted; D3 open |
-| CR1 `/connect`, QR codes, identity package | Implemented. Console profile editing (CR1.8) is not built |
-| CR2.1 one subscriber list | Implemented |
-| CR2.2 onward (consent, email, sign-up) | Not started; waits on D3 for public wording |
+| CR0 design | ADR 0008 accepted D1 and D2. Full audit and test baseline (CR0.1) remain open |
+| CR1 `/connect`, QR codes, identity package | Implemented, including console profile editing and tested logo/cover uploads; deployment acceptance is pending |
+| CR2.1–CR2.14 subscriptions | Implemented and tested; legal review approved 2026-11-02 |
+| Pixelfed connector | Implemented separately from Instagram; live-instance acceptance is pending |
+| CR3–CR6 | Not started |
 
 ## Dependencies between phases
 CR2 depends on CR1 for the sign-up links and channel explanations. CR4 depends

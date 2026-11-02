@@ -439,8 +439,10 @@ class AnnouncementPublisher:
     def refresh_connect_page(self) -> None:
         """Rebuild the public /connect page. A failure here must never block delivery."""
         try:
-            profile, resolution, announcements, logo = load_identity(self.config_path, self.storage)
-            files = build_site(profile, resolution, announcements, logo)
+            profile, resolution, announcements, logo, cover = load_identity(
+                self.config_path, self.storage
+            )
+            files = build_site(profile, resolution, announcements, logo, cover=cover)
             write_files(self.feed_dir.parent / "connect", files)
         except Exception:
             logger.warning("Could not refresh the /connect page.", exc_info=True)

@@ -20,6 +20,7 @@ from community_stack.continuity.connect_page import (
     qr_png,
     qr_svg,
     render_page,
+    store_profile_image,
     write_files,
 )
 from PIL import Image
@@ -96,6 +97,11 @@ def test_page_uses_no_javascript_and_no_outside_resources():
     assert '<link rel="stylesheet" href=' not in page
 
 
+def test_page_includes_cover_image():
+    page = render_page(_profile(cover="cover.jpg"), _resolution(), [], None, GENERATED, "cover.jpg")
+    assert '<div class="cover"><img src="cover.jpg" alt=""></div>' in page
+
+
 def test_page_is_printable_and_declares_its_stable_address():
     page = render_page(_profile(), _resolution(), [], None, GENERATED)
     assert "@media print" in page
@@ -158,6 +164,27 @@ def test_prepare_logo_reports_a_missing_file(tmp_path):
         prepare_logo(tmp_path / "logo.png")
 
 
+def test_store_profile_image_reencodes_and_deduplicates(tmp_path):
+    source = io.BytesIO()
+    info = PngInfo()
+    info.add_text("Comment", "private metadata")
+    Image.new("RGB", (64, 64), "blue").save(source, format="PNG", pnginfo=info)
+
+    directory = tmp_path / "data" / "announcements" / "media" / "community"
+    filename, path, created = store_profile_image(source.getvalue(), "cover", directory)
+    assert filename.startswith("cover-") and filename.endswith(".jpg")
+    assert path.parent == directory
+    assert created is True
+    assert b"private metadata" not in path.read_bytes()
+
+    repeated_name, repeated_path, repeated_created = store_profile_image(
+        source.getvalue(), "cover", directory
+    )
+    assert repeated_name == filename
+    assert repeated_path == path
+    assert repeated_created is False
+
+
 def test_qr_svg_is_well_formed_and_qr_png_decodes_as_image():
     svg = qr_svg("https://community.example.org/connect/")
     root = ET.fromstring(svg)
@@ -179,6 +206,20 @@ def test_bundle_contains_identity_files_and_no_private_data():
     assert [c["key"] for c in data["independent_channels"]] == ["website", "activitypub"]
     text = bundle["community.json"].decode()
     assert "subscriber" not in text.lower()
+
+
+def test_bundle_contains_cover_image_and_metadata():
+    bundle = build_bundle(
+        _profile(cover="cover.jpg"),
+        _resolution(),
+        [],
+        None,
+        GENERATED,
+        ("cover.jpg", b"cover bytes"),
+    )
+    assert bundle["cover.jpg"] == b"cover bytes"
+    assert b'"cover": "cover.jpg"' in bundle["community.json"]
+    assert b'src="cover.jpg"' in bundle["index.html"]
 
 
 def test_build_site_includes_logo_when_given(tmp_path):

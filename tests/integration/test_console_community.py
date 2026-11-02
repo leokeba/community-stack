@@ -1,5 +1,6 @@
 """The console's community profile page: login, role checks, saving through the agent, and refusals."""
 
+import io
 import re
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from community_stack.agent import client as agent_client
 from community_stack.agent.operations import AgentContext
 from community_stack.agent.server import AgentService
 from fastapi.testclient import TestClient
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 REPO = Path(__file__).resolve().parents[2]
 PASSWORD = "a-long-safe-test-password"
@@ -114,6 +117,55 @@ def test_owner_saves_the_profile_through_the_agent(site):
     # The saved profile is used on the next page load.
     page = client.get("/admin/community")
     assert "Riverside Collective" in page.text
+
+
+def test_owner_can_upload_logo_and_cover(site):
+    client, root = site
+    sign_in(client, "olga")
+    page = client.get("/admin/community")
+    png = io.BytesIO()
+    metadata = PngInfo()
+    metadata.add_text("Comment", "private metadata")
+    Image.new("RGB", (64, 64), "blue").save(png, format="PNG", pnginfo=metadata)
+    image = png.getvalue()
+
+    response = client.post(
+        "/admin/community",
+        data={"csrf_token": csrf(page), **form(logo="", cover="")},
+        files={
+            "logo_upload": ("logo.png", image, "image/png"),
+            "cover_upload": ("cover.png", image, "image/png"),
+        },
+    )
+    assert response.status_code == 303
+
+    config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
+    logo = config["community"]["logo"]
+    cover = config["community"]["cover"]
+    assert logo.startswith("logo-") and logo.endswith(".jpg")
+    assert cover.startswith("cover-") and cover.endswith(".jpg")
+    assets = root / "data" / "announcements" / "media" / "community"
+    assert (assets / logo).is_file()
+    assert (assets / cover).is_file()
+    assert b"private metadata" not in (assets / logo).read_bytes()
+    page_html = (root / "connect" / "index.html").read_text(encoding="utf-8")
+    assert 'src="cover.jpg"' in page_html
+    assert (root / "connect" / "cover.jpg").is_file()
+
+
+def test_owner_cannot_upload_a_non_image_as_profile_art(site):
+    client, root = site
+    sign_in(client, "olga")
+    page = client.get("/admin/community")
+    before = (root / "community-stack.yaml").read_text(encoding="utf-8")
+    response = client.post(
+        "/admin/community",
+        data={"csrf_token": csrf(page), **form()},
+        files={"logo_upload": ("logo.png", b"not an image", "image/png")},
+    )
+    assert response.status_code == 400
+    assert "could not be used" in response.text
+    assert (root / "community-stack.yaml").read_text(encoding="utf-8") == before
 
 
 def test_a_publisher_cannot_change_the_profile(site):

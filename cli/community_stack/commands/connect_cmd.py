@@ -47,8 +47,8 @@ def run_connect(args: argparse.Namespace) -> int:
 
 
 def _show(config_path: Path | str, storage: AnnouncementStorage) -> int:
-    profile, resolution, announcements, _logo = load_identity(
-        config_path, storage, require_logo=True
+    profile, resolution, announcements, _logo, _cover = load_identity(
+        config_path, storage, require_images=True
     )
     print(f"Community:    {profile.name}")
     print(f"Address:      {profile.url}")
@@ -79,8 +79,8 @@ def _show(config_path: Path | str, storage: AnnouncementStorage) -> int:
 
 
 def _generate_qr(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, _resolution, _announcements, _logo = load_identity(
-        config_path, storage, require_logo=True
+    profile, _resolution, _announcements, _logo, _cover = load_identity(
+        config_path, storage, require_images=True
     )
     destination = (getattr(args, "destination", None) or profile.connect_url).rstrip("/")
     if not destination.startswith("https://"):
@@ -106,11 +106,11 @@ def _generate_qr(args: argparse.Namespace, config_path: Path | str, storage) -> 
 
 
 def _export(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, resolution, announcements, logo = load_identity(
-        config_path, storage, require_logo=True
+    profile, resolution, announcements, logo, cover = load_identity(
+        config_path, storage, require_images=True
     )
     now = datetime.now(timezone.utc).isoformat()
-    files = build_bundle(profile, resolution, announcements, logo, now)
+    files = build_bundle(profile, resolution, announcements, logo, now, cover)
     target = Path(getattr(args, "output", None) or DEFAULT_EXPORT)
     if target.suffix != ".zip":
         target = target.with_suffix(".zip")
@@ -118,17 +118,17 @@ def _export(args: argparse.Namespace, config_path: Path | str, storage) -> int:
     write_checksummed_zip(target, files, profile.name, now, len(announcements))
     print("Identity package exported.")
     print(f"  Archive path: {target.resolve()}")
-    print("  Contents: index.html (the page), community.json, qr.svg, qr.png, logo")
+    print("  Contents: index.html (the page), community.json, qr.svg, qr.png, profile images")
     print("  Check it with: community-stack archive verify <path>")
     return 0
 
 
 def _render(args: argparse.Namespace, config_path: Path | str, storage) -> int:
-    profile, resolution, announcements, logo = load_identity(
-        config_path, storage, require_logo=True
+    profile, resolution, announcements, logo, cover = load_identity(
+        config_path, storage, require_images=True
     )
     output_dir = Path(getattr(args, "output_dir", None) or DEFAULT_SITE_DIR)
-    write_files(output_dir, build_site(profile, resolution, announcements, logo))
+    write_files(output_dir, build_site(profile, resolution, announcements, logo, cover=cover))
     print(f"Wrote the public /connect page to {output_dir.resolve()}")
     return 0
 
