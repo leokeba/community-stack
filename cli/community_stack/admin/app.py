@@ -4,182 +4,67 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
-import json
-import logging
-import mimetypes
 import os
 import re
 import secrets
-import tempfile
 from collections.abc import AsyncIterator
-from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
-from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import (
-    FileResponse,
-    HTMLResponse,
-    JSONResponse,
-    RedirectResponse,
-    Response,
-)
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from community_stack.admin import totp
+from community_stack.admin.accounts import register_accounts
 from community_stack.admin.activitypub import register_activitypub
-from community_stack.admin.store import (
-    PERMISSIONS,
-    ROLE_DESCRIPTIONS,
-    ROLES,
-    SESSION_TTL,
-    AdminStore,
-    can,
-    tokens_match,
+from community_stack.admin.announcements import register_announcements
+from community_stack.admin.auth import register_auth
+from community_stack.admin.backups import register_backups
+from community_stack.admin.channels import register_channels
+from community_stack.admin.common import (
+    CONSOLE_CSP,
+    DEFAULT_AGENT_SOCKET,
+    LOGIN_IP_LIMIT,
+    PREAUTH_CSRF_COOKIE,
+    SESSION_COOKIE,
+    STATIC_DIR,
+    TEMPLATE_DIR,
+    WORKER_INTERVAL_SECONDS,
+    LoginRequired,
+    flash,
+    logger,
+    static_version,
+    status_badge,
 )
+from community_stack.admin.continuity import register_continuity
+from community_stack.admin.dashboard import register_dashboard
+from community_stack.admin.matrix_users import register_matrix_users
+from community_stack.admin.mirroring import register_mirroring
+from community_stack.admin.services import register_services
+from community_stack.admin.settings import register_settings
+from community_stack.admin.store import PERMISSIONS, SESSION_TTL, AdminStore, can, tokens_match
+from community_stack.admin.subscriptions import register_subscriptions
+from community_stack.admin.system import register_system
+from community_stack.admin.templates import register_templates
 from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
-from community_stack.agent.health import LOG_LINES, LOG_SERVICES
-from community_stack.agent.settings import SETTINGS
-from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
-from community_stack.announcements.adapters.http import UnsafeURLError
-from community_stack.announcements.adapters.manual import ManualChannelAdapter
-from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
-from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
-from community_stack.announcements.formatting import render_html
-from community_stack.announcements.matrix_mirror import MODERATOR_POWER, mirror_for
-from community_stack.announcements.media import (
-    MAX_UPLOAD_BYTES,
-    MEDIA_ID,
-    MediaError,
-    process_image,
-    validate_alt,
-)
-from community_stack.announcements.models import (
-    UNPUBLISHED,
-    Announcement,
-    AnnouncementStatus,
-    ModelValidationError,
-)
+from community_stack.announcements.matrix_mirror import mirror_for
+from community_stack.announcements.models import Announcement, AnnouncementStatus
 from community_stack.announcements.platform_content import generate_platform_text
 from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
-from community_stack.announcements.publisher import AnnouncementPublisher, ManualOutcomeConflict
-from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
+from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
-from community_stack.community import SOCIAL_PLATFORMS, connection_warnings, load_community
 from community_stack.config import ConfigError, load_config
 from community_stack.config_edit import get_value
-from community_stack.continuity.connect_page import (
-    MAX_LOGO_BYTES as MAX_PROFILE_IMAGE_BYTES,
-)
-from community_stack.continuity.connect_page import (
-    ConnectError,
-    offline_connect_files,
-    store_profile_image,
-)
-from community_stack.continuity.offline_exporter import OfflineArchiveExporter
-from community_stack.continuity.readiness import build_readiness_report
-from community_stack.continuity.service import DEFAULT_ENGLISH_TEMPLATE, ContinuityService
-from community_stack.subscriptions.email_signup import (
-    EMAIL_CONSENT_TEXT,
-    EMAIL_CONSENT_VERSION,
-    PRIVACY_NOTICE_REVIEWED,
-    SIGNUP_SOURCE,
-    confirmation_message,
-    read_unsubscribe_token,
-    test_message,
-)
-from community_stack.subscriptions.email_transport import TransportError
-from community_stack.subscriptions.manager import (
-    Subscriber,
-    SubscriberManager,
-    validate_destination,
-)
+from community_stack.continuity.service import ContinuityService
 
 # What each sign-up choice receives. Announcements tagged 'important' reach the second group.
-PREFERENCE_TOPICS: dict[str, list[str]] = {"all": [], "important": ["important"]}
-
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
-
-SESSION_COOKIE = "community_admin_session"
-PREAUTH_CSRF_COOKIE = "community_admin_csrf"
-SECOND_STEP_COOKIE = "community_admin_second_step"
-LOGIN_IP_LIMIT = 20
-ANY_USERNAME = "\0any"
-TEMPLATE_DIR = Path(__file__).parent / "templates"
-STATIC_DIR = Path(__file__).parent / "static"
-WORKER_INTERVAL_SECONDS = 15.0
-DEFAULT_AGENT_SOCKET = "/run/community-stack-agent/agent.sock"
-SOCIAL_ROWS = 5
-# Everything a console page uses is served from here; nothing is loaded from elsewhere.
-CONSOLE_CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
-    "font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
-    "base-uri 'none'; object-src 'none'"
-)
-# The dashboard shows service status; it must never wait on a slow agent.
-DASHBOARD_AGENT_TIMEOUT_SECONDS = 5.0
-
-mimetypes.add_type("font/woff2", ".woff2")
-
-logger = logging.getLogger(__name__)
-
-# Announcement, delivery, job and health states as people read them, with a colour tone.
-STATUS_BADGES = {
-    "draft": ("Draft", "neutral"),
-    "in_review": ("In review", "warning"),
-    "approved": ("Approved", "info"),
-    "scheduled": ("Scheduled", "info"),
-    "published": ("Published", "success"),
-    "updated": ("Updated", "success"),
-    "withdrawn": ("Withdrawn", "neutral"),
-    "prepared": ("Prepared", "info"),
-    "delivered": ("Published", "success"),
-    "failed": ("Failed", "danger"),
-    "unknown": ("Unknown", "warning"),
-    "queued": ("Waiting to retry", "warning"),
-    "running": ("In progress", "info"),
-    "ok": ("OK", "success"),
-    "warning": ("Needs attention", "warning"),
-    "problem": ("Problem", "danger"),
-}
-
-
-def status_badge(value: Any, label: str | None = None, tone: str | None = None) -> Markup:
-    key = str(getattr(value, "value", value))
-    known_label, known_tone = STATUS_BADGES.get(
-        key, (key.replace("_", " ").capitalize(), "neutral")
-    )
-    return Markup('<span class="badge badge-{}">{}</span>').format(
-        tone or known_tone, label or known_label
-    )
-
-
-def flash(text: str, tone: str = "success", details: list[str] | None = None, **extra: Any):
-    """A message shown once at the top of the next page: success, warning or error."""
-    return {"tone": tone, "text": text, "details": details or [], **extra}
-
-
-def static_version() -> str:
-    """Changes whenever a static file does, so browsers never mix old scripts with new pages."""
-    digest = hashlib.sha256()
-    for path in sorted(item for item in STATIC_DIR.rglob("*") if item.is_file()):
-        digest.update(path.relative_to(STATIC_DIR).as_posix().encode() + path.read_bytes())
-    return digest.hexdigest()[:12]
-
-
-class LoginRequired(Exception):
-    """Raised when a page needs a signed-in account."""
 
 
 def create_app(
@@ -210,11 +95,7 @@ def create_app(
     )
     storage = AnnouncementStorage(db_path=db_path)
     auth_store = AdminStore(db_path)
-    publisher = AnnouncementPublisher(
-        storage=storage,
-        config_path=config_path,
-        feed_dir=feed_dir,
-    )
+    publisher = AnnouncementPublisher(storage=storage, config_path=config_path, feed_dir=feed_dir)
     continuity_service = ContinuityService(storage, publisher, config_path)
 
     def configured_channel_links() -> dict[str, str]:
@@ -233,9 +114,7 @@ def create_app(
 
     def mirror():
         return mirror_for(
-            storage,
-            publisher,
-            lambda: storage.get_setting("review_required", "false") == "true",
+            storage, publisher, lambda: storage.get_setting("review_required", "false") == "true"
         )
 
     async def deliver_due_jobs() -> None:
@@ -334,10 +213,7 @@ def create_app(
         if "username" in context and "flash" not in context:
             context["flash"] = auth_store.pop_flash(request.cookies.get(SESSION_COOKIE))
         return templates.TemplateResponse(
-            request=request,
-            name=template,
-            context=context,
-            status_code=status_code,
+            request=request, name=template, context=context, status_code=status_code
         )
 
     def redirect_with(request: Request, url: str, message: dict[str, Any]) -> RedirectResponse:
@@ -419,11 +295,7 @@ def create_app(
         return session, form
 
     def audit(
-        request: Request,
-        actor: str | None,
-        action: str,
-        target: str | None = None,
-        **details: Any,
+        request: Request, actor: str | None, action: str, target: str | None = None, **details: Any
     ) -> None:
         auth_store.record_event(actor, action, target, details, client_host(request))
 
@@ -563,10 +435,6 @@ def create_app(
         )
         return page(session, announcement=announcement, error=error, custom_channels=channels)
 
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
-
     # The community's own fediverse account: public, unauthenticated endpoints.
 
     def community_name() -> str:
@@ -575,652 +443,7 @@ def create_app(
         except (ConfigError, KeyError, OSError):
             return "Community"
 
-    # Public SMS sign-up: every join and leave is confirmed with a texted code.
-
-    def sms_adapter():
-        return next((a for a in publisher.adapters if isinstance(a, SmsGatewayAdapter)), None)
-
-    def sms_signup() -> SmsSignup:
-        secret = storage.get_setting("sms_code_secret", "")
-        if not secret:
-            secret = secrets.token_hex(32)
-            storage.set_setting("sms_code_secret", secret)
-        return SmsSignup(storage.db_path.parent / "subscribers.db", secret)
-
-    def subscribe_page(request: Request, step: str, status_code: int = 200, **context) -> Response:
-        csrf_token = preauth_csrf_token(request)
-        response = render(
-            request,
-            "subscribe.html",
-            {
-                "csrf_token": csrf_token,
-                "step": step,
-                "available": sms_adapter() is not None,
-                "community": community_name(),
-                "error": None,
-                "number": "",
-                **context,
-            },
-            status_code=status_code,
-        )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
-        return response
-
-    @app.get("/subscribe")
-    async def subscribe_form(request: Request) -> Response:
-        return subscribe_page(request, "join")
-
-    @app.get("/subscribe/stop")
-    async def unsubscribe_form(request: Request) -> Response:
-        return subscribe_page(request, "leave")
-
-    @app.post("/subscribe/{purpose}/code")
-    async def subscribe_send_code(request: Request, purpose: str) -> Response:
-        if purpose not in ("join", "leave"):
-            raise HTTPException(status_code=404)
-        form = await submitted_form(request)
-        preauth_csrf_or_forbidden(request, form)
-        adapter = sms_adapter()
-        if adapter is None:
-            raise HTTPException(status_code=404)
-        # Bots fill in every field, including this invisible one.
-        if form.get("website"):
-            return subscribe_page(request, "code", purpose=purpose, number="")
-        if purpose == "join" and form.get("consent") != "yes":
-            return subscribe_page(request, purpose, 400, error="Please tick the consent box.")
-        try:
-            number = normalize_phone(form.get("number", ""))
-            code = sms_signup().new_code(number, purpose, client_host(request))
-        except ValueError as exc:
-            return subscribe_page(request, purpose, 400, error=str(exc))
-        text = f"{code} is your code to {'join' if purpose == 'join' else 'leave'} {community_name()} alerts."
-        await run_in_threadpool(
-            adapter.send, [number], text, f"code:{number}:{secrets.token_hex(4)}"
-        )
-        return subscribe_page(request, "code", purpose=purpose, number=number)
-
-    @app.post("/subscribe/{purpose}/confirm")
-    async def subscribe_confirm(request: Request, purpose: str) -> Response:
-        if purpose not in ("join", "leave"):
-            raise HTTPException(status_code=404)
-        form = await submitted_form(request)
-        preauth_csrf_or_forbidden(request, form)
-        adapter = sms_adapter()
-        if adapter is None:
-            raise HTTPException(status_code=404)
-        try:
-            number = normalize_phone(form.get("number", ""))
-        except ValueError as exc:
-            return subscribe_page(request, purpose, 400, error=str(exc))
-        if not sms_signup().confirm(number, purpose, form.get("code", "")):
-            return subscribe_page(
-                request,
-                "code",
-                400,
-                purpose=purpose,
-                number=number,
-                error="That code did not work. Check it, or ask for a new one later.",
-            )
-        if purpose == "join":
-            adapter.subscribers.add_subscriber("sms", number)
-        else:
-            adapter.subscribers.unsubscribe("sms", number)
-        return subscribe_page(request, "joined" if purpose == "join" else "left")
-
-    # Email sign-up (CR2.6, CR2.7). Confirmation and unsubscribe links are safe to open:
-    # only a button press changes anything, so mail scanners cannot sign people up or out.
-
-    def email_adapter() -> EmailNewsletterAdapter | None:
-        return next((a for a in publisher.adapters if isinstance(a, EmailNewsletterAdapter)), None)
-
-    def email_signup_page(
-        request: Request, step: str, status_code: int = 200, **context
-    ) -> Response:
-        adapter = email_adapter()
-        csrf_token = preauth_csrf_token(request)
-        response = render(
-            request,
-            "subscribe_email.html",
-            {
-                "csrf_token": csrf_token,
-                "step": step,
-                "available": adapter is not None and adapter.unsubscribe_secret is not None,
-                "community": community_name(),
-                "consent_text": EMAIL_CONSENT_TEXT,
-                "error": None,
-                "email": "",
-                "token": "",
-                "masked": "",
-                "reviewed": PRIVACY_NOTICE_REVIEWED,
-                "contact": "",
-                **context,
-            },
-            status_code=status_code,
-        )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
-        return response
-
-    def unsubscribe_secret_bytes() -> bytes | None:
-        secret = storage.get_setting("subscriber_token_secret", "")
-        return secret.encode() if secret else None
-
-    @app.get("/subscribe/email/privacy")
-    async def email_privacy_notice(request: Request) -> Response:
-        try:
-            profile, _config = load_community(config_path)
-            contact = profile.contact_email or ""
-        except (ConfigError, OSError):
-            contact = ""
-        return email_signup_page(
-            request,
-            "privacy",
-            reviewed=PRIVACY_NOTICE_REVIEWED,
-            contact=contact,
-        )
-
-    @app.get("/subscribe/email")
-    async def email_signup_form(request: Request) -> Response:
-        return email_signup_page(request, "form")
-
-    @app.post("/subscribe/email")
-    async def email_signup_submit(request: Request) -> Response:
-        form = await submitted_form(request)
-        preauth_csrf_or_forbidden(request, form)
-        adapter = email_adapter()
-        if adapter is None or adapter.unsubscribe_secret is None or not PRIVACY_NOTICE_REVIEWED:
-            raise HTTPException(status_code=404)
-        # Bots fill in every field, including this invisible one. They get the same answer as people.
-        if form.get("website"):
-            return email_signup_page(request, "check")
-        address = form.get("email", "").strip()
-        if form.get("consent") != "yes":
-            return email_signup_page(
-                request, "form", 400, email=address, error="Please tick the consent box."
-            )
-        subscribers: SubscriberManager = adapter.subscriber_manager
-        try:
-            subscribers.validate_destination("email", address)
-        except ValueError:
-            return email_signup_page(
-                request, "form", 400, email=address, error="Enter a valid email address."
-            )
-        client_key = hashlib.sha256(
-            (client_host(request) + (unsubscribe_secret_bytes() or b"").decode()).encode()
-        ).hexdigest()
-        if not subscribers.allow_signup(client_key, address):
-            return email_signup_page(
-                request,
-                "form",
-                429,
-                email=address,
-                error="Too many sign-up requests. Please try again later.",
-            )
-        preference = form.get("preference", "all")
-        if preference not in PREFERENCE_TOPICS:
-            return email_signup_page(
-                request, "form", 400, email=address, error="Choose what to receive."
-            )
-        subscribers.register_consent_text(EMAIL_CONSENT_VERSION, EMAIL_CONSENT_TEXT)
-        _subscriber, token = subscribers.request_subscription(
-            "email",
-            address,
-            consent_version=EMAIL_CONSENT_VERSION,
-            consent_source=SIGNUP_SOURCE,
-            topics=PREFERENCE_TOPICS[preference],
-        )
-        if token is not None:
-            message = confirmation_message(
-                adapter.from_address,
-                address,
-                community_name(),
-                f"{adapter.public_base_url}/subscribe/email/confirm?t={token}",
-            )
-            try:
-                await run_in_threadpool(adapter.transport.send, message)
-            except TransportError:
-                logger.warning("Could not send an email sign-up confirmation.")
-                return email_signup_page(
-                    request,
-                    "form",
-                    503,
-                    email=address,
-                    error="We could not send the confirmation email. Please try again later.",
-                )
-        # The same answer whether or not the address is already subscribed.
-        return email_signup_page(request, "check")
-
-    @app.get("/subscribe/email/confirm")
-    async def email_confirm_form(request: Request) -> Response:
-        token = request.query_params.get("t", "")
-        if not token or email_adapter() is None:
-            return email_signup_page(request, "invalid", 400)
-        return email_signup_page(request, "confirm", token=token)
-
-    # Not /confirm: the SMS route POST /subscribe/{purpose}/confirm is declared first and would match.
-    @app.post("/subscribe/email/activate")
-    async def email_confirm_submit(request: Request) -> Response:
-        form = await submitted_form(request)
-        preauth_csrf_or_forbidden(request, form)
-        adapter = email_adapter()
-        if adapter is None:
-            raise HTTPException(status_code=404)
-        confirmed = adapter.subscriber_manager.confirm_subscription(form.get("t", ""))
-        if confirmed is None:
-            return email_signup_page(
-                request,
-                "invalid",
-                400,
-                error="This link has expired or was already used. Sign up again for a new one.",
-            )
-        return email_signup_page(request, "subscribed")
-
-    @app.get("/subscribe/email/unsubscribe")
-    async def email_unsubscribe_form(request: Request) -> Response:
-        token = request.query_params.get("t", "")
-        secret = unsubscribe_secret_bytes()
-        address = read_unsubscribe_token(secret, token) if secret and token else None
-        if address is None or email_adapter() is None:
-            return email_signup_page(request, "invalid", 400)
-        masked = Subscriber(channel="email", destination=address).mask_destination()
-        return email_signup_page(request, "unsubscribe", token=token, masked=masked)
-
-    @app.post("/subscribe/email/unsubscribe")
-    async def email_unsubscribe_submit(request: Request) -> Response:
-        # No CSRF cookie here: mail clients send one-click unsubscribes without it (RFC 8058).
-        # The signed token in the link is the proof of authority.
-        token = request.query_params.get("t", "")
-        secret = unsubscribe_secret_bytes()
-        address = read_unsubscribe_token(secret, token) if secret and token else None
-        adapter = email_adapter()
-        if address is None or adapter is None:
-            return email_signup_page(request, "invalid", 400)
-        adapter.subscriber_manager.unsubscribe("email", address)
-        return email_signup_page(request, "unsubscribed")
-
-    # Subscribers console (CR2.10, CR2.13). Owners and admins only.
-
-    def subscriber_records() -> tuple[dict[str, int], list[dict[str, str]]]:
-        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
-        email = manager.export_records()
-        counts = {
-            "email_active": sum(1 for r in email if r["status"] == "active"),
-            "email_pending": sum(1 for r in email if r["status"] == "pending"),
-            "email_unsubscribed": sum(1 for r in email if r["status"] == "unsubscribed"),
-            "sms_active": len(manager.list_subscribers(channel="sms")),
-        }
-        rows = []
-        for record in email:
-            consent = record["consent_source"] or "not recorded"
-            if record["consent_source"] == "legacy":
-                consent = "recorded before consent tracking"
-            elif record["consent_at"]:
-                consent = f"{record['consent_at'][:10]}, {record['consent_source']}"
-            rows.append(
-                {
-                    "address": record["destination"],
-                    "masked": Subscriber(
-                        channel="email", destination=record["destination"]
-                    ).mask_destination(),
-                    "status": record["status"],
-                    "consent": consent,
-                    "topics": ", ".join(record["topics"]) or "everything",
-                }
-            )
-        return counts, rows
-
-    @app.get("/admin/subscribers")
-    async def subscribers_page(request: Request) -> Response:
-        session = require(request, "settings")
-        counts, records = subscriber_records()
-        return render(
-            request,
-            "subscribers.html",
-            page(
-                session,
-                counts=counts,
-                records=records,
-                reviewed=PRIVACY_NOTICE_REVIEWED,
-                warnings=connection_warnings(storage.list_connections()),
-            ),
-        )
-
-    @app.get("/admin/subscribers/export")
-    async def subscribers_export(request: Request) -> Response:
-        session = require(request, "settings")
-        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
-        body = json.dumps(
-            {"format": "community-stack/subscribers", "records": manager.export_records()},
-            indent=2,
-        )
-        audit(request, session["username"], "subscribers.exported")
-        return Response(
-            body,
-            media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="subscribers-export.json"'},
-        )
-
-    @app.post("/admin/subscribers/erase")
-    async def subscribers_erase(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        address = form.get("address", "").strip().lower()
-        masked = Subscriber(channel="email", destination=address).mask_destination()
-        if form.get("confirm") != "yes":
-            raise HTTPException(status_code=400, detail="Tick the box to confirm erasure.")
-        manager = SubscriberManager(storage.db_path.parent / "subscribers.db")
-        erased = manager.delete_subscriber("email", address)
-        audit(
-            request,
-            session["username"],
-            "subscribers.erased",
-            masked,
-            outcome="succeeded" if erased else "not_found",
-        )
-        message = (
-            flash(f"Erased everything held about {masked}.")
-            if erased
-            else flash("No record was found for that address.", "warning")
-        )
-        return redirect_with(request, "/admin/subscribers", message)
-
-    @app.post("/admin/subscribers/test-email")
-    async def subscribers_test_email(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        address = form.get("to", "").strip()
-        masked = Subscriber(channel="email", destination=address).mask_destination()
-        try:
-            validate_destination("email", address)
-        except ValueError:
-            return redirect_with(
-                request, "/admin/subscribers", flash("Enter a valid email address.", "error")
-            )
-        adapter = email_adapter()
-        if adapter is None or adapter.unsubscribe_secret is None:
-            return redirect_with(
-                request,
-                "/admin/subscribers",
-                flash("No email server is connected. Connect one on the Channels page.", "error"),
-            )
-        message = test_message(
-            adapter.from_address,
-            address,
-            community_name(),
-            adapter.unsubscribe_url(address),
-        )
-        try:
-            await run_in_threadpool(adapter.transport.send, message)
-        except TransportError as exc:
-            audit(request, session["username"], "subscribers.test_sent", masked, outcome="failed")
-            return redirect_with(
-                request,
-                "/admin/subscribers",
-                flash(f"The test was not sent: {exc}", "error"),
-            )
-        audit(request, session["username"], "subscribers.test_sent", masked, outcome="succeeded")
-        return redirect_with(
-            request,
-            "/admin/subscribers",
-            flash(f"Test email sent to {masked}. Check the inbox and spam folder."),
-        )
-
     register_activitypub(app, storage=storage, publisher=publisher, community_name=community_name)
-
-    status_agent = AgentClient(agent.socket_path, timeout=DASHBOARD_AGENT_TIMEOUT_SECONDS)
-
-    async def service_status(session: dict[str, Any]) -> dict[str, Any] | None:
-        """Running services for the dashboard strip, or why they are unknown."""
-        if not can(session["role"], "system"):
-            return None
-        if not agent.available():
-            return {"error": "System agent not running"}
-        try:
-            status = await run_in_threadpool(status_agent.call, "status.get", session["username"])
-        except (AgentUnavailable, AgentRefused):
-            return {"error": "System agent not answering"}
-        if not status.get("docker_available"):
-            return {"error": "Docker is not reachable"}
-        return {"containers": status.get("containers") or []}
-
-    @app.get("/admin")
-    async def dashboard(request: Request) -> Response:
-        session = require(request, "view")
-        steps = setup_steps() if can(session["role"], "system") else []
-        everything = storage.list_announcements(limit=None)
-        month = datetime.now(publisher.timezone).strftime("%Y-%m")
-        failed = storage.get_failed_deliveries()
-        titles = {a.id: a.title for a in everything}
-        failures: dict[str, dict[str, Any]] = {}
-        for delivery in failed:
-            entry = failures.setdefault(
-                delivery["adapter_name"],
-                {
-                    "label": channel_label(delivery["adapter_name"]),
-                    "count": 0,
-                    "error": delivery.get("last_error"),
-                    "announcement_id": delivery["announcement_id"],
-                },
-            )
-            entry["count"] += 1
-        failing = set(failures)
-        enabled = storage.get_channel_settings()
-        recent = everything[:8]
-        return render(
-            request,
-            "dashboard.html",
-            page(
-                session,
-                setup_done=sum(step["done"] for step in steps),
-                setup_total=len(steps),
-                next_step=next((step for step in steps if not step["done"]), None),
-                announcements=recent,
-                deliveries={a.id: storage.get_delivery_states(a.id) for a in recent},
-                awaiting_review=[
-                    a
-                    for a in everything
-                    if a.status == AnnouncementStatus.IN_REVIEW
-                    and storage.last_submitter(a.id) != session["username"]
-                ]
-                if can(session["role"], "approve")
-                else [],
-                counts={
-                    "published": sum(
-                        1
-                        for a in everything
-                        if a.status in (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
-                        and (a.published_at or "").startswith(month)
-                    ),
-                    "scheduled": sum(a.status == AnnouncementStatus.SCHEDULED for a in everything),
-                    "in_review": sum(a.status == AnnouncementStatus.IN_REVIEW for a in everything),
-                },
-                failed_count=len(failed),
-                failures=list(failures.values()),
-                jobs=[
-                    {**job, "title": titles.get(job["announcement_id"], "")}
-                    for job in storage.get_active_jobs()
-                ],
-                channels=[
-                    {
-                        "label": adapter.capabilities.label,
-                        "state": "failing"
-                        if adapter.name in failing
-                        else ("on" if enabled.get(adapter.name, True) else "off"),
-                    }
-                    for adapter in publisher.adapters
-                ],
-                services=await service_status(session),
-            ),
-        )
-
-    @app.get("/admin/setup")
-    async def setup_page(request: Request) -> Response:
-        if auth_store.has_admin():
-            return login_redirect()
-        csrf_token = preauth_csrf_token(request)
-        response = render(
-            request,
-            "setup.html",
-            {
-                "csrf_token": csrf_token,
-                "setup_available": bool(setup_token),
-                "error": None,
-            },
-        )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
-        return response
-
-    @app.post("/admin/setup")
-    async def setup_admin(request: Request) -> Response:
-        if auth_store.has_admin():
-            return login_redirect()
-        form = await submitted_form(request)
-        preauth_csrf_or_forbidden(request, form)
-        host = client_host(request)
-        if auth_store.is_rate_limited(host, "setup"):
-            raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-        if not tokens_match(setup_token, form.get("setup_token")):
-            auth_store.record_failed_attempt(host, "setup")
-            raise HTTPException(status_code=403, detail="Administrator setup token is invalid.")
-        username = form.get("username", "").strip()
-        try:
-            await run_in_threadpool(auth_store.create_admin, username, form.get("password", ""))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        auth_store.clear_failed_attempts(host, "setup")
-        audit(request, username, "setup.completed", username, role="owner")
-        auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
-        token, _ = auth_store.new_session(username)
-        auth_store.set_flash(
-            token, flash(f"Welcome, {username}. Next, work through the setup checklist.")
-        )
-        response = RedirectResponse("/admin", status_code=303)
-        set_cookie(response, token)
-        return response
-
-    @app.get("/admin/login")
-    async def login_page(request: Request) -> Response:
-        csrf_token = preauth_csrf_token(request)
-        response = render(
-            request,
-            "login.html",
-            {"csrf_token": csrf_token, "error": None},
-        )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
-        return response
-
-    @app.post("/admin/login")
-    async def login(request: Request) -> Response:
-        form = await submitted_form(request)
-        csrf_token = preauth_csrf_or_forbidden(request, form)
-        username = form.get("username", "").strip()
-        host = client_host(request)
-        if auth_store.is_rate_limited(host, username) or auth_store.is_rate_limited(
-            host, ANY_USERNAME, LOGIN_IP_LIMIT
-        ):
-            raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-        if not await run_in_threadpool(
-            auth_store.verify_password, username, form.get("password", "")
-        ):
-            auth_store.record_failed_attempt(host, username)
-            auth_store.record_failed_attempt(host, ANY_USERNAME)
-            audit(request, None, "login.failed", username[:80])
-            return render(
-                request,
-                "login.html",
-                {"csrf_token": csrf_token, "error": "Login failed."},
-                status_code=401,
-            )
-        auth_store.clear_failed_attempts(host, username)
-        if auth_store.totp_enabled(username):
-            response = RedirectResponse("/admin/login/verify", status_code=303)
-            set_cookie(response, auth_store.begin_pending_login(username), SECOND_STEP_COOKIE)
-            return response
-        audit(request, username, "login.succeeded")
-        return signed_in_response(request, username)
-
-    def signed_in_response(request: Request, username: str) -> RedirectResponse:
-        auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
-        token, _ = auth_store.new_session(username)
-        response = RedirectResponse("/admin", status_code=303)
-        set_cookie(response, token)
-        response.delete_cookie(
-            SECOND_STEP_COOKIE, path="/admin", secure=True, httponly=True, samesite="strict"
-        )
-        return response
-
-    @app.get("/admin/login/verify")
-    async def second_step_page(request: Request) -> Response:
-        if not auth_store.pending_login(request.cookies.get(SECOND_STEP_COOKIE), count=False):
-            return login_redirect()
-        csrf_token = preauth_csrf_token(request)
-        response = render(request, "login_verify.html", {"csrf_token": csrf_token, "error": None})
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE)
-        return response
-
-    @app.post("/admin/login/verify")
-    async def second_step(request: Request) -> Response:
-        form = await submitted_form(request)
-        csrf_token = preauth_csrf_or_forbidden(request, form)
-        pending = request.cookies.get(SECOND_STEP_COOKIE)
-        username = auth_store.pending_login(pending)
-        if not username:
-            return login_redirect()
-        used = auth_store.verify_second_factor(username, form.get("code", ""))
-        if not used:
-            auth_store.record_failed_attempt(client_host(request), ANY_USERNAME)
-            audit(request, None, "login.second_step_failed", username)
-            return render(
-                request,
-                "login_verify.html",
-                {"csrf_token": csrf_token, "error": "That code did not work. Try the newest one."},
-                status_code=401,
-            )
-        auth_store.end_pending_login(pending)
-        audit(request, username, "login.succeeded", second_step=used)
-        return signed_in_response(request, username)
-
-    @app.post("/admin/logout")
-    async def logout(request: Request) -> Response:
-        session = authenticated(request)
-        if not session:
-            return login_redirect()
-        form = await submitted_form(request)
-        csrf_or_forbidden(request, session, form)
-        auth_store.delete_session(request.cookies.get(SESSION_COOKIE))
-        audit(request, session["username"], "logout")
-        response = RedirectResponse("/admin/login", status_code=303)
-        response.delete_cookie(
-            SESSION_COOKIE, path="/admin", secure=True, httponly=True, samesite="strict"
-        )
-        return response
-
-    ANNOUNCEMENT_FILTERS = {
-        "draft": ("Drafts", (AnnouncementStatus.DRAFT, AnnouncementStatus.APPROVED)),
-        "in_review": ("In review", (AnnouncementStatus.IN_REVIEW,)),
-        "scheduled": ("Scheduled", (AnnouncementStatus.SCHEDULED,)),
-        "published": ("Published", (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)),
-        "withdrawn": ("Withdrawn", (AnnouncementStatus.WITHDRAWN,)),
-    }
-
-    @app.get("/admin/announcements")
-    async def announcement_list(request: Request) -> Response:
-        session = require(request, "view")
-        everything = storage.list_announcements(limit=None)
-        selected = request.query_params.get("status", "")
-        if selected not in ANNOUNCEMENT_FILTERS:
-            selected = ""
-        filters = [{"key": "", "label": "All", "count": len(everything)}] + [
-            {"key": key, "label": label, "count": sum(a.status in states for a in everything)}
-            for key, (label, states) in ANNOUNCEMENT_FILTERS.items()
-        ]
-        shown = (
-            [a for a in everything if a.status in ANNOUNCEMENT_FILTERS[selected][1]]
-            if selected
-            else everything
-        )
-        return render(
-            request,
-            "announcements.html",
-            page(session, announcements=shown, filters=filters, selected=selected),
-        )
 
     TEMPLATE_ID = re.compile(r"^tpl_[A-Za-z0-9_-]{8,40}$")
 
@@ -1228,25 +451,6 @@ def create_app(
         template = storage.get_template(template_id) if TEMPLATE_ID.fullmatch(template_id) else None
         if template is None:
             raise HTTPException(status_code=404, detail="Template not found.")
-        return template
-
-    def template_from_form(form: dict[str, str], template_id: str | None = None) -> dict:
-        name = " ".join(form.get("name", "").split())
-        if not name or len(name) > 80:
-            raise ModelValidationError("Give the template a name of up to 80 characters.")
-        template = {
-            "id": template_id,
-            "name": name,
-            "title": form.get("title", "").strip(),
-            "body": form.get("body", "").strip(),
-            "author": form.get("author") or None,
-            "tags": parse_tags(form),
-            "channel_text": parse_channel_text(form),
-        }
-        # Templates must be usable as announcements, so they follow the same rules.
-        Announcement(
-            title=template["title"], body=template["body"], channel_text=template["channel_text"]
-        )
         return template
 
     def as_editor_values(template: dict) -> dict:
@@ -1261,1675 +465,6 @@ def create_app(
             {f"channel_text:{k}": v for k, v in (template.get("channel_text") or {}).items()}
         )
         return values
-
-    @app.get("/admin/announcements/new")
-    async def new_announcement_page(request: Request) -> Response:
-        session = require(request, "edit")
-        template_id = request.query_params.get("template")
-        prefill = as_editor_values(template_or_404(template_id)) if template_id else None
-        context = editor_page(session, prefill, None)
-        context["templates"] = storage.list_templates()
-        return render(request, "editor.html", context)
-
-    @app.get("/admin/templates")
-    async def templates_page(request: Request) -> Response:
-        session = require(request, "edit")
-        return render(
-            request,
-            "templates.html",
-            page(session, templates=storage.list_templates(), error=None),
-        )
-
-    @app.get("/admin/templates/new")
-    async def new_template_page(request: Request) -> Response:
-        session = require(request, "edit")
-        context = editor_page(session, None, None)
-        context.update(template_mode=True, form_action="/admin/templates/new")
-        return render(request, "editor.html", context)
-
-    @app.post("/admin/templates/new")
-    async def create_template(request: Request) -> Response:
-        session, form = await checked_form(request, "edit")
-        try:
-            template_id = storage.save_template(template_from_form(form), session["username"])
-        except ModelValidationError as exc:
-            context = editor_page(session, form, str(exc))
-            context.update(template_mode=True, form_action="/admin/templates/new")
-            return render(request, "editor.html", context, status_code=400)
-        audit(request, session["username"], "template.created", template_id, name=form.get("name"))
-        return redirect_with(request, "/admin/templates", flash("Template saved."))
-
-    @app.get("/admin/templates/{template_id}/edit")
-    async def edit_template_page(request: Request, template_id: str) -> Response:
-        session = require(request, "edit")
-        context = editor_page(session, as_editor_values(template_or_404(template_id)), None)
-        context.update(template_mode=True, form_action=f"/admin/templates/{template_id}/update")
-        return render(request, "editor.html", context)
-
-    @app.post("/admin/templates/{template_id}/update")
-    async def update_template(request: Request, template_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        template_or_404(template_id)
-        try:
-            storage.save_template(template_from_form(form, template_id), session["username"])
-        except ModelValidationError as exc:
-            context = editor_page(session, form, str(exc))
-            context.update(template_mode=True, form_action=f"/admin/templates/{template_id}/update")
-            return render(request, "editor.html", context, status_code=400)
-        audit(request, session["username"], "template.updated", template_id, name=form.get("name"))
-        return redirect_with(request, "/admin/templates", flash("Template saved."))
-
-    @app.post("/admin/templates/{template_id}/delete")
-    async def delete_template(request: Request, template_id: str) -> Response:
-        session, _ = await checked_form(request, "edit")
-        template = template_or_404(template_id)
-        storage.delete_template(template_id)
-        audit(request, session["username"], "template.deleted", template_id, name=template["name"])
-        return redirect_with(
-            request, "/admin/templates", flash(f"Deleted the template {template['name']}.")
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/save-as-template")
-    async def save_as_template(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        announcement = announcement_or_404(announcement_id)
-        name = " ".join(form.get("name", "").split())[:80] or announcement.title[:80]
-        template_id = storage.save_template(
-            {
-                "name": name,
-                "title": announcement.title,
-                "body": announcement.body,
-                "author": announcement.author,
-                "tags": announcement.tags,
-                "channel_text": announcement.channel_text,
-            },
-            session["username"],
-        )
-        audit(request, session["username"], "template.created", template_id, name=name)
-        return redirect_with(request, "/admin/templates", flash(f"Saved as the template {name}."))
-
-    @app.post("/admin/announcements/new")
-    async def create_announcement(request: Request) -> Response:
-        session, form = await checked_form(request, "edit")
-        try:
-            announcement = publisher.create_draft(
-                title=form.get("title", ""),
-                body=form.get("body", ""),
-                author=form.get("author") or None,
-                tags=parse_tags(form),
-                channel_text=parse_channel_text(form),
-            )
-        except ModelValidationError as exc:
-            return render(
-                request, "editor.html", editor_page(session, form, str(exc)), status_code=400
-            )
-        audit(
-            request,
-            session["username"],
-            "announcement.created",
-            announcement.id,
-            title=announcement.title,
-        )
-        return redirect_with(
-            request, f"/admin/announcements/{announcement.id}", flash("Draft saved.")
-        )
-
-    def editable_announcement(announcement_id: str):
-        try:
-            announcement = publisher.preview(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        editable = announcement.status == AnnouncementStatus.DRAFT or (
-            announcement.status == AnnouncementStatus.SCHEDULED and not review_required()
-        )
-        if not editable:
-            raise HTTPException(
-                status_code=409,
-                detail="Images can only be changed on drafts (edit the announcement to reopen it).",
-            )
-        return announcement
-
-    @app.post("/admin/announcements/{announcement_id}/image")
-    async def upload_image(request: Request, announcement_id: str) -> Response:
-        session = require(request, "edit")
-        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES + 65536:
-            raise HTTPException(status_code=413, detail="Images must be 10 MB or smaller.")
-        form = await request.form()
-        if not tokens_match(session["csrf_token"], str(form.get("csrf_token", ""))):
-            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
-        editable_announcement(announcement_id)
-        upload = form.get("image")
-        if upload is None or not hasattr(upload, "read"):
-            raise HTTPException(status_code=400, detail="Choose an image to upload.")
-        try:
-            alt = validate_alt(str(form.get("alt", "")))
-            data = await upload.read(MAX_UPLOAD_BYTES + 1)
-            processed = await run_in_threadpool(process_image, data)
-        except MediaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        image = storage.save_image(announcement_id, processed, alt, session["username"])
-        audit(
-            request,
-            session["username"],
-            "announcement.image_added",
-            announcement_id,
-            width=image.width,
-            height=image.height,
-        )
-        return redirect_with(
-            request, f"/admin/announcements/{announcement_id}", flash("Image added.")
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/image/alt")
-    async def change_image_alt(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        announcement = editable_announcement(announcement_id)
-        if not announcement.image:
-            raise HTTPException(status_code=404, detail="This announcement has no image.")
-        try:
-            storage.set_image_alt(announcement.image.id, validate_alt(form.get("alt", "")))
-        except MediaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(request, session["username"], "announcement.image_described", announcement_id)
-        return redirect_with(
-            request, f"/admin/announcements/{announcement_id}", flash("Image description saved.")
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/image/remove")
-    async def remove_image(request: Request, announcement_id: str) -> Response:
-        session, _ = await checked_form(request, "edit")
-        editable_announcement(announcement_id)
-        storage.remove_image(announcement_id)
-        audit(request, session["username"], "announcement.image_removed", announcement_id)
-        return redirect_with(
-            request, f"/admin/announcements/{announcement_id}", flash("Image removed.")
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/channel-image")
-    async def upload_channel_image(request: Request, announcement_id: str) -> Response:
-        session = require(request, "edit")
-        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES + 65536:
-            raise HTTPException(status_code=413, detail="Images must be 10 MB or smaller.")
-        form = await request.form()
-        if not tokens_match(session["csrf_token"], str(form.get("csrf_token", ""))):
-            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
-        editable_announcement(announcement_id)
-        channel = str(form.get("channel", ""))
-        if channel not in PLATFORMS:
-            raise HTTPException(status_code=400, detail="Choose a supported platform.")
-        upload = form.get("image")
-        if upload is None or not hasattr(upload, "read"):
-            raise HTTPException(status_code=400, detail="Choose an image to upload.")
-        try:
-            alt = validate_alt(str(form.get("alt", "")))
-            data = await upload.read(MAX_UPLOAD_BYTES + 1)
-            processed = await run_in_threadpool(process_image, data)
-        except MediaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        image = storage.save_channel_image(
-            announcement_id, channel, processed, alt, session["username"]
-        )
-        audit(
-            request,
-            session["username"],
-            "announcement.channel_image_added",
-            announcement_id,
-            channel=channel,
-            width=image.width,
-            height=image.height,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash(f"{PLATFORMS[channel].name} image saved."),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/channel-image/{channel}/alt")
-    async def change_channel_image_alt(
-        request: Request, announcement_id: str, channel: str
-    ) -> Response:
-        session, form = await checked_form(request, "edit")
-        if channel not in PLATFORMS:
-            raise HTTPException(status_code=404)
-        announcement = editable_announcement(announcement_id)
-        image = announcement.channel_media.get(channel)
-        if image is None:
-            raise HTTPException(status_code=404, detail="This platform has no image override.")
-        try:
-            storage.set_image_alt(image.id, validate_alt(form.get("alt", "")))
-        except MediaError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.channel_image_described",
-            announcement_id,
-            channel=channel,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash(f"{PLATFORMS[channel].name} image description saved."),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/channel-image/{channel}/remove")
-    async def remove_channel_image(
-        request: Request, announcement_id: str, channel: str
-    ) -> Response:
-        session, _ = await checked_form(request, "edit")
-        if channel not in PLATFORMS:
-            raise HTTPException(status_code=404)
-        editable_announcement(announcement_id)
-        if not storage.remove_channel_image(announcement_id, channel):
-            raise HTTPException(status_code=404, detail="This platform has no image override.")
-        audit(
-            request,
-            session["username"],
-            "announcement.channel_image_removed",
-            announcement_id,
-            channel=channel,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash(f"{PLATFORMS[channel].name} image override removed."),
-        )
-
-    @app.get("/admin/media/{media_id}")
-    async def media(request: Request, media_id: str) -> Response:
-        require(request, "view")
-        image = storage.get_media(media_id) if MEDIA_ID.fullmatch(media_id) else None
-        if image is None or not image.path.is_file():
-            raise HTTPException(status_code=404, detail="Image not found.")
-        return FileResponse(
-            image.path,
-            media_type=image.content_type,
-            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
-        )
-
-    @app.post("/admin/preview")
-    async def preview(request: Request) -> Response:
-        _, form = await checked_form(request, "edit")
-        try:
-            draft = Announcement(
-                title=form.get("title", "").strip() or "(no title yet)",
-                body=form.get("body", "").strip() or "(no message yet)",
-                author=form.get("author") or None,
-                channel_text=parse_channel_text(form),
-            )
-        except ModelValidationError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(
-            {
-                "html": render_html(draft.body),
-                "channels": [
-                    {
-                        "name": check.name,
-                        "label": check.capabilities.label,
-                        "length": check.text_length,
-                        "limit": check.capabilities.max_text_length,
-                        "over_limit": check.over_limit,
-                        "shortened": check.over_limit and check.capabilities.shortens_long_text,
-                        "preview": check.preview,
-                    }
-                    for check in publisher.channel_checks(draft)
-                ],
-            }
-        )
-
-    @app.get("/admin/announcements/{announcement_id}")
-    async def announcement_detail(request: Request, announcement_id: str) -> Response:
-        session = require(request, "view")
-        try:
-            announcement = publisher.preview(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        scheduled_local = (
-            datetime.fromisoformat(announcement.scheduled_at)
-            .astimezone(publisher.timezone)
-            .strftime("%A %d %B %Y, %H:%M")
-            if announcement.scheduled_at
-            else None
-        )
-        delivery_states = storage.get_delivery_states(announcement_id)
-        delivery_by_channel = {item["adapter_name"]: item for item in delivery_states}
-        adapters_by_name = {
-            adapter.name: adapter for adapter in publisher.adapters if adapter.name in PLATFORMS
-        }
-        platform_content = []
-        for platform in PLATFORM_CATALOG:
-            adapter = adapters_by_name.get(platform.identifier)
-            delivery = delivery_by_channel.get(platform.identifier)
-            operation = delivery["operation"] if delivery else None
-            manual_action = {
-                "manual_publish": "publish",
-                "manual_update": "update",
-                "manual_withdraw": "withdraw",
-            }.get(operation)
-            if adapter is None and manual_action is None:
-                continue
-            if adapter is None:
-                adapter = ManualChannelAdapter(platform)
-            if manual_action is None and isinstance(adapter, ManualChannelAdapter):
-                manual_action = (
-                    operation if operation in ("publish", "update", "withdraw") else None
-                )
-            if announcement.status == AnnouncementStatus.WITHDRAWN and not (
-                manual_action == "withdraw"
-                and delivery
-                and delivery["status"] in ("prepared", "failed", "unknown")
-            ):
-                continue
-            variant = publisher.channel_variant(announcement, platform.identifier)
-            check = adapter.check(variant)
-            platform_content.append(
-                {
-                    "spec": platform,
-                    "text": check.preview,
-                    "image": variant.image,
-                    "check": check,
-                    "delivery": delivery,
-                    "manual": isinstance(adapter, ManualChannelAdapter)
-                    or manual_action is not None,
-                    "manual_action": manual_action,
-                }
-            )
-        return render(
-            request,
-            "detail.html",
-            page(
-                session,
-                announcement=announcement,
-                review_required=review_required(),
-                submitter=storage.last_submitter(announcement_id),
-                review_history=storage.review_history(announcement_id),
-                body_html=Markup(render_html(announcement.body)),
-                scheduled_local=scheduled_local,
-                timezone_name=str(publisher.timezone),
-                now_local=datetime.now(publisher.timezone).strftime("%Y-%m-%dT%H:%M"),
-                deliveries=delivery_states,
-                jobs=storage.get_active_jobs(announcement_id),
-                checks=publisher.channel_checks(announcement),
-                platform_content=platform_content,
-                platform_media=[
-                    {
-                        "identifier": platform.identifier,
-                        "name": platform.name,
-                        "image": announcement.channel_media.get(platform.identifier),
-                    }
-                    for platform in PLATFORM_CATALOG
-                ],
-                delivery_attempts=storage.get_delivery_attempts(announcement_id),
-            ),
-        )
-
-    @app.get("/admin/announcements/{announcement_id}/edit")
-    async def edit_announcement_page(request: Request, announcement_id: str) -> Response:
-        session = require(request, "edit")
-        try:
-            announcement = publisher.preview(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        if announcement.status.value == "withdrawn":
-            raise HTTPException(status_code=409, detail="Withdrawn announcements cannot be edited.")
-        return render(request, "editor.html", editor_page(session, announcement, None))
-
-    @app.post("/admin/announcements/{announcement_id}/update")
-    async def update_announcement(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        existing = announcement_or_404(announcement_id)
-        before = existing.status
-        try:
-            announcement, _ = publisher.update(
-                announcement_id,
-                title=form.get("title"),
-                body=form.get("body"),
-                author=form.get("author") or None,
-                tags=parse_tags(form) if "tags" in form else None,
-                channel_text=parse_channel_text(form, existing),
-            )
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except (ValueError, ModelValidationError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        message = flash("Changes saved.")
-        if review_required() and before in (
-            AnnouncementStatus.IN_REVIEW,
-            AnnouncementStatus.APPROVED,
-            AnnouncementStatus.SCHEDULED,
-        ):
-            # What gets published must be exactly what was approved.
-            publisher.set_review_status(announcement_id, (before,), AnnouncementStatus.DRAFT)
-            storage.add_review_event(
-                announcement_id, "returned_to_draft", session["username"], "Edited after review."
-            )
-            message = flash(
-                "Changes saved. It changed after review, so it is a draft again and needs a new review.",
-                "warning",
-            )
-        audit(
-            request,
-            session["username"],
-            "announcement.updated",
-            announcement_id,
-            title=announcement.title,
-        )
-        return redirect_with(request, f"/admin/announcements/{announcement_id}", message)
-
-    @app.post("/admin/announcements/{announcement_id}/publish")
-    async def publish_announcement(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        if form.get("confirm") != "publish":
-            raise HTTPException(
-                status_code=400, detail="Explicit publish confirmation is required."
-            )
-        require_approved(announcement_or_404(announcement_id))
-        try:
-            announcement, results = publisher.publish_draft(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.published",
-            announcement_id,
-            title=announcement.title,
-            channels=sorted(results),
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            delivery_message("Published.", results),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/channels/{channel}/outcome")
-    async def record_manual_outcome(
-        request: Request, announcement_id: str, channel: str
-    ) -> Response:
-        session, form = await checked_form(request, "edit")
-        if channel not in PLATFORMS:
-            raise HTTPException(status_code=404)
-        outcome = form.get("outcome", "")
-        try:
-            manual_action, outcome, recorded_post_url = publisher.record_manual_outcome(
-                announcement_id,
-                channel,
-                outcome,
-                recorded_by=session["username"],
-                post_url=form.get("post_url"),
-                note=form.get("note"),
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="Announcement or platform not found."
-            ) from None
-        except ManualOutcomeConflict as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.manual_outcome_recorded",
-            announcement_id,
-            channel=channel,
-            outcome=outcome,
-            post_url=recorded_post_url,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash(f"{PLATFORMS[channel].name} manual {manual_action} recorded as {outcome}."),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/submit")
-    async def submit_for_review(request: Request, announcement_id: str) -> Response:
-        session, _ = await checked_form(request, "edit")
-        try:
-            announcement = publisher.set_review_status(
-                announcement_id, (AnnouncementStatus.DRAFT,), AnnouncementStatus.IN_REVIEW
-            )
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        storage.add_review_event(announcement_id, "submitted", session["username"])
-        audit(
-            request,
-            session["username"],
-            "announcement.submitted",
-            announcement_id,
-            title=announcement.title,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash("Submitted for review. Someone else needs to approve it."),
-        )
-
-    async def review_decision(request: Request, announcement_id: str, approve: bool) -> Response:
-        session, form = await checked_form(request, "approve")
-        announcement_or_404(announcement_id)
-        if storage.last_submitter(announcement_id) == session["username"]:
-            raise HTTPException(
-                status_code=403, detail="Someone other than the submitter must review it."
-            )
-        note = " ".join(form.get("note", "").split())[:1000] or None
-        if not approve and not note:
-            raise HTTPException(status_code=400, detail="Say what needs to change.")
-        target = AnnouncementStatus.APPROVED if approve else AnnouncementStatus.DRAFT
-        try:
-            announcement = publisher.set_review_status(
-                announcement_id, (AnnouncementStatus.IN_REVIEW,), target
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        action = "approved" if approve else "changes_requested"
-        storage.add_review_event(announcement_id, action, session["username"], note)
-        audit(
-            request,
-            session["username"],
-            f"announcement.{action}",
-            announcement_id,
-            title=announcement.title,
-        )
-        text = (
-            "Approved. It can now be published or scheduled."
-            if approve
-            else "Sent back for changes, with your note."
-        )
-        return redirect_with(request, f"/admin/announcements/{announcement_id}", flash(text))
-
-    @app.post("/admin/announcements/{announcement_id}/approve")
-    async def approve_announcement(request: Request, announcement_id: str) -> Response:
-        return await review_decision(request, announcement_id, approve=True)
-
-    @app.post("/admin/announcements/{announcement_id}/request-changes")
-    async def request_changes(request: Request, announcement_id: str) -> Response:
-        return await review_decision(request, announcement_id, approve=False)
-
-    @app.post("/admin/announcements/{announcement_id}/publish-urgently")
-    async def publish_urgently(request: Request, announcement_id: str) -> Response:
-        """Safety notices that cannot wait for a reviewer: owners and admins, with a reason."""
-        session, form = await checked_form(request, "settings")
-        announcement = announcement_or_404(announcement_id)
-        if announcement.status not in UNPUBLISHED:
-            raise HTTPException(status_code=409, detail="This announcement is already public.")
-        reason = " ".join(form.get("reason", "").split())[:500]
-        if len(reason) < 10:
-            raise HTTPException(status_code=400, detail="Explain why this cannot wait for review.")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        try:
-            announcement, results = publisher.publish_draft(announcement_id)
-        except ValueError:
-            # Submitted or in review: claim it from whatever unpublished state it is in.
-            publisher.set_review_status(
-                announcement_id,
-                (AnnouncementStatus.IN_REVIEW,),
-                AnnouncementStatus.APPROVED,
-            )
-            announcement, results = publisher.publish_draft(announcement_id)
-        storage.add_review_event(
-            announcement_id, "published_without_review", session["username"], reason
-        )
-        audit(
-            request,
-            session["username"],
-            "announcement.published_urgently",
-            announcement_id,
-            title=announcement.title,
-            reason=reason,
-            channels=sorted(results),
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            delivery_message(
-                "Published without review. Your reason is in the activity log.", results
-            ),
-        )
-
-    @app.post("/admin/settings/review")
-    async def update_review_setting(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        enabled = form.get("review_required") == "true"
-        storage.set_setting("review_required", "true" if enabled else "false")
-        audit(request, session["username"], "settings.review", required=enabled)
-        state = "on" if enabled else "off"
-        return redirect_with(
-            request, "/admin/settings", flash(f"Review before publishing is now {state}.")
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/schedule")
-    async def schedule_announcement(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        current = announcement_or_404(announcement_id)
-        if review_required() and current.status != AnnouncementStatus.APPROVED:
-            raise HTTPException(
-                status_code=409, detail="Review is on: this announcement must be approved first."
-            )
-        try:
-            local = datetime.strptime(form.get("scheduled_for", ""), "%Y-%m-%dT%H:%M")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Choose a date and time.") from None
-        try:
-            announcement = publisher.schedule(
-                announcement_id, local.replace(tzinfo=publisher.timezone)
-            )
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.scheduled",
-            announcement_id,
-            title=announcement.title,
-            scheduled_at=announcement.scheduled_at,
-        )
-        when = local.strftime("%A %d %B %Y, %H:%M")
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash(f"Scheduled for {when} ({publisher.timezone})."),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/unschedule")
-    async def unschedule_announcement(request: Request, announcement_id: str) -> Response:
-        session, _ = await checked_form(request, "edit")
-        try:
-            announcement = publisher.unschedule(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.unscheduled",
-            announcement_id,
-            title=announcement.title,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            flash("Schedule cancelled. The announcement is a draft again."),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/withdraw")
-    async def withdraw_announcement(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
-        if form.get("confirm") != "withdraw":
-            raise HTTPException(
-                status_code=400, detail="Explicit withdrawal confirmation is required."
-            )
-        try:
-            announcement, results = publisher.withdraw(announcement_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Announcement not found.") from None
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "announcement.withdrawn",
-            announcement_id,
-            title=announcement.title,
-        )
-        return redirect_with(
-            request,
-            f"/admin/announcements/{announcement_id}",
-            delivery_message("Withdrawn from public channels.", results),
-        )
-
-    @app.post("/admin/announcements/{announcement_id}/retry")
-    async def retry_announcement(request: Request, announcement_id: str) -> Response:
-        session, _ = await checked_form(request, "edit")
-        results = publisher.retry_failed(announcement_id)
-        audit(
-            request,
-            session["username"],
-            "announcement.retried",
-            announcement_id,
-            channels=sorted(key.split(":", 1)[1] for key in results),
-        )
-        text = f"Retried {len(results)} failed deliveries." if results else "Nothing to retry."
-        return redirect_with(request, f"/admin/announcements/{announcement_id}", flash(text))
-
-    # Community profile (CR1.8). Read from the configuration; saved through the agent.
-    community_labels = {
-        "website": "Our website",
-        "email": "Email updates",
-        "matrix": "Matrix chat room",
-        "activitypub": "Fediverse account",
-        "rss": "Feeds (RSS, Atom and JSON Feed)",
-    }
-
-    def community_form_values(form: dict[str, str]) -> dict[str, Any]:
-        social = []
-        for index in range(SOCIAL_ROWS):
-            social.append(
-                {
-                    "platform": form.get(f"social_platform_{index}", "").strip(),
-                    "url": form.get(f"social_url_{index}", "").strip(),
-                    "handle": form.get(f"social_handle_{index}", "").strip(),
-                }
-            )
-        return {
-            "name": form.get("name", ""),
-            "description": form.get("description", ""),
-            "url": form.get("url", ""),
-            "logo": form.get("logo", ""),
-            "cover": form.get("cover", ""),
-            "contact_email": form.get("contact_email", ""),
-            "emergency_instructions": form.get("emergency_instructions", ""),
-            "social": social,
-            "independent": {
-                key: form.get(f"independent_{key}") == "on" for key in community_labels
-            },
-        }
-
-    def community_current_values() -> dict[str, Any]:
-        try:
-            raw = load_config(config_path).get("community") or {}
-        except (ConfigError, OSError):
-            raw = {}
-        social = [dict(item) for item in raw.get("social", [])][:SOCIAL_ROWS]
-        social += [{}] * (SOCIAL_ROWS - len(social))
-        independent = raw.get("independent") or {}
-        return {
-            "name": raw.get("name", ""),
-            "description": raw.get("description", ""),
-            "url": raw.get("url", ""),
-            "logo": raw.get("logo", ""),
-            "cover": raw.get("cover", ""),
-            "contact_email": (raw.get("contact") or {}).get("email", ""),
-            "emergency_instructions": raw.get("emergency_instructions", ""),
-            "social": social,
-            "independent": {
-                key: bool(independent.get(key, key in ("website", "rss")))
-                for key in community_labels
-            },
-        }
-
-    def community_page(
-        request: Request,
-        session: dict[str, Any],
-        values: dict[str, Any],
-        error: str | None = None,
-        status_code: int = 200,
-    ) -> HTMLResponse:
-        social_rows = [
-            {
-                "platform": item.get("platform", ""),
-                "url": item.get("url", ""),
-                "handle": item.get("handle", ""),
-            }
-            for item in values["social"]
-        ]
-        return render(
-            request,
-            "community.html",
-            page(
-                session,
-                v={**values, "social": social_rows},
-                social_rows=social_rows,
-                platforms=list(SOCIAL_PLATFORMS.items()),
-                channels=list(community_labels.items()),
-                flash_error=error,
-            ),
-            status_code=status_code,
-        )
-
-    @app.get("/admin/community")
-    async def community_profile_page(request: Request) -> Response:
-        session = require(request, "settings")
-        return community_page(request, session, community_current_values())
-
-    @app.post("/admin/community")
-    async def community_profile_save(request: Request) -> Response:
-        session = require(request, "settings")
-        raw_form = await request.form()
-        form = {key: value for key, value in raw_form.items() if isinstance(value, str)}
-        csrf_or_forbidden(request, session, form)
-        values = community_form_values(form)
-        image_directory = (
-            Path(config_path).parent / "data" / "announcements" / "media" / "community"
-        )
-        try:
-            for kind in ("logo", "cover"):
-                upload = raw_form.get(f"{kind}_upload")
-                if not isinstance(upload, StarletteUploadFile) or not upload.filename:
-                    continue
-                try:
-                    data = await upload.read(MAX_PROFILE_IMAGE_BYTES + 1)
-                finally:
-                    await upload.close()
-                if len(data) > MAX_PROFILE_IMAGE_BYTES:
-                    raise ConnectError(f"The {kind} must be 2 MB or smaller.")
-                filename, _path, _created = await run_in_threadpool(
-                    store_profile_image, data, kind, image_directory
-                )
-                values[kind] = filename
-        except ConnectError as exc:
-            audit(request, session["username"], "community.updated", outcome="invalid_image")
-            return community_page(request, session, values, str(exc), 400)
-        except OSError:
-            audit(request, session["username"], "community.updated", outcome="image_read_failed")
-            return community_page(
-                request,
-                session,
-                values,
-                "The uploaded image could not be read or saved.",
-                400,
-            )
-        try:
-            await run_in_threadpool(
-                agent.call, "community.apply", session["username"], {"community": values}
-            )
-        except AgentUnavailable:
-            audit(request, session["username"], "community.updated", outcome="failed")
-            return community_page(
-                request,
-                session,
-                values,
-                "The control agent is not running, so nothing was saved.",
-                503,
-            )
-        except AgentRefused as exc:
-            audit(request, session["username"], "community.updated", outcome="refused")
-            return community_page(request, session, values, str(exc), 400)
-        publisher.refresh_connect_page()
-        audit(request, session["username"], "community.updated", outcome="succeeded")
-        return redirect_with(
-            request,
-            "/admin/community",
-            flash("Community profile saved. The contact page is updated."),
-        )
-
-    @app.get("/admin/settings")
-    async def settings_page(request: Request) -> Response:
-        session = require(request, "settings")
-        settings = storage.get_channel_settings()
-        channels = [
-            {
-                "name": adapter.name,
-                "label": adapter.capabilities.label,
-                "enabled": settings.get(adapter.name, True),
-            }
-            for adapter in publisher.adapters
-        ]
-        return render(
-            request,
-            "settings.html",
-            page(session, channels=channels, review_required=review_required()),
-        )
-
-    @app.post("/admin/settings")
-    async def update_settings(request: Request) -> Response:
-        session, _ = await checked_form(request, "settings")
-        raw_form = await request.form()
-        enabled_names = set(raw_form.getlist("enabled_channel"))
-        valid_names = {adapter.name for adapter in publisher.adapters}
-        if not enabled_names.issubset(valid_names):
-            raise HTTPException(status_code=400, detail="Unknown publishing destination.")
-        for adapter in publisher.adapters:
-            storage.set_channel_enabled(adapter.name, adapter.name in enabled_names)
-            if isinstance(adapter, WebFeedAdapter):
-                settings = storage.get_channel_settings()
-                adapter.channel_links = configured_channel_links()
-                if not settings.get("matrix_room", True):
-                    adapter.channel_links.pop("Matrix announcements", None)
-                if settings.get("web_feed", True):
-                    adapter.rebuild()
-        audit(request, session["username"], "settings.updated", enabled=sorted(enabled_names))
-        return redirect_with(request, "/admin/settings", flash("Publishing destinations saved."))
-
-    def channels_page(
-        request: Request,
-        session: dict[str, Any],
-        message: dict[str, Any] | None = None,
-        status_code: int = 200,
-    ) -> HTMLResponse:
-        """The channels page; `message` (an error from a form) replaces the stored flash."""
-        saved = storage.list_connections()
-        enabled = storage.get_channel_settings()
-        connectors = [
-            {
-                "type": connector,
-                "connected": kind in saved,
-                "enabled": enabled.get(kind, True),
-                "available": kind != "whatsapp"
-                or (publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None),
-                "values": {
-                    field.name: saved.get(kind, {}).get(field.name, "")
-                    for field in connector.fields
-                    if not field.secret
-                },
-            }
-            for kind, connector in CONNECTORS.items()
-        ]
-        context = page(session, connectors=connectors)
-        if message:
-            context["flash"] = message
-        return render(request, "channels.html", context, status_code=status_code)
-
-    def connector_for(kind: str):
-        connector = CONNECTORS.get(kind)
-        if connector is None:
-            raise HTTPException(status_code=404, detail="Unknown channel type.")
-        return connector
-
-    @app.get("/admin/channels")
-    async def channels(request: Request) -> Response:
-        return channels_page(request, require(request, "settings"))
-
-    @app.post("/admin/channels/{kind}/save")
-    async def save_channel(request: Request, kind: str) -> Response:
-        session, form = await checked_form(request, "settings")
-        connector = connector_for(kind)
-        if kind == "whatsapp" and not publisher.whatsapp_bridge_enabled:
-            return channels_page(
-                request,
-                session,
-                flash("Enable the WhatsApp bridge first on the Services page.", "error"),
-                409,
-            )
-        if kind == "whatsapp" and publisher.matrix_auth is None:
-            return channels_page(
-                request,
-                session,
-                flash(
-                    "Connect Matrix announcements first; WhatsApp forwarding uses that account.",
-                    "error",
-                ),
-                409,
-            )
-        saved = storage.list_connections().get(kind, {})
-        try:
-            values = await run_in_threadpool(
-                connector.validate, merge_values(connector, form, saved)
-            )
-        except (UnsafeURLError, ValueError) as exc:
-            return channels_page(request, session, flash(f"{connector.label}: {exc}", "error"), 400)
-        storage.save_connection(kind, values, session["username"])
-        publisher.reload_connections()
-        public = {f.name: values.get(f.name) for f in connector.fields if not f.secret}
-        audit(
-            request,
-            session["username"],
-            "channel.updated" if saved else "channel.connected",
-            kind,
-            **public,
-        )
-        return redirect_with(
-            request,
-            f"/admin/channels#channel-{kind}",
-            flash(f"{connector.label} saved. Use 'Test connection' to check it."),
-        )
-
-    def mirroring_page(
-        request: Request, session: dict[str, Any], error: str | None = None, status_code: int = 200
-    ):
-        rooms = mirror()
-        labels = {a.name: a.capabilities.label for a in publisher.adapters}
-        return render(
-            request,
-            "mirroring.html",
-            page(
-                session,
-                available=rooms is not None,
-                rooms=rooms.rooms() if rooms else [],
-                channel_labels=labels,
-                **({"flash": flash(error, "error")} if error else {}),
-            ),
-            status_code=status_code,
-        )
-
-    @app.get("/admin/mirroring")
-    async def mirroring(request: Request) -> Response:
-        return mirroring_page(request, require(request, "settings"))
-
-    @app.post("/admin/mirroring/add")
-    async def add_mirrored_room(request: Request) -> Response:
-        session, _ = await checked_form(request, "settings")
-        raw = await request.form()
-        rooms = mirror()
-        if rooms is None:
-            raise HTTPException(
-                status_code=409, detail="Set up the Matrix announcements channel first."
-            )
-        known = {a.name for a in publisher.adapters}
-        channels = [c for c in raw.getlist("channel") if c in known]
-        if not channels:
-            return mirroring_page(request, session, "Choose at least one channel.", 400)
-        try:
-            added = await run_in_threadpool(
-                rooms.add_room,
-                str(raw.get("room", "")).strip(),
-                str(raw.get("mode", "review")),
-                MODERATOR_POWER if raw.get("who") != "everyone" else 0,
-                channels,
-                session["username"],
-            )
-        except ValueError as exc:
-            return mirroring_page(request, session, str(exc), 400)
-        audit(
-            request,
-            session["username"],
-            "mirroring.room_added",
-            added["room_id"],
-            mode=str(raw.get("mode")),
-            channels=channels,
-        )
-        return redirect_with(
-            request, "/admin/mirroring", flash(f"Mirroring {raw.get('room', '')}.".strip())
-        )
-
-    @app.post("/admin/mirroring/remove")
-    async def remove_mirrored_room(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        rooms = mirror()
-        if rooms is not None:
-            rooms.remove_room(form.get("room_id", ""))
-        audit(request, session["username"], "mirroring.room_removed", form.get("room_id", ""))
-        return redirect_with(request, "/admin/mirroring", flash("Stopped mirroring that room."))
-
-    async def matrix_users_page(
-        request: Request,
-        session: dict[str, Any],
-        outcome: dict[str, Any] | None = None,
-        status_code: int = 200,
-    ) -> HTMLResponse:
-        listing, error = None, None
-        if agent.available():
-            try:
-                listing = await run_in_threadpool(
-                    agent.call, "matrix.users.list", session["username"]
-                )
-            except (AgentUnavailable, AgentRefused) as exc:
-                error = str(exc)
-        return render(
-            request,
-            "matrix_users.html",
-            page(
-                session,
-                agent_available=agent.available(),
-                listing=listing,
-                error=error,
-                **({"flash": outcome} if outcome else {}),
-            ),
-            status_code=status_code,
-        )
-
-    @app.get("/admin/matrix-users")
-    async def matrix_users(request: Request) -> Response:
-        return await matrix_users_page(request, require(request, "system"))
-
-    async def matrix_user_action(
-        request: Request, op: str, title: str, fields: tuple[str, ...]
-    ) -> HTMLResponse:
-        session, form = await checked_form(request, "system")
-        params = {name: form.get(name, "").strip() for name in fields if form.get(name, "").strip()}
-        try:
-            result = await run_in_threadpool(
-                agent.call, op, session["username"], params, form.get("password") or None
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(
-                request,
-                session["username"],
-                f"system.{op}",
-                params.get("user_id") or params.get("username"),
-                outcome="failed",
-            )
-            return await matrix_users_page(request, session, flash(f"{title}: {exc}", "error"), 400)
-        # Temporary passwords are shown once and never written to the activity log or
-        # stored as a message: this response is the only place they appear.
-        audit(
-            request, session["username"], f"system.{op}", result.get("user_id"), outcome="succeeded"
-        )
-        message = flash(f"{title}: {result.get('user_id')}")
-        if result.get("temporary_password"):
-            message.update(
-                secret=result["temporary_password"],
-                secret_label="Temporary password, shown only now",
-            )
-        return await matrix_users_page(request, session, message)
-
-    @app.post("/admin/matrix-users/create")
-    async def create_matrix_user(request: Request) -> Response:
-        return await matrix_user_action(
-            request, "matrix.users.create", "New Matrix account", ("username", "display_name")
-        )
-
-    @app.post("/admin/matrix-users/reset-password")
-    async def reset_matrix_password(request: Request) -> Response:
-        return await matrix_user_action(
-            request, "matrix.users.reset_password", "New temporary password", ("user_id",)
-        )
-
-    @app.post("/admin/matrix-users/deactivate")
-    async def deactivate_matrix_user(request: Request) -> Response:
-        return await matrix_user_action(
-            request, "matrix.users.deactivate", "Account deactivated", ("user_id",)
-        )
-
-    @app.get("/admin/channels/signal/link")
-    async def signal_link(request: Request) -> Response:
-        session = require(request, "settings")
-        status, accounts = await run_in_threadpool(
-            signal_send, "GET", f"{SIGNAL_API}/v1/accounts", {}, None
-        )
-        groups, error = [], None
-        if status != 200 or not isinstance(accounts, list):
-            error = "The Signal service is not running. Turn on Signal on the Services page first."
-            accounts = []
-        for account in accounts:
-            number = account.get("number") or account.get("aci")
-            g_status, found = await run_in_threadpool(
-                signal_send, "GET", f"{SIGNAL_API}/v1/groups/{quote(number, safe='')}", {}, None
-            )
-            for group in found if g_status == 200 and isinstance(found, list) else []:
-                groups.append({"number": number, "id": group.get("id"), "name": group.get("name")})
-        return render(
-            request,
-            "signal_link.html",
-            page(session, accounts=accounts, groups=groups, error=error),
-        )
-
-    @app.get("/admin/channels/signal/qr")
-    async def signal_qr(request: Request) -> Response:
-        require(request, "settings")
-        status, image = await run_in_threadpool(
-            signal_send,
-            "GET",
-            f"{SIGNAL_API}/v1/qrcodelink?device_name=Community%20Stack",
-            {},
-            None,
-        )
-        if status != 200 or not isinstance(image, bytes):
-            raise HTTPException(status_code=503, detail="The Signal service is not running.")
-        return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
-
-    @app.post("/admin/channels/signal/use")
-    async def signal_use_group(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        try:
-            values = CONNECTORS["signal"].validate(form)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        storage.save_connection("signal", values, session["username"])
-        publisher.reload_connections()
-        audit(
-            request, session["username"], "channel.connected", "signal", group=values["group_name"]
-        )
-        return redirect_with(
-            request,
-            "/admin/channels#channel-signal",
-            flash(f"Announcements will be posted to the Signal group {values['group_name']}."),
-        )
-
-    @app.post("/admin/channels/{kind}/test")
-    async def test_channel(request: Request, kind: str) -> Response:
-        session, _ = await checked_form(request, "settings")
-        connector = connector_for(kind)
-        if kind == "whatsapp" and not (
-            publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="Enable the WhatsApp bridge and connect Matrix announcements first.",
-            )
-        values = storage.list_connections().get(kind)
-        if values is None:
-            raise HTTPException(status_code=409, detail="This channel is not connected.")
-        try:
-            adapter = next((a for a in publisher.adapters if a.name == kind), None)
-            if adapter is None:
-                adapter = build_connector(kind, values, publisher.matrix_auth)
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        result = await run_in_threadpool(adapter.health_check)
-        audit(request, session["username"], "channel.tested", kind, ok=result.ok)
-        return redirect_with(
-            request,
-            f"/admin/channels#channel-{kind}",
-            flash(f"{connector.label}: {result.details}", "success" if result.ok else "error"),
-        )
-
-    @app.post("/admin/channels/{kind}/disconnect")
-    async def disconnect_channel(request: Request, kind: str) -> Response:
-        session, _ = await checked_form(request, "settings")
-        connector = connector_for(kind)
-        storage.delete_connection(kind)
-        publisher.reload_connections()
-        audit(request, session["username"], "channel.disconnected", kind)
-        return redirect_with(
-            request,
-            f"/admin/channels#channel-{kind}",
-            flash(f"{connector.label} disconnected. Its saved credentials were deleted."),
-        )
-
-    @app.get("/admin/whatsapp")
-    async def whatsapp_setup(request: Request) -> Response:
-        session = require(request, "settings")
-        try:
-            config = load_config(config_path) if Path(config_path).is_file() else {}
-        except ConfigError:
-            config = {}
-        return render(
-            request,
-            "whatsapp.html",
-            page(
-                session,
-                bridge_enabled=publisher.whatsapp_bridge_enabled,
-                matrix_connected=publisher.matrix_auth is not None,
-                channel_connected="whatsapp" in storage.list_connections(),
-                matrix_domain=config.get("domain", {}).get("matrix", "your Matrix server"),
-            ),
-        )
-
-    def accounts_page(
-        request: Request, session: dict[str, Any], error: str | None = None, status_code=200
-    ) -> HTMLResponse:
-        assignable = [r for r in ROLES if r != "owner" or session["role"] == "owner"]
-        return render(
-            request,
-            "accounts.html",
-            page(
-                session,
-                accounts=auth_store.list_accounts(),
-                assignable_roles=assignable,
-                role_descriptions=ROLE_DESCRIPTIONS,
-                **({"flash": flash(error, "error")} if error else {}),
-            ),
-            status_code=status_code,
-        )
-
-    def managed_account(session: dict[str, Any], form: dict[str, str]) -> dict[str, Any]:
-        """The account a form targets, if the signed-in role may manage it."""
-        account = auth_store.get_account(form.get("username", ""))
-        if account is None:
-            raise HTTPException(status_code=404, detail="Account not found.")
-        if account["username"] == session["username"]:
-            raise HTTPException(
-                status_code=400,
-                detail="Change your own password on the My account page; "
-                "ask another owner or admin to change your role or access.",
-            )
-        if account["role"] == "owner" and session["role"] != "owner":
-            raise HTTPException(status_code=403, detail="Only owners can manage owners.")
-        return account
-
-    @app.get("/admin/accounts")
-    async def accounts(request: Request) -> Response:
-        return accounts_page(request, require(request, "accounts"))
-
-    @app.post("/admin/accounts/create")
-    async def create_account(request: Request) -> Response:
-        session, form = await checked_form(request, "accounts")
-        role = form.get("role", "")
-        if role == "owner" and session["role"] != "owner":
-            raise HTTPException(status_code=403, detail="Only owners can create owners.")
-        username = form.get("username", "").strip()
-        try:
-            await run_in_threadpool(
-                auth_store.create_account, username, form.get("password", ""), role
-            )
-        except ValueError as exc:
-            return accounts_page(request, session, str(exc), 400)
-        audit(request, session["username"], "account.created", username, role=role)
-        return redirect_with(
-            request,
-            "/admin/accounts",
-            flash(f"Created the account {username}. Share the temporary password privately."),
-        )
-
-    @app.post("/admin/accounts/role")
-    async def change_role(request: Request) -> Response:
-        session, form = await checked_form(request, "accounts")
-        account = managed_account(session, form)
-        role = form.get("role", "")
-        if role == "owner" and session["role"] != "owner":
-            raise HTTPException(status_code=403, detail="Only owners can grant the owner role.")
-        try:
-            auth_store.set_role(account["username"], role)
-        except ValueError as exc:
-            return accounts_page(request, session, str(exc), 400)
-        audit(
-            request,
-            session["username"],
-            "account.role_changed",
-            account["username"],
-            previous=account["role"],
-            role=role,
-        )
-        return redirect_with(
-            request, "/admin/accounts", flash(f"{account['username']} is now {role}.")
-        )
-
-    @app.post("/admin/accounts/access")
-    async def change_access(request: Request) -> Response:
-        session, form = await checked_form(request, "accounts")
-        account = managed_account(session, form)
-        disable = form.get("action") == "disable"
-        try:
-            auth_store.set_disabled(account["username"], disable)
-        except ValueError as exc:
-            return accounts_page(request, session, str(exc), 400)
-        action = "account.disabled" if disable else "account.enabled"
-        audit(request, session["username"], action, account["username"])
-        text = (
-            f"{account['username']} can no longer sign in."
-            if disable
-            else f"{account['username']} can sign in again."
-        )
-        return redirect_with(request, "/admin/accounts", flash(text))
-
-    @app.post("/admin/accounts/password")
-    async def reset_password(request: Request) -> Response:
-        session, form = await checked_form(request, "accounts")
-        account = managed_account(session, form)
-        try:
-            await run_in_threadpool(
-                auth_store.set_password, account["username"], form.get("password", "")
-            )
-        except ValueError as exc:
-            return accounts_page(request, session, str(exc), 400)
-        audit(request, session["username"], "account.password_reset", account["username"])
-        return redirect_with(
-            request,
-            "/admin/accounts",
-            flash(f"Password reset for {account['username']}. Share it with them privately."),
-        )
-
-    def account_page(
-        request: Request,
-        session: dict[str, Any],
-        status_code: int = 200,
-        **context: Any,
-    ) -> HTMLResponse:
-        username = session["username"]
-        values = {
-            "role_description": ROLE_DESCRIPTIONS[session["role"]],
-            "error": None,
-            "two_step": auth_store.totp_enabled(username),
-            "codes_left": auth_store.recovery_codes_left(username),
-            "setup": None,
-            "recovery_codes": None,
-            "two_step_error": None,
-            **context,
-        }
-        return render(request, "account.html", page(session, **values), status_code=status_code)
-
-    @app.post("/admin/accounts/two-step")
-    async def reset_two_step(request: Request) -> Response:
-        session, form = await checked_form(request, "accounts")
-        account = managed_account(session, form)
-        auth_store.disable_totp(account["username"])
-        audit(request, session["username"], "two_step.reset", account["username"])
-        return redirect_with(
-            request,
-            "/admin/accounts",
-            flash(
-                f"Two-step login is off for {account['username']}. "
-                "They can turn it on again from My account."
-            ),
-        )
-
-    @app.get("/admin/account")
-    async def my_account(request: Request) -> Response:
-        session = require(request, "view")
-        return account_page(request, session)
-
-    @app.post("/admin/account/two-step/start")
-    async def start_two_step(request: Request) -> Response:
-        session, form = await checked_form(request, "view")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("current_password", "")
-        ):
-            return account_page(
-                request, session, 400, two_step_error="Your current password is not correct."
-            )
-        secret = auth_store.start_totp(session["username"])
-        uri = totp.provisioning_uri(secret, session["username"], "Community Stack")
-        setup = {"secret": secret, "qr": Markup(totp.qr_svg(uri))}
-        return account_page(request, session, setup=setup)
-
-    @app.post("/admin/account/two-step/confirm")
-    async def confirm_two_step(request: Request) -> Response:
-        session, form = await checked_form(request, "view")
-        codes = auth_store.confirm_totp(session["username"], form.get("code", ""))
-        if codes is None:
-            return account_page(
-                request,
-                session,
-                400,
-                two_step_error="That code did not match. Start again and scan the new code.",
-            )
-        audit(request, session["username"], "two_step.enabled", session["username"])
-        return account_page(request, session, recovery_codes=codes)
-
-    @app.post("/admin/account/two-step/recovery-codes")
-    async def new_recovery_codes(request: Request) -> Response:
-        session, form = await checked_form(request, "view")
-        if not auth_store.verify_second_factor(session["username"], form.get("code", "")):
-            return account_page(request, session, 400, two_step_error="That code did not work.")
-        codes = auth_store.regenerate_recovery_codes(session["username"])
-        audit(request, session["username"], "two_step.recovery_codes_replaced")
-        return account_page(request, session, recovery_codes=codes)
-
-    @app.post("/admin/account/two-step/disable")
-    async def disable_two_step(request: Request) -> Response:
-        session, form = await checked_form(request, "view")
-        password_ok = await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("current_password", "")
-        )
-        if not password_ok or not auth_store.verify_second_factor(
-            session["username"], form.get("code", "")
-        ):
-            return account_page(
-                request, session, 400, two_step_error="The password or the code did not work."
-            )
-        auth_store.disable_totp(session["username"])
-        audit(request, session["username"], "two_step.disabled", session["username"])
-        return redirect_with(request, "/admin/account", flash("Two-step login is off."))
-
-    @app.post("/admin/account")
-    async def change_my_password(request: Request) -> Response:
-        session, form = await checked_form(request, "view")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("current_password", "")
-        ):
-            error = "Your current password is not correct."
-        else:
-            try:
-                await run_in_threadpool(
-                    auth_store.set_password,
-                    session["username"],
-                    form.get("new_password", ""),
-                    request.cookies.get(SESSION_COOKIE),
-                )
-            except ValueError as exc:
-                error = str(exc)
-            else:
-                audit(request, session["username"], "password.changed", session["username"])
-                return redirect_with(
-                    request,
-                    "/admin/account",
-                    flash("Password changed. Your other sessions were signed out."),
-                )
-        return account_page(request, session, 400, error=error)
-
-    async def run_system_operation(
-        request: Request,
-        session: dict[str, Any],
-        op: str,
-        title: str,
-        password: str | None = None,
-    ) -> HTMLResponse:
-        try:
-            result = await run_in_threadpool(agent.call, op, session["username"], None, password)
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(request, session["username"], f"system.{op}", outcome="refused")
-            return await backups_page(
-                request, session, flash(f"{title} failed: {exc}", "error"), 400
-            )
-        audit(request, session["username"], f"system.{op}", outcome="succeeded")
-        details = []
-        if result.get("id"):
-            encrypted = "encrypted" if result.get("encrypted") else "not encrypted"
-            details.append(f"Snapshot {result['id']}, {encrypted}.")
-        details += [f"Warning: {line}" for line in result.get("warnings") or []]
-        details += list(result.get("messages") or []) + list(result.get("checks") or [])
-        tone = "warning" if result.get("warnings") else "success"
-        return redirect_with(request, "/admin/backups", flash(f"{title} finished.", tone, details))
-
-    @app.get("/admin/system")
-    async def system(request: Request) -> Response:
-        # Its backup actions moved to Backups and its service list to Services.
-        require(request, "system")
-        return RedirectResponse("/admin/backups", status_code=303)
-
-    @app.post("/admin/system/backup")
-    async def system_backup(request: Request) -> Response:
-        session, _ = await checked_form(request, "system")
-        return await run_system_operation(request, session, "backup.create", "Backup")
-
-    @app.post("/admin/system/verify")
-    async def system_verify(request: Request) -> Response:
-        session, _ = await checked_form(request, "system")
-        return await run_system_operation(request, session, "backup.verify", "Backup check")
-
-    @app.post("/admin/system/drill")
-    async def system_drill(request: Request) -> Response:
-        session, form = await checked_form(request, "system")
-        return await run_system_operation(
-            request, session, "restore.drill", "Restore drill", form.get("password", "")
-        )
-
-    async def services_page(
-        request: Request,
-        session: dict[str, Any],
-        message: dict[str, Any] | None = None,
-        status_code: int = 200,
-    ) -> HTMLResponse:
-        values, status, components, error = None, None, [], None
-        if agent.available():
-            try:
-                config = await run_in_threadpool(agent.call, "config.get", session["username"])
-                values = config["values"]
-                status = await run_in_threadpool(agent.call, "status.get", session["username"])
-                components = (
-                    await run_in_threadpool(agent.call, "services.versions", session["username"])
-                )["components"]
-            except (AgentUnavailable, AgentRefused) as exc:
-                error = str(exc)
-        return render(
-            request,
-            "services.html",
-            page(
-                session,
-                agent_available=agent.available(),
-                settings=SETTINGS.values(),
-                values=values,
-                status=status,
-                components=components,
-                timezones=sorted(available_timezones()),
-                error=error,
-                **({"flash": message} if message else {}),
-            ),
-            status_code=status_code,
-        )
-
-    def submitted_changes(form: dict[str, str]) -> dict[str, str]:
-        return {key: form[f"setting:{key}"] for key in SETTINGS if f"setting:{key}" in form}
-
-    @app.get("/admin/services")
-    async def services(request: Request) -> Response:
-        return await services_page(request, require(request, "system"))
-
-    @app.post("/admin/services/update")
-    async def update_service(request: Request) -> Response:
-        session, form = await checked_form(request, "system")
-        service = form.get("service", "")
-        try:
-            result = await run_in_threadpool(
-                agent.call, "services.update", session["username"], {"service": service}
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(request, session["username"], "system.services.update", service, outcome="failed")
-            return await services_page(
-                request, session, flash(f"Updating {service} failed: {exc}", "error"), 400
-            )
-        audit(request, session["username"], "system.services.update", service, outcome="succeeded")
-        return redirect_with(
-            request, "/admin/services", flash(f"Updated {service}.", details=result["steps"])
-        )
-
-    @app.post("/admin/services/review")
-    async def review_services(request: Request) -> Response:
-        session, form = await checked_form(request, "system")
-        changes = submitted_changes(form)
-        try:
-            plan = await run_in_threadpool(
-                agent.call, "config.plan", session["username"], {"changes": changes}
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            return await services_page(request, session, flash(str(exc), "error"), 400)
-        if not plan["changes"]:
-            return await services_page(
-                request, session, flash("Nothing was changed.", "warning"), 400
-            )
-        applied = {change["key"]: form[f"setting:{change['key']}"] for change in plan["changes"]}
-        return render(
-            request, "services_review.html", page(session, plan=plan, changes=applied, result=None)
-        )
-
-    @app.post("/admin/services/apply")
-    async def apply_services(request: Request) -> Response:
-        session, form = await checked_form(request, "system")
-        changes = submitted_changes(form)
-        try:
-            result = await run_in_threadpool(
-                agent.call,
-                "config.apply",
-                session["username"],
-                {"changes": changes},
-                form.get("password") or None,
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(
-                request,
-                session["username"],
-                "system.config.apply",
-                outcome="failed",
-                settings=sorted(changes),
-            )
-            return render(
-                request,
-                "services_review.html",
-                page(session, plan=None, changes=changes, result={"error": str(exc)}),
-                status_code=400,
-            )
-        publisher.reload_connections()
-        audit(
-            request,
-            session["username"],
-            "system.config.apply",
-            outcome="succeeded",
-            settings=sorted(changes),
-        )
-        return render(
-            request, "services_review.html", page(session, plan=None, changes={}, result=result)
-        )
 
     def setup_steps() -> list[dict[str, Any]]:
         try:
@@ -3013,454 +548,204 @@ def create_app(
             status_code=status_code,
         )
 
-    @app.get("/admin/backups")
-    async def backups(request: Request) -> Response:
-        return await backups_page(request, require(request, "system"))
+    register_subscriptions(
+        app,
+        audit=audit,
+        checked_form=checked_form,
+        client_host=client_host,
+        community_name=community_name,
+        config_path=config_path,
+        page=page,
+        preauth_csrf_or_forbidden=preauth_csrf_or_forbidden,
+        preauth_csrf_token=preauth_csrf_token,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        set_cookie=set_cookie,
+        storage=storage,
+        submitted_form=submitted_form,
+    )
 
-    async def backup_change(
-        request: Request, op: str, title: str, fields: tuple[str, ...]
-    ) -> HTMLResponse:
-        session, form = await checked_form(request, "system")
-        params = {name: form.get(name, "").strip() for name in fields if form.get(name, "").strip()}
-        try:
-            result = await run_in_threadpool(
-                agent.call, op, session["username"], params, form.get("password") or None
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(request, session["username"], f"system.{op}", outcome="failed")
-            return await backups_page(request, session, flash(f"{title}: {exc}", "error"), 400)
-        audit(request, session["username"], f"system.{op}", outcome="succeeded")
-        return redirect_with(request, "/admin/backups", flash(title, details=result["steps"]))
+    register_templates(
+        app,
+        announcement_or_404=announcement_or_404,
+        as_editor_values=as_editor_values,
+        audit=audit,
+        checked_form=checked_form,
+        editor_page=editor_page,
+        page=page,
+        parse_channel_text=parse_channel_text,
+        parse_tags=parse_tags,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        storage=storage,
+        template_or_404=template_or_404,
+    )
 
-    @app.post("/admin/backups/offsite")
-    async def backups_offsite(request: Request) -> Response:
-        return await backup_change(
-            request,
-            "backups.use_offsite",
-            "Off-site backups",
-            ("endpoint", "bucket", "prefix", "region", "access_key_id", "secret_access_key"),
-        )
+    register_announcements(
+        app,
+        announcement_or_404=announcement_or_404,
+        as_editor_values=as_editor_values,
+        audit=audit,
+        auth_store=auth_store,
+        checked_form=checked_form,
+        delivery_message=delivery_message,
+        editor_page=editor_page,
+        page=page,
+        parse_channel_text=parse_channel_text,
+        parse_tags=parse_tags,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        require_approved=require_approved,
+        review_required=review_required,
+        storage=storage,
+        template_or_404=template_or_404,
+    )
 
-    @app.post("/admin/backups/local")
-    async def backups_local(request: Request) -> Response:
-        return await backup_change(request, "backups.use_local", "Backups on this server", ())
+    register_settings(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        config_path=config_path,
+        configured_channel_links=configured_channel_links,
+        csrf_or_forbidden=csrf_or_forbidden,
+        page=page,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        review_required=review_required,
+        storage=storage,
+    )
 
-    def continuity_translation_values(
-        form: Any, languages: tuple[str, ...]
-    ) -> dict[str, dict[str, str]]:
-        translations = {}
-        for language in languages:
-            item = {
-                key: str(form.get(f"{key}:{language}", "")).strip()
-                for key in ("title", "body_template", "what_happened", "join_instructions")
-            }
-            if any(item.values()):
-                translations[language] = item
-        return translations
+    register_channels(
+        app,
+        audit=audit,
+        checked_form=checked_form,
+        config_path=config_path,
+        page=page,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        storage=storage,
+    )
 
-    def render_continuity_page(
-        request: Request,
-        session: dict[str, Any],
-        status: dict[str, Any],
-        form_values: dict[str, Any],
-        plan: dict[str, Any] | None = None,
-        error: str | None = None,
-        status_code: int = 200,
-    ) -> Response:
-        profile, _config = load_community(config_path)
-        translations = form_values.get("translations")
-        if translations is None:
-            current = status["current"]
-            translations = (
-                current["translations"]
-                if current and current["active"]
-                else {
-                    language: (
-                        DEFAULT_ENGLISH_TEMPLATE.copy()
-                        if language == "en"
-                        else {
-                            "title": "",
-                            "body_template": "",
-                            "what_happened": "",
-                            "join_instructions": "",
-                        }
-                    )
-                    for language in profile.languages
-                }
-            )
-        return render(
-            request,
-            "continuity.html",
-            page(
-                session,
-                status=status,
-                channel_options=continuity_service.channel_options(),
-                languages=profile.languages,
-                translations=translations,
-                form_values=form_values,
-                plan=plan,
-                error=error,
-            ),
-            status_code=status_code,
-        )
+    register_mirroring(
+        app,
+        audit=audit,
+        checked_form=checked_form,
+        mirror=mirror,
+        page=page,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+    )
 
-    @app.get("/admin/continuity")
-    async def continuity_page(request: Request) -> Response:
-        session = require(request, "settings")
-        status = continuity_service.status()
-        current = status["current"]
-        return render_continuity_page(
-            request,
-            session,
-            status,
-            {
-                "reason": current["reason"] if current and current["active"] else "",
-                "affected": current["affected_channels"] if current and current["active"] else [],
-            },
-        )
+    register_matrix_users(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        page=page,
+        render=render,
+        require=require,
+    )
 
-    @app.post("/admin/continuity/plan")
-    async def continuity_plan(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        submitted = await request.form()
-        profile, _config = load_community(config_path)
-        values = {
-            "reason": form.get("reason", ""),
-            "affected": submitted.getlist("affected"),
-            "translations": continuity_translation_values(form, profile.languages),
-        }
-        try:
-            plan = await run_in_threadpool(
-                continuity_service.plan,
-                values["reason"],
-                values["affected"],
-                values["translations"] or None,
-            )
-        except ValueError as exc:
-            return render_continuity_page(
-                request,
-                session,
-                continuity_service.status(),
-                values,
-                error=str(exc),
-                status_code=400,
-            )
-        audit(
-            request,
-            session["username"],
-            "continuity.plan",
-            plan["event_id"],
-            affected_channels=plan["affected_channels"],
-        )
-        return render_continuity_page(
-            request, session, continuity_service.status(), values, plan=plan
-        )
+    register_accounts(
+        app,
+        audit=audit,
+        auth_store=auth_store,
+        checked_form=checked_form,
+        page=page,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+    )
 
-    @app.post("/admin/continuity/activate")
-    async def continuity_activate(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        submitted = await request.form()
-        profile, _config = load_community(config_path)
-        values = {
-            "reason": form.get("reason", ""),
-            "affected": submitted.getlist("affected"),
-            "translations": continuity_translation_values(form, profile.languages),
-        }
-        try:
-            await run_in_threadpool(
-                continuity_service.plan,
-                values["reason"],
-                values["affected"],
-                values["translations"] or None,
-            )
-            result = await run_in_threadpool(
-                continuity_service.activate,
-                session["username"],
-                values["reason"],
-                values["affected"],
-                values["translations"] or None,
-            )
-        except ValueError as exc:
-            return render_continuity_page(
-                request,
-                session,
-                continuity_service.status(),
-                values,
-                error=str(exc),
-                status_code=400,
-            )
-        audit(
-            request,
-            session["username"],
-            "continuity.activated",
-            result["event_id"],
-            affected_channels=values["affected"],
-            steps=result["steps"],
-        )
-        failures = [
-            f"{step}: {status}" for step, status in result["steps"].items() if status == "failed"
-        ]
-        message = (
-            "Continuity mode is active. Failed steps can be resumed from this page."
-            if failures
-            else "Continuity mode is active."
-        )
-        return redirect_with(
-            request,
-            "/admin/continuity",
-            flash(message, "warning" if failures else "success", failures),
-        )
+    register_system(
+        app,
+        agent=agent,
+        audit=audit,
+        backups_page=backups_page,
+        checked_form=checked_form,
+        page=page,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+    )
 
-    @app.post("/admin/continuity/deactivate")
-    async def continuity_deactivate(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        try:
-            result = await run_in_threadpool(
-                continuity_service.deactivate,
-                session["username"],
-                form.get("reason", ""),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "continuity.deactivated",
-            result["event_id"],
-            steps=result["steps"],
-        )
-        failures = [
-            f"{step}: {status}" for step, status in result["steps"].items() if status == "failed"
-        ]
-        return redirect_with(
-            request,
-            "/admin/continuity",
-            flash(
-                "Continuity notice removed; event history is retained.",
-                "warning" if failures else "success",
-                failures,
-            ),
-        )
+    register_services(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        page=page,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+    )
 
-    @app.post("/admin/continuity/channel")
-    async def continuity_channel_state(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        channel = form.get("channel", "")
-        status = form.get("status", "")
-        reason = form.get("reason", "")
-        try:
-            await run_in_threadpool(
-                continuity_service.set_channel_state,
-                channel,
-                status,
-                reason,
-                session["username"],
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception:
-            audit(
-                request,
-                session["username"],
-                "continuity.channel_state",
-                channel,
-                status=status,
-                reason=reason,
-                page_refresh="failed",
-            )
-            raise
-        audit(
-            request,
-            session["username"],
-            "continuity.channel_state",
-            channel,
-            status=status,
-            reason=reason,
-        )
-        return redirect_with(
-            request,
-            "/admin/continuity",
-            flash(f"{channel} is now marked {status}."),
-        )
+    register_backups(
+        app,
+        agent=agent,
+        audit=audit,
+        backups_page=backups_page,
+        checked_form=checked_form,
+        config_path=config_path,
+        redirect_with=redirect_with,
+        require=require,
+        storage=storage,
+    )
 
-    @app.get("/admin/continuity/guide.zip")
-    async def continuity_guide(request: Request) -> Response:
-        session = require(request, "settings")
-        if not continuity_service.guide_path.is_file():
-            raise HTTPException(status_code=404, detail="No continuity guide is available.")
-        audit(request, session["username"], "continuity.guide_downloaded")
-        return FileResponse(
-            continuity_service.guide_path,
-            media_type="application/zip",
-            filename="continuity-guide.zip",
-        )
+    register_continuity(
+        app,
+        audit=audit,
+        auth_store=auth_store,
+        checked_form=checked_form,
+        config_path=config_path,
+        continuity_service=continuity_service,
+        page=page,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        render=render,
+        require=require,
+        storage=storage,
+    )
 
-    @app.get("/admin/continuity/readiness")
-    async def continuity_readiness(request: Request) -> Response:
-        session = require(request, "settings")
-        report = await run_in_threadpool(
-            build_readiness_report,
-            storage,
-            publisher,
-            config_path,
-            continuity_service.guide_path,
-        )
-        status = continuity_service.status()
-        return render(
-            request,
-            "continuity_readiness.html",
-            page(
-                session,
-                report=report,
-                drill_channels=continuity_service.drill_channels(),
-                exercises=status["exercises"],
-            ),
-        )
+    register_dashboard(
+        app,
+        agent=agent,
+        channel_label=channel_label,
+        page=page,
+        publisher=publisher,
+        render=render,
+        require=require,
+        setup_steps=setup_steps,
+        storage=storage,
+    )
 
-    @app.post("/admin/continuity/drill/start")
-    async def continuity_drill_start(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        submitted = await request.form()
-        try:
-            exercise = await run_in_threadpool(
-                continuity_service.start_drill,
-                session["username"],
-                form.get("scenario", ""),
-                submitted.getlist("channel"),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "continuity.drill_started",
-            exercise["exercise_id"],
-            channels=exercise["channels"],
-            delivery=exercise["delivery"],
-        )
-        failed = [name for name, result in exercise["delivery"].items() if result == "failed"]
-        return redirect_with(
-            request,
-            "/admin/continuity/readiness",
-            flash(
-                "Simulation published. Verify each selected channel and record the results.",
-                "warning" if failed else "success",
-                failed,
-            ),
-        )
-
-    @app.post("/admin/continuity/drill/review")
-    async def continuity_drill_review(request: Request) -> Response:
-        session, form = await checked_form(request, "settings")
-        if not await run_in_threadpool(
-            auth_store.verify_password, session["username"], form.get("password", "")
-        ):
-            raise HTTPException(status_code=403, detail="Password confirmation failed.")
-        try:
-            exercise = await run_in_threadpool(
-                continuity_service.review_drill,
-                form.get("exercise_id", ""),
-                session["username"],
-                form.get("access_verified") == "yes",
-                form.get("problems", ""),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit(
-            request,
-            session["username"],
-            "continuity.drill_reviewed",
-            exercise["exercise_id"],
-            status=exercise["status"],
-            access_verified=exercise["access_verified"],
-            problems=exercise["problems"],
-        )
-        return redirect_with(
-            request,
-            "/admin/continuity/readiness",
-            flash(f"Exercise review recorded: {exercise['status']}."),
-        )
-
-    @app.get("/admin/backups/offline-archive.zip")
-    async def offline_archive(request: Request) -> Response:
-        session = require(request, "system")
-        try:
-            name = load_config(config_path)["project"]["name"]
-        except (ConfigError, KeyError, OSError):
-            name = "Community"
-        connect_files, _warning = offline_connect_files(config_path, storage)
-        with tempfile.TemporaryDirectory() as directory:
-            path = OfflineArchiveExporter(storage=storage, community_name=name).export_archive(
-                Path(directory) / "offline-announcements.zip", connect_files=connect_files
-            )
-            content = path.read_bytes()
-        audit(request, session["username"], "announcements.offline_archive_downloaded")
-        return Response(
-            content,
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="offline-announcements.zip"'},
-        )
-
-    @app.get("/admin/health")
-    async def health_page(request: Request) -> Response:
-        session = require(request, "system")
-        service = request.query_params.get("service")
-        lines = request.query_params.get("lines", "200")
-        health_result, logs, error = None, None, None
-        if agent.available():
-            try:
-                health_result = await run_in_threadpool(
-                    agent.call, "health.get", session["username"]
-                )
-                if service:
-                    logs = await run_in_threadpool(
-                        agent.call,
-                        "logs.get",
-                        session["username"],
-                        {"service": service, "lines": lines},
-                    )
-            except (AgentUnavailable, AgentRefused) as exc:
-                error = str(exc)
-        return render(
-            request,
-            "health.html",
-            page(
-                session,
-                agent_available=agent.available(),
-                health=health_result,
-                logs=logs,
-                error=error,
-                log_services=LOG_SERVICES,
-                log_lines=LOG_LINES,
-                selected_service=service,
-                selected_lines=lines,
-            ),
-        )
-
-    @app.get("/admin/start")
-    async def start(request: Request) -> Response:
-        session = require(request, "system")
-        return render(request, "start.html", page(session, steps=setup_steps()))
-
-    @app.get("/admin/audit")
-    async def audit_log(request: Request) -> Response:
-        session = require(request, "audit")
-        return render(request, "audit.html", page(session, events=auth_store.list_events()))
+    register_auth(
+        app,
+        audit=audit,
+        auth_store=auth_store,
+        authenticated=authenticated,
+        client_host=client_host,
+        csrf_or_forbidden=csrf_or_forbidden,
+        login_redirect=login_redirect,
+        preauth_csrf_or_forbidden=preauth_csrf_or_forbidden,
+        preauth_csrf_token=preauth_csrf_token,
+        render=render,
+        set_cookie=set_cookie,
+        setup_token=setup_token,
+        submitted_form=submitted_form,
+    )
 
     return app

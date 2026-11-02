@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from community_stack.admin import app as app_module
+from community_stack.admin import channels as channels_module
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
 from community_stack.announcements.adapters.signal import SIGNAL_API, SignalAdapter, signal_send
@@ -81,7 +81,7 @@ def test_signal_api_is_isolated_on_an_internal_network():
 @pytest.fixture
 def console(tmp_path, monkeypatch):
     fake = FakeSignal()
-    monkeypatch.setattr(app_module, "signal_send", fake)
+    monkeypatch.setattr(channels_module, "signal_send", fake)
     AdminStore(tmp_path / "announcements.db").create_admin("olga", "a-long-safe-test-password")
     app = create_app(
         db_path=tmp_path / "announcements.db",
