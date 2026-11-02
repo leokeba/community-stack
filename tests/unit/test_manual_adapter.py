@@ -24,10 +24,12 @@ def test_manual_adapter_returns_prepared_and_uses_platform_copy():
 
 def test_manual_adapter_rejects_over_limit_and_does_not_guess_limits():
     limited = ManualChannelAdapter(PLATFORMS["instagram"])
+    limit = limited.capabilities.max_text_length
+    assert limit is not None
     oversized = Announcement(
         title="Food drive",
         body="Bring supplies.",
-        channel_text={"instagram": "x" * (limited.capabilities.max_text_length + 1)},
+        channel_text={"instagram": "x" * (limit + 1)},
     )
     result = limited.publish(oversized)
 
