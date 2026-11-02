@@ -538,12 +538,14 @@ def test_deployment_mounts_connect_directory_read_only_for_landing():
     landing = yaml.safe_load((REPO / "services/landing/docker-compose.yml").read_text())
     volumes = landing["services"]["landing"]["volumes"]
     assert "../../data/landing/connect:/usr/share/nginx/html/connect:ro" in volumes
+    assert "../../data/landing/continuity:/usr/share/nginx/html/continuity:ro" in volumes
 
 
 def test_deployment_mounts_connect_directory_writable_for_announcements():
     app = yaml.safe_load((REPO / "services/announcements/docker-compose.yml").read_text())
     volumes = app["services"]["announcements"]["volumes"]
     assert "../../data/landing/connect:/app/data/landing/connect" in volumes
+    assert "../../data/landing/continuity:/app/data/landing/continuity" in volumes
 
 
 def test_connect_mountpoint_exists_in_read_only_html_volume():
@@ -570,5 +572,6 @@ def test_deploy_script_prepares_the_contact_page_folder_and_landing():
     assert "COMMUNITY_STACK_UID=" in script and '-o "$container_uid"' in script
     assert 'exec -u "$container_uid:$container_gid"' in script
     assert "data/landing/connect" in script
+    assert "data/landing/continuity" in script
     assert "connect render" in script
     assert "up -d --force-recreate landing" in script

@@ -60,6 +60,7 @@ uv run ruff check .
 uv run ruff format --check .
 docker compose -f services/announcements/docker-compose.yml config --quiet
 docker compose -f services/proxy/docker-compose.yml config --quiet
+docker compose -f services/landing/docker-compose.yml config --quiet
 
 printf 'Checking SSH, backup, and Docker prerequisites on %s...\n' "$target"
 ssh "${ssh_opts[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$target" bash -s -- "$remote_dir" <<'REMOTE'
@@ -134,7 +135,8 @@ if [[ ! "$container_uid" =~ ^[0-9]+$ || ! "$container_gid" =~ ^[0-9]+$ ]]; then
     printf 'COMMUNITY_STACK_UID and COMMUNITY_STACK_GID must be numbers.\n' >&2
     exit 1
 fi
-sudo -n install -d -m 0755 -o "$container_uid" -g "$container_gid" "$project_dir/data/landing/connect"
+sudo -n install -d -m 0755 -o "$container_uid" -g "$container_gid" \
+    "$project_dir/data/landing/connect" "$project_dir/data/landing/continuity"
 
 docker_cmd=(sudo -n docker)
 compose_shell='cd "$1" && shift && exec "$@"'
