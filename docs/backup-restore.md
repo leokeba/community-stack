@@ -149,7 +149,7 @@ If the primary server is lost or destroyed:
 1. **Provision a new Linux VPS** (Debian 12 / Ubuntu 22.04 LTS).
 2. **Install `uv` and clone the repository:**
    ```bash
-   git clone https://github.com/your-org/community-stack.git /opt/community-stack
+   git clone https://github.com/leokeba/community-stack.git /opt/community-stack
    cd /opt/community-stack
    ```
 3. **Obtain the latest backup snapshot archive** (from off-host S3 or remote storage).

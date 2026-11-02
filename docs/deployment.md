@@ -90,7 +90,7 @@ Clone the repository and install `uv`:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/community-stack.git /opt/community-stack
+git clone https://github.com/leokeba/community-stack.git /opt/community-stack
 cd /opt/community-stack
 
 # Install uv (if not already present)

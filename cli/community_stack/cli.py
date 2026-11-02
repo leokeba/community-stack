@@ -14,13 +14,13 @@ from community_stack.commands.bridge_cmd import run_bridge
 from community_stack.commands.check_cmd import run_check
 from community_stack.commands.connect_cmd import run_connect
 from community_stack.commands.continuity_cmd import run_continuity
+from community_stack.commands.doctor_cmd import run_doctor
 from community_stack.commands.init_cmd import run_init
 from community_stack.commands.install_cmd import run_install
 from community_stack.commands.logs_cmd import run_logs
 from community_stack.commands.plan_cmd import run_plan
 from community_stack.commands.restore_cmd import run_restore
 from community_stack.commands.status_cmd import run_status
-from community_stack.commands.stubs import run_doctor
 from community_stack.commands.subscribers_cmd import run_subscribers
 from community_stack.commands.upgrade_cmd import run_upgrade
 

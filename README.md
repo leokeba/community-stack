@@ -70,7 +70,7 @@ This project uses [`uv`](https://docs.astral.sh/uv/) for high-speed, reproducibl
 
 ### 1. Clone and Install Dependencies
 ```bash
-git clone https://github.com/your-org/community-stack.git
+git clone https://github.com/leokeba/community-stack.git
 cd community-stack
 
 # Sync virtual environment and dependencies

@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from community_stack.commands.stubs import audit_disk_space, audit_network_isolation, run_doctor
+from community_stack.commands.doctor_cmd import (
+    audit_disk_space,
+    audit_network_isolation,
+    run_doctor,
+)
 
 
 def test_audit_disk_space(tmp_path):
@@ -12,16 +16,16 @@ def test_audit_disk_space(tmp_path):
 
 
 def test_audit_network_isolation_no_docker(monkeypatch):
-    monkeypatch.setattr("community_stack.commands.stubs.is_docker_available", lambda: False)
+    monkeypatch.setattr("community_stack.commands.doctor_cmd.is_docker_available", lambda: False)
     findings = audit_network_isolation()
     assert len(findings) == 1
     assert "Docker not reachable" in findings[0]
 
 
 def test_audit_network_isolation_secure(monkeypatch):
-    monkeypatch.setattr("community_stack.commands.stubs.is_docker_available", lambda: True)
+    monkeypatch.setattr("community_stack.commands.doctor_cmd.is_docker_available", lambda: True)
     monkeypatch.setattr(
-        "community_stack.commands.stubs.list_community_containers",
+        "community_stack.commands.doctor_cmd.list_community_containers",
         lambda: [
             {"name": "community_postgres", "status": "Up 2 hours"},
             {"name": "community_synapse", "status": "Up 2 hours"},
@@ -32,9 +36,9 @@ def test_audit_network_isolation_secure(monkeypatch):
 
 
 def test_audit_network_isolation_flags_exposed_postgres(monkeypatch):
-    monkeypatch.setattr("community_stack.commands.stubs.is_docker_available", lambda: True)
+    monkeypatch.setattr("community_stack.commands.doctor_cmd.is_docker_available", lambda: True)
     monkeypatch.setattr(
-        "community_stack.commands.stubs.list_community_containers",
+        "community_stack.commands.doctor_cmd.list_community_containers",
         lambda: [
             {"name": "community_postgres", "status": "Up 2 hours, 0.0.0.0:5432->5432/tcp"},
         ],
