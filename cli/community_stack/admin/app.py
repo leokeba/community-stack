@@ -381,15 +381,26 @@ def create_app(
                 result[name] = text
         return result
 
-    def editor_page(session: dict[str, Any], announcement: Any, error: str | None) -> dict:
+    def editor_page(
+        session: dict[str, Any],
+        announcement: Any,
+        error: str | None,
+        submitted_values: dict[str, str] | None = None,
+    ) -> dict:
         saved = getattr(announcement, "channel_text", None) or {}
-        submitted = announcement if isinstance(announcement, dict) else {}
+        submitted = submitted_values or (announcement if isinstance(announcement, dict) else {})
         title = submitted.get("title", getattr(announcement, "title", "")).strip()
         body = submitted.get("body", getattr(announcement, "body", "")).strip()
         if "tags" in submitted:
             tags = parse_tags(submitted)
         else:
             tags = getattr(announcement, "tags", [])
+        image = getattr(announcement, "image", None)
+        status = getattr(getattr(announcement, "status", None), "value", None)
+        image_editable = (
+            status is None or status == "draft" or (status == "scheduled" and not review_required())
+        )
+        image_alt = submitted.get("image_alt", image.alt if image else "")
         canonical_url = (
             publisher.canonical_url_for(announcement)
             if isinstance(announcement, Announcement)
@@ -439,7 +450,22 @@ def create_app(
             }
             for adapter in custom_text_channels()
         )
-        return page(session, announcement=announcement, error=error, custom_channels=channels)
+        return page(
+            session,
+            announcement=announcement,
+            error=error,
+            custom_channels=channels,
+            form_values={
+                "title": title,
+                "body": body,
+                "author": submitted.get("author", getattr(announcement, "author", "")) or "",
+                "tags": tags,
+                "image_alt": image_alt,
+                "remove_image": submitted.get("remove_image") == "true",
+            },
+            image=image,
+            image_editable=image_editable,
+        )
 
     # The community's own fediverse account: public, unauthenticated endpoints.
 

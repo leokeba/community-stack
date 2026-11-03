@@ -320,6 +320,76 @@ def upload(client, url, token, alt=ALT):
     )
 
 
+def test_editor_uploads_previews_replaces_and_removes_shared_image(console):
+    app, client, _ = console
+    editor = client.get("/admin/announcements/new")
+    created = client.post(
+        "/admin/announcements/new",
+        data={
+            "csrf_token": csrf(editor),
+            "title": "Food drive",
+            "body": "Bring supplies.",
+            "image_alt": ALT,
+        },
+        files={"image": ("photo.jpg", jpeg_with_location(), "image/jpeg")},
+    )
+    assert created.status_code == 303
+    announcement_id = created.headers["location"].rsplit("/", 1)[-1]
+    original = app.state.storage.get_announcement(announcement_id).image
+    assert original is not None
+
+    edit_url = f"{created.headers['location']}/edit"
+    edit = client.get(edit_url)
+    assert f'src="/admin/media/{original.id}"' in edit.text
+    assert f">{ALT}</textarea>" in edit.text
+
+    saved = client.post(
+        f"{created.headers['location']}/update",
+        data={
+            "csrf_token": csrf(edit),
+            "title": "Food drive update",
+            "body": "Bring canned food.",
+            "image_alt": ALT,
+        },
+        files={"image": ("", b"", "application/octet-stream")},
+    )
+    assert saved.status_code == 303
+    unchanged = app.state.storage.get_announcement(announcement_id).image
+    assert unchanged is not None and unchanged.id == original.id
+
+    edit = client.get(edit_url)
+    replacement = client.post(
+        f"{created.headers['location']}/update",
+        data={
+            "csrf_token": csrf(edit),
+            "title": "Food drive update",
+            "body": "Bring canned food.",
+            "image_alt": "Canned food arranged on a table",
+        },
+        files={"image": ("replacement.jpg", jpeg_with_location(), "image/jpeg")},
+    )
+    assert replacement.status_code == 303
+    replaced_image = app.state.storage.get_announcement(announcement_id).image
+    assert replaced_image is not None
+    assert replaced_image.id != original.id
+    assert not original.path.exists()
+
+    edit = client.get(edit_url)
+    removed = client.post(
+        f"{created.headers['location']}/update",
+        data={
+            "csrf_token": csrf(edit),
+            "title": "Food drive update",
+            "body": "Bring canned food.",
+            "image_alt": "Canned food arranged on a table",
+            "remove_image": "true",
+        },
+        files={"image": ("", b"", "application/octet-stream")},
+    )
+    assert removed.status_code == 303
+    assert app.state.storage.get_announcement(announcement_id).image is None
+
+
 def test_console_upload_describe_and_remove(console):
     app, client, url = console
     detail = client.get(url)

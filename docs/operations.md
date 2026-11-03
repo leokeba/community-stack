@@ -169,8 +169,9 @@ limit you can write custom text, for example a short version with hashtags for
 Mastodon; leave it empty to send the title and message, shortened with a link
 when too long. The announcement page shows the same previews after saving.
 
-Drafts and scheduled announcements can have one image, added on the
-announcement page with a required description for people who cannot see it.
+Drafts and editable scheduled announcements can have one image, added or changed
+directly in the draft or edit form with a preview and a required description for
+people who cannot see it.
 Uploads must be JPEG, PNG, WebP or GIF and at most 10 MB; the server removes
 location and camera metadata, applies the photo's rotation and resizes it to at
 most 1600 pixels. Images stay private until the announcement is published, are

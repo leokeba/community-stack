@@ -13,22 +13,44 @@
 </div>
 {% if error %}<p class="error" role="alert" data-reveal>{{ error }}</p>{% endif %}
 <div class="editor-layout">
-<form class="card" method="post" data-preview-url="/admin/preview" action="{{ form_action if template_mode else ('/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new') }}">
+<form class="card" method="post" enctype="multipart/form-data" data-preview-url="/admin/preview" action="{{ form_action if template_mode else ('/admin/announcements/' ~ announcement.id ~ '/update' if announcement and announcement.id else '/admin/announcements/new') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% if template_mode %}
   <label for="template-name">Template name</label>
   <input id="template-name" name="name" type="text" maxlength="80" value="{{ announcement.name if announcement else '' }}" required>
   {% endif %}
   <label for="title">Announcement title</label>
-  <input id="title" name="title" type="text" maxlength="200" value="{{ announcement.title if announcement else '' }}" required>
+  <input id="title" name="title" type="text" maxlength="200" value="{{ form_values.title }}" required>
   <label for="body">Message</label>
-  <textarea id="body" name="body" maxlength="50000" aria-describedby="body-help" required>{{ announcement.body if announcement else '' }}</textarea>
+  <textarea id="body" name="body" maxlength="50000" aria-describedby="body-help" required>{{ form_values.body }}</textarea>
   <p id="body-help" class="muted">Formatting: <code>## Heading</code>, <code>**bold**</code>, <code>*italic*</code>, <code>- list item</code>, <code>[link text](https://…)</code>. Channels without formatting get clean plain text.</p>
   <label for="author">Author or group (optional)</label>
-  <input id="author" name="author" type="text" value="{{ announcement.author if announcement else '' }}">
+  <input id="author" name="author" type="text" value="{{ form_values.author }}">
   {% if not announcement or announcement.status is not defined or announcement.status.value in ["draft", "in_review", "approved", "scheduled"] %}
   <label for="tags">Tags, separated by commas (optional)</label>
-  <input id="tags" name="tags" type="text" value="{{ announcement.tags|join(', ') if announcement and announcement.tags is not string else (announcement.tags if announcement else '') }}">
+  <input id="tags" name="tags" type="text" value="{{ form_values.tags|join(', ') }}">
+  {% endif %}
+  {% if not template_mode %}
+  <section class="editor-image" aria-labelledby="image-heading">
+    <h2 id="image-heading">Image <span class="muted">(optional)</span></h2>
+    <p class="muted">JPEG, PNG, WebP or GIF, up to 10 MB. Images are cleaned of location and camera metadata and resized when needed.</p>
+    <figure data-image-preview data-original-src="{{ '/admin/media/' ~ image.id if image else '' }}"{% if not image or form_values.remove_image %} hidden{% endif %}>
+      {% if image %}<img src="/admin/media/{{ image.id }}" alt="{{ image.alt }}" width="{{ image.width }}" height="{{ image.height }}" data-image-preview-image>{% else %}<img alt="" data-image-preview-image>{% endif %}
+      <figcaption class="muted" data-image-caption>{{ image.alt if image else '' }}</figcaption>
+    </figure>
+    {% if image_editable %}
+    <label for="announcement-image">{{ "Replace image (optional)" if image else "Choose an image (optional)" }}</label>
+    <input id="announcement-image" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-image-input>
+    <label for="image-alt">Description for people who cannot see the image</label>
+    <textarea id="image-alt" name="image_alt" maxlength="1000" rows="2"{% if image %} required{% endif %}>{{ form_values.image_alt }}</textarea>
+    {% if image %}
+    <label><input type="checkbox" name="remove_image" value="true"{% if form_values.remove_image %} checked{% endif %} data-remove-image> Remove current image when saving</label>
+    {% endif %}
+    <p class="muted">Leave the file empty to keep the current image. Uploading a new file replaces it; to remove it, leave the file empty and select the checkbox.</p>
+    {% else %}
+    <p class="muted">Image changes are unavailable for this announcement's current review or publishing status. Reopen it as a draft to change the image.</p>
+    {% endif %}
+  </section>
   {% endif %}
   {% if custom_channels %}
   <details {% if custom_channels|selectattr("value")|list %}open{% endif %}>

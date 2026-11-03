@@ -61,6 +61,26 @@ def register_announcements(
         "withdrawn": ("Withdrawn", (AnnouncementStatus.WITHDRAWN,)),
     }
 
+    async def checked_editor_form(request: Request):
+        session = require(request, "edit")
+        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES + 65536:
+            raise HTTPException(status_code=413, detail="Images must be 10 MB or smaller.")
+        form = await request.form()
+        if not tokens_match(session["csrf_token"], str(form.get("csrf_token", ""))):
+            raise HTTPException(status_code=403, detail="Invalid or expired CSRF token.")
+        return session, form
+
+    def editor_form_values(form) -> dict[str, str]:
+        return {key: str(value) for key, value in form.items() if not hasattr(value, "read")}
+
+    async def submitted_image(form):
+        upload = form.get("image")
+        if upload is None or not hasattr(upload, "read") or not getattr(upload, "filename", ""):
+            return None
+        alt = validate_alt(str(form.get("image_alt", "")))
+        data = await upload.read(MAX_UPLOAD_BYTES + 1)
+        return await run_in_threadpool(process_image, data), alt
+
     @app.get("/admin/announcements")
     async def announcement_list(request: Request) -> Response:
         session = require(request, "view")
@@ -94,7 +114,16 @@ def register_announcements(
 
     @app.post("/admin/announcements/new")
     async def create_announcement(request: Request) -> Response:
-        session, form = await checked_form(request, "edit")
+        session, form = await checked_editor_form(request)
+        try:
+            image = await submitted_image(form)
+        except MediaError as exc:
+            return render(
+                request,
+                "editor.html",
+                editor_page(session, editor_form_values(form), str(exc)),
+                status_code=400,
+            )
         try:
             announcement = publisher.create_draft(
                 title=form.get("title", ""),
@@ -105,7 +134,21 @@ def register_announcements(
             )
         except ModelValidationError as exc:
             return render(
-                request, "editor.html", editor_page(session, form, str(exc)), status_code=400
+                request,
+                "editor.html",
+                editor_page(session, editor_form_values(form), str(exc)),
+                status_code=400,
+            )
+        if image:
+            processed, alt = image
+            stored_image = storage.save_image(announcement.id, processed, alt, session["username"])
+            audit(
+                request,
+                session["username"],
+                "announcement.image_added",
+                announcement.id,
+                width=stored_image.width,
+                height=stored_image.height,
             )
         audit(
             request,
@@ -115,7 +158,9 @@ def register_announcements(
             title=announcement.title,
         )
         return redirect_with(
-            request, f"/admin/announcements/{announcement.id}", flash("Draft saved.")
+            request,
+            f"/admin/announcements/{announcement.id}",
+            flash("Draft saved with image." if image else "Draft saved."),
         )
 
     def editable_announcement(announcement_id: str):
@@ -420,9 +465,36 @@ def register_announcements(
 
     @app.post("/admin/announcements/{announcement_id}/update")
     async def update_announcement(request: Request, announcement_id: str) -> Response:
-        session, form = await checked_form(request, "edit")
+        session, form = await checked_editor_form(request)
         existing = announcement_or_404(announcement_id)
         before = existing.status
+        try:
+            image = await submitted_image(form)
+            image_alt_value = str(
+                form.get("image_alt", existing.image.alt if existing.image else "")
+            )
+            image_alt = validate_alt(image_alt_value) if existing.image else None
+        except MediaError as exc:
+            return render(
+                request,
+                "editor.html",
+                editor_page(
+                    session,
+                    existing,
+                    str(exc),
+                    editor_form_values(form),
+                ),
+                status_code=400,
+            )
+        remove_image = form.get("remove_image") == "true"
+        image_alt_changed = (
+            existing.image is not None
+            and not remove_image
+            and image is None
+            and image_alt != existing.image.alt
+        )
+        if image or (remove_image and existing.image) or image_alt_changed:
+            editable_announcement(announcement_id)
         try:
             announcement, _ = publisher.update(
                 announcement_id,
@@ -436,6 +508,23 @@ def register_announcements(
             raise HTTPException(status_code=404, detail="Announcement not found.") from None
         except (ValueError, ModelValidationError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if image:
+            processed, alt = image
+            stored_image = storage.save_image(announcement_id, processed, alt, session["username"])
+            audit(
+                request,
+                session["username"],
+                "announcement.image_added",
+                announcement_id,
+                width=stored_image.width,
+                height=stored_image.height,
+            )
+        elif remove_image and existing.image:
+            storage.remove_image(announcement_id)
+            audit(request, session["username"], "announcement.image_removed", announcement_id)
+        elif image_alt_changed and existing.image and image_alt is not None:
+            storage.set_image_alt(existing.image.id, image_alt)
+            audit(request, session["username"], "announcement.image_described", announcement_id)
         message = flash("Changes saved.")
         if review_required() and before in (
             AnnouncementStatus.IN_REVIEW,
