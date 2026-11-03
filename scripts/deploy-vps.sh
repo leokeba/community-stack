@@ -230,12 +230,15 @@ if route_import not in text:
 PY
 
 caddy_backup="$project_dir/backups/Caddyfile.before-$deploy_id"
-if ! "${docker_cmd[@]}" exec community_proxy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
-    sudo -n -u community install -m 0644 "$caddy_backup" services/proxy/Caddyfile
+if ! "${compose_proxy[@]}" run --rm --no-deps --entrypoint caddy caddy \
+    validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    sudo -n -u community install -m 0644 "$caddy_backup" \
+        "$project_dir/services/proxy/Caddyfile"
     exit 1
 fi
 if ! "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy; then
-    sudo -n -u community install -m 0644 "$caddy_backup" services/proxy/Caddyfile
+    sudo -n -u community install -m 0644 "$caddy_backup" \
+        "$project_dir/services/proxy/Caddyfile"
     "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy || true
     exit 1
 fi
