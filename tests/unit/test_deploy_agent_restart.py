@@ -20,7 +20,8 @@ def test_deploy_script_verifies_caddy_route_mounts_and_stable_running_state():
     assert 'grep -qx "$route"' in deploy_script
     assert "/etc/caddy/vikunja.caddy" in deploy_script
     assert "{{.State.Status}} {{.RestartCount}}" in deploy_script
-    assert "Caddy did not remain running after recreation" in deploy_script
+    assert "Caddy did not remain running after deployment" in deploy_script
+    assert "Verifying the proxy routes and restarting the control agent..." in deploy_script
 
 
 def run_restart_helper(tmp_path, state):
