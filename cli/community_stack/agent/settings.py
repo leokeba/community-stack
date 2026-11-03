@@ -307,9 +307,7 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
             f"{'enabled' if get_value(proposed_config, ('services', 'vikunja', 'enable_link_sharing'), False) else 'disabled'}."
         )
     if effective.get("services.vikunja.allow_registration") is True:
-        warnings.append(
-            "Anyone can create a Vikunja account while self-registration is enabled."
-        )
+        warnings.append("Anyone can create a Vikunja account while self-registration is enabled.")
     if effective.get("services.vikunja.enable_link_sharing") is True:
         warnings.append(
             "Project owners can create anonymous Vikunja share links with Read, Read & Write, "
