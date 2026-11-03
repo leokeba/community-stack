@@ -434,7 +434,7 @@ def test_console_connects_and_checks_mailgun_email(console):
     transport.replies.append(
         (
             "GET",
-            "/v3/mg.example.org/domains/mg.example.org",
+            "/v4/domains/mg.example.org",
             200,
             {"domain": {"name": "mg.example.org"}},
         )
@@ -466,7 +466,7 @@ def test_console_connects_and_checks_mailgun_email(console):
     )
     assert transport.calls[-1][0:2] == (
         "GET",
-        "https://api.mailgun.net/v3/mg.example.org/domains/mg.example.org",
+        "https://api.mailgun.net/v4/domains/mg.example.org",
     )
 
 

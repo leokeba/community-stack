@@ -533,7 +533,7 @@ CONNECTORS: dict[str, ConnectorType] = {
             kind="email",
             label="Email newsletter",
             steps=(
-                "Choose SMTP or Mailgun. For Mailgun, create a sending domain and use its private API key.",
+                "Choose SMTP or Mailgun. For Mailgun, enter the sending domain name only (not the API URL) and use its private API key.",
                 "Use a verified sending address on that domain.",
                 "Enter your public website address so personal unsubscribe links point to your site.",
             ),
@@ -556,9 +556,9 @@ CONNECTORS: dict[str, ConnectorType] = {
                 ),
                 ConnectorField(
                     "mailgun_domain",
-                    "Mailgun sending domain (Mailgun only)",
+                    "Mailgun sending domain name only (Mailgun only)",
                     required=False,
-                    placeholder="mg.example.org",
+                    placeholder="sandbox.example.mailgun.org",
                 ),
                 ConnectorField(
                     "mailgun_api_key",

@@ -167,7 +167,7 @@ def test_mailgun_uses_the_eu_endpoint_for_verification():
     assert transport.verify() == "Connected to Mailgun sending domain mg.example.org."
     assert calls[0][0:2] == (
         "GET",
-        "https://api.eu.mailgun.net/v3/mg.example.org/domains/mg.example.org",
+        "https://api.eu.mailgun.net/v4/domains/mg.example.org",
     )
 
 

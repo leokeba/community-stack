@@ -116,8 +116,7 @@ class MailgunTransport(EmailTransport):
     @property
     def _base_url(self) -> str:
         host = self._API_HOSTS[self.region]
-        domain = quote(self.domain, safe="")
-        return f"https://{host}/v3/{domain}"
+        return f"https://{host}"
 
     def _request(self, method: str, path: str, payload: http.Form | None = None):
         credentials = base64.b64encode(f"api:{self.api_key}".encode()).decode("ascii")
@@ -129,7 +128,7 @@ class MailgunTransport(EmailTransport):
         )
 
     def verify(self) -> str:
-        status, _body = self._request("GET", f"domains/{quote(self.domain, safe='')}")
+        status, _body = self._request("GET", f"v4/domains/{quote(self.domain, safe='')}")
         if status != 200:
             raise TransportError(
                 f"Mailgun connection check failed (HTTP {status}).",
@@ -171,7 +170,8 @@ class MailgunTransport(EmailTransport):
 
     def send(self, message: EmailMessage) -> None:
         fields = self._message_fields(message)
-        status, _body = self._request("POST", "messages", http.Form(fields))
+        domain = quote(self.domain, safe="")
+        status, _body = self._request("POST", f"v3/{domain}/messages", http.Form(fields))
         if not 200 <= status < 300:
             raise TransportError(
                 f"Mailgun rejected the message (HTTP {status}).",

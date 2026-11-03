@@ -81,7 +81,7 @@ Email remains the most ubiquitous open communications medium.
    - *Pros:* High deliverability out-of-the-box, reliable TLS transmission.
    - *Cons:* Small operational cost, dependency on relay account.
 3. **Mailgun API:**
-   - Configure the verified sending domain, private API key and US or EU region on the Channels page.
+   - Configure the sending domain name only (for example, `sandbox123.mailgun.org`), private API key and US or EU region on the Channels page. Do not enter the API base URL in the domain field.
    - Sends one API request per active subscriber, preserving the existing delivery ledger and one-click unsubscribe headers.
    - Open and click tracking are explicitly disabled on each API request.
    - The connection test checks the Mailgun domain credentials without sending an email.
