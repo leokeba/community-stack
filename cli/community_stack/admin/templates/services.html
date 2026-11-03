@@ -38,7 +38,7 @@
   <p><button type="submit">Review changes</button></p>
 </form>
 {% if values.get("services.vikunja.enabled") and vikunja_url %}
-<p class="notice" role="status">Vikunja is enabled. <a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a>. <a href="/admin/vikunja-users">Create a Vikunja account</a>. Task permissions are managed in Vikunja.</p>
+<p class="notice" role="status">Vikunja is enabled. <a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a>. <a href="/admin/vikunja-users">Create a Vikunja account</a>. Self-registration is {{ "on" if values.get("services.vikunja.allow_registration") else "off" }}; public project sharing is {{ "on" if values.get("services.vikunja.enable_link_sharing") else "off" }}. Configure each project's share permission in Vikunja; choose Read for a public to-do list.</p>
 {% endif %}
 {% if values.get("services.facilmap.enabled") and facilmap_url %}
 <p class="notice" role="status">FacilMap is enabled. <a href="{{ facilmap_url }}" target="_blank" rel="noopener noreferrer">Open FacilMap</a>. It has no user accounts: map links are bearer credentials, and anyone who reaches the service can create maps. Do not store sensitive locations.</p>

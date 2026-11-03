@@ -171,6 +171,26 @@ SETTINGS: dict[str, Setting] = {
             dangerous=True,
         ),
         Setting(
+            "services.vikunja.allow_registration",
+            "Vikunja self-registration",
+            "Allow anyone to create a Vikunja account. Existing accounts are unaffected; "
+            "turn this off to keep account creation admin-managed.",
+            "bool",
+            False,
+            restart_service="vikunja",
+            dangerous=True,
+        ),
+        Setting(
+            "services.vikunja.enable_link_sharing",
+            "Vikunja public project sharing",
+            "Allow project owners to create anonymous share links. Anyone with a link gets "
+            "its selected permission; use Read for public to-do lists.",
+            "bool",
+            False,
+            restart_service="vikunja",
+            dangerous=True,
+        ),
+        Setting(
             "services.facilmap.enabled",
             "FacilMap collaborative maps",
             "Deploy maps.<community domain>. FacilMap has no user accounts or OIDC; anyone "
@@ -272,17 +292,29 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
         config, ("services", "announcements", "channels", "matrix_room", "enabled"), False
     ):
         warnings.append("Matrix announcements will fail while Matrix is off.")
+    proposed_config = yaml.safe_load(new_text)
     if effective.get("services.vikunja.enabled") is True:
         hostname = get_value(
-            yaml.safe_load(new_text),
+            proposed_config,
             ("services", "vikunja", "hostname"),
             f"tasks.{get_value(config, ('domain', 'base'), 'example.org')}",
         )
         warnings.append(
             f"Vikunja will be deployed at https://{hostname}/. Its accounts are separate "
-            "from Matrix, and public link sharing remains disabled."
+            f"from Matrix; self-registration is "
+            f"{'enabled' if get_value(proposed_config, ('services', 'vikunja', 'allow_registration'), False) else 'disabled'} "
+            f"and public link sharing is "
+            f"{'enabled' if get_value(proposed_config, ('services', 'vikunja', 'enable_link_sharing'), False) else 'disabled'}."
         )
-    proposed_config = yaml.safe_load(new_text)
+    if effective.get("services.vikunja.allow_registration") is True:
+        warnings.append(
+            "Anyone can create a Vikunja account while self-registration is enabled."
+        )
+    if effective.get("services.vikunja.enable_link_sharing") is True:
+        warnings.append(
+            "Project owners can create anonymous Vikunja share links with Read, Read & Write, "
+            "or Admin permission. Review each project's contents and choose Read for public lists."
+        )
     if effective.get("services.facilmap.enabled") is True or (
         "services.facilmap.hostname" in effective
         and get_value(proposed_config, ("services", "facilmap", "enabled"), False)

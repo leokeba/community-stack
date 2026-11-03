@@ -100,6 +100,13 @@ temporary password is shown only in the creation response; if it is lost,
 create a replacement through Vikunja's own supported account-management
 workflow rather than expecting Community Stack to recover it.
 
+The **Server → Services and updates** page also controls Vikunja self-registration
+and public project sharing. Changing either setting takes effect after Vikunja
+restarts and requires password confirmation. Self-registration lets anyone
+create an account; leaving it off keeps account creation admin-managed. Public
+sharing permits project owners to create anonymous share links, but does not
+create a public project automatically.
+
 ## Lifecycle commands
 
 ```bash
@@ -125,9 +132,10 @@ optional service is disabled.
 ## Authentication and sharing
 
 Vikunja's native account authentication is used. Self-registration and public
-link sharing are off by default; registration can be explicitly enabled using
-`allow_registration`. Community Stack does not add an identity provider or
-modify Vikunja's authorization model.
+link sharing are off by default; system administrators can change both from
+**Server → Services and updates** or configure `allow_registration` and
+`enable_link_sharing` directly. Community Stack does not yet add an identity
+provider or modify Vikunja's authorization model.
 
 Vikunja supports OpenID Connect (OIDC), but Community Stack does not currently
 provide a central identity provider or configure OIDC. A future identity
@@ -135,12 +143,12 @@ provider can be integrated using Vikunja's native OIDC provider configuration
 after callback URLs, account linking, and recovery have been tested. Matrix and
 Vikunja accounts remain separate in this milestone.
 
-Keep `enable_link_sharing: false` unless a community explicitly chooses
-anonymous project access. A link share is not inherently read-only: Vikunja
-allows a creator to choose Read, Read & Write, or Admin permission and an
-optional password. Anyone holding the link receives the selected permission;
-delete the share to revoke access. Review the project contents and permission
-before distributing a share URL.
+Keep public sharing off unless a community explicitly chooses anonymous project
+access. It is a global switch; project owners still create each share in
+Vikunja, choosing Read, Read & Write, or Admin permission and an optional
+password. Anyone holding the link receives the selected permission; delete the
+share to revoke access. For a public to-do list, choose Read and review the
+project contents before distributing its share URL.
 
 ## Notifications and integrations
 

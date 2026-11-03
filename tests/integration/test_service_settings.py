@@ -136,6 +136,8 @@ def test_stale_agent_does_not_report_a_full_settings_form_as_too_many(project, m
         "services.signal.enabled": "false",
         "services.whatsapp_bridge.enabled": "false",
         "services.matrix.enabled": "true",
+        "services.vikunja.allow_registration": "false",
+        "services.vikunja.enable_link_sharing": "false",
         "services.facilmap.enabled": "false",
         "services.facilmap.hostname": "maps.example.org",
         "services.vikunja.enabled": "false",
@@ -343,11 +345,20 @@ def test_console_provisions_and_deploys_vikunja(console):
     root, client = console
     page = client.get("/admin/services")
     assert "Vikunja task management" in page.text
-    values = {**form_values(page), "setting:services.vikunja.enabled": "true"}
+    assert "Vikunja self-registration" in page.text
+    assert "Vikunja public project sharing" in page.text
+    values = {
+        **form_values(page),
+        "setting:services.vikunja.enabled": "true",
+        "setting:services.vikunja.allow_registration": "true",
+        "setting:services.vikunja.enable_link_sharing": "true",
+    }
 
     review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
     assert review.status_code == 200
     assert "https://tasks.example.org/" in review.text
+    assert "Anyone can create a Vikunja account" in review.text
+    assert "Read &amp; Write" in review.text
     assert "Confirm with your password" in review.text
 
     hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
@@ -360,6 +371,8 @@ def test_console_provisions_and_deploys_vikunja(console):
 
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["services"]["vikunja"]["enabled"] is True
+    assert config["services"]["vikunja"]["allow_registration"] is True
+    assert config["services"]["vikunja"]["enable_link_sharing"] is True
     env = (root / ".env").read_text(encoding="utf-8")
     assert "VIKUNJA_POSTGRES_PASSWORD=" in env
     assert "VIKUNJA_SERVICE_SECRET=" in env
@@ -368,6 +381,7 @@ def test_console_provisions_and_deploys_vikunja(console):
 
     settings_page = client.get("/admin/services")
     assert 'href="https://tasks.example.org/"' in settings_page.text
+    assert "Self-registration is on; public project sharing is on." in settings_page.text
 
 
 def test_console_provisions_and_deploys_facilmap(console):
