@@ -346,9 +346,9 @@ CONNECTORS: dict[str, ConnectorType] = {
             kind="pixelfed",
             label="Pixelfed",
             steps=(
-                "Sign in to the community's Pixelfed account and open its application or developer settings.",
-                "Create an application with read:accounts, write:statuses, and write:media permissions.",
-                "Copy the account's access token, then enter the Pixelfed server address and token below.",
+                "Enter the community's Pixelfed server address and choose Connect with Pixelfed.",
+                "Approve the requested read and write permissions on Pixelfed.",
+                "If your server does not allow app registration through its API, use an existing access token below or ask its administrator to enable OAuth app registration.",
             ),
             fields=(
                 ConnectorField(

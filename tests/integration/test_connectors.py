@@ -4,6 +4,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
@@ -513,6 +514,59 @@ def test_console_connects_and_tests_pixelfed(console):
     assert "Connected to Pixelfed as @community." in channels_page.text
     assert "1800 caption characters" in channels_page.text
     assert token not in str(app.state.auth_store.list_events())
+
+
+def test_console_connects_pixelfed_with_oauth(console):
+    app, client, transport = console
+    transport.replies.extend(
+        [
+            (
+                "POST",
+                "/api/v1/apps",
+                200,
+                {"client_id": "pixelfed-client", "client_secret": "pixelfed-client-secret"},
+            ),
+            ("POST", "/oauth/token", 200, {"access_token": "pixelfed-oauth-token"}),
+        ]
+    )
+    page = client.get("/admin/channels")
+    assert "https://community.example.org/admin/channels/pixelfed/callback" in page.text
+
+    start = client.post(
+        "/admin/channels/pixelfed/oauth/start",
+        data={
+            "csrf_token": csrf(page),
+            "instance_url": "https://pixelfed.example/",
+        },
+    )
+    assert start.status_code == 303
+    authorization_url = urlsplit(start.headers["location"])
+    parameters = parse_qs(authorization_url.query)
+    assert authorization_url.path == "/oauth/authorize"
+    assert parameters["redirect_uri"] == [
+        "https://community.example.org/admin/channels/pixelfed/callback"
+    ]
+    assert parameters["scope"] == ["read write"]
+    assert parameters["response_type"] == ["code"]
+    assert parameters["state"]
+
+    callback = client.get(
+        "/admin/channels/pixelfed/callback",
+        params={"code": "authorization-code", "state": parameters["state"][0]},
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/admin/channels#channel-pixelfed"
+    assert app.state.storage.list_connections()["pixelfed"] == {
+        "instance_url": "https://pixelfed.example",
+        "access_token": "pixelfed-oauth-token",
+    }
+    replay = client.get(
+        "/admin/channels/pixelfed/callback",
+        params={"code": "authorization-code", "state": parameters["state"][0]},
+    )
+    assert replay.status_code == 400
+    assert "pixelfed-client-secret" not in str(app.state.auth_store.list_events())
+    assert "pixelfed-oauth-token" not in str(app.state.auth_store.list_events())
 
 
 def test_meta_connectors_are_available_and_testable_in_admin(console):

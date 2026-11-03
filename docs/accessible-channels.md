@@ -45,9 +45,14 @@ Pixelfed account. This is separate from the ActivityPub actor above: Pixelfed
 users can already follow that actor, while this connector posts as the
 community's Pixelfed account.
 
-- **Setup:** Enter the Pixelfed server URL and an account access token with
-  `read:accounts`, `write:statuses`, and `write:media` permissions on **Admin →
-  Channels → Pixelfed**.
+- **Setup:** On **Admin → Channels → Pixelfed**, enter the server URL and choose
+  **Connect with Pixelfed**. The console registers an OAuth client through the
+  Pixelfed API, then sends the administrator to Pixelfed to approve `read` and
+  `write` access. The callback URL is
+  `https://<community-web-domain>/admin/channels/pixelfed/callback`; the console
+  displays its configured URL beside the button. Pixelfed must allow app
+  registration through its API. If it does not, an existing access token can
+  still be entered using the manual option.
 - **Publishing:** Posts are public. The announcement's shared image and alt
   text are uploaded to Pixelfed; channel-specific caption text is supported.
 - **Limits:** The connection test reads the server's reported caption limit.

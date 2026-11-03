@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from community_stack.admin.common import flash
+from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
@@ -54,7 +57,13 @@ def register_channels(
             }
             for kind, connector in CONNECTORS.items()
         ]
-        context = page(session, connectors=connectors)
+        context = page(
+            session,
+            connectors=connectors,
+            pixelfed_redirect_uri=(
+                f"{publisher.base_url.rstrip('/')}/admin/channels/pixelfed/callback"
+            ),
+        )
         if message:
             context["flash"] = message
         return render(request, "channels.html", context, status_code=status_code)
@@ -112,6 +121,154 @@ def register_channels(
             f"/admin/channels#channel-{kind}",
             flash(f"{connector.label} saved. Use 'Test connection' to check it."),
         )
+
+    @app.post("/admin/channels/pixelfed/oauth/start")
+    async def start_pixelfed_oauth(request: Request) -> Response:
+        session, form = await checked_form(request, "settings")
+        instance_url = form.get("instance_url", "").strip().rstrip("/")
+        try:
+            instance_url = await run_in_threadpool(http.assert_public_https, instance_url)
+        except UnsafeURLError as exc:
+            return channels_page(
+                request, session, flash(f"Pixelfed: {exc}", "error"), status_code=400
+            )
+
+        redirect_uri = f"{publisher.base_url.rstrip('/')}/admin/channels/pixelfed/callback"
+        status, body = await run_in_threadpool(
+            http.send,
+            "POST",
+            f"{instance_url}/api/v1/apps",
+            {"Accept": "application/json"},
+            {
+                "client_name": "Community Stack",
+                "redirect_uris": redirect_uri,
+                "scopes": "read write",
+                "website": publisher.base_url,
+            },
+        )
+        if (
+            status not in (200, 201)
+            or not isinstance(body, dict)
+            or not body.get("client_id")
+            or not body.get("client_secret")
+        ):
+            detail = http.error_text(status, body)
+            return channels_page(
+                request,
+                session,
+                flash(f"Pixelfed could not register an OAuth client: {detail}", "error"),
+                status_code=502,
+            )
+
+        state = secrets.token_urlsafe(32)
+        storage.create_oauth_state(
+            state,
+            {
+                "client_id": str(body["client_id"]),
+                "client_secret": str(body["client_secret"]),
+                "csrf_token": session["csrf_token"],
+                "instance_url": instance_url,
+                "redirect_uri": redirect_uri,
+                "username": session["username"],
+            },
+            (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+        )
+        authorization_parameters = urlencode({
+            'client_id': body['client_id'],
+            'redirect_uri': redirect_uri,
+            'response_type': 'code',
+            'scope': 'read write',
+            'state': state,
+        })
+        authorize_url = f"{instance_url}/oauth/authorize?{authorization_parameters}"
+        response = RedirectResponse(authorize_url, status_code=303)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.get("/admin/channels/pixelfed/callback")
+    async def pixelfed_oauth_callback(request: Request) -> Response:
+        session = require(request, "settings")
+        state = request.query_params.get("state", "")
+        flow = storage.consume_oauth_state(state) if state else None
+        if not flow or not (
+            flow.get("username") == session["username"]
+            and secrets.compare_digest(flow.get("csrf_token", ""), session["csrf_token"])
+        ):
+            return channels_page(
+                request,
+                session,
+                flash("Pixelfed authorization expired or could not be verified. Please retry.", "error"),
+                status_code=400,
+            )
+
+        provider_error = request.query_params.get("error")
+        if provider_error:
+            return redirect_with(
+                request,
+                "/admin/channels#channel-pixelfed",
+                flash(f"Pixelfed authorization was not completed: {provider_error[:200]}", "error"),
+            )
+        code = request.query_params.get("code", "")
+        if not code or len(code) > 4096:
+            return channels_page(
+                request,
+                session,
+                flash("Pixelfed did not return an authorization code. Please retry.", "error"),
+                status_code=400,
+            )
+
+        status, body = await run_in_threadpool(
+            http.send,
+            "POST",
+            f"{flow['instance_url']}/oauth/token",
+            {"Accept": "application/json"},
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": flow["client_id"],
+                "client_secret": flow["client_secret"],
+                "redirect_uri": flow["redirect_uri"],
+            },
+        )
+        access_token = body.get("access_token") if isinstance(body, dict) else None
+        if status != 200 or not isinstance(access_token, str):
+            detail = http.error_text(status, body)
+            return channels_page(
+                request,
+                session,
+                flash(f"Pixelfed could not issue an access token: {detail}", "error"),
+                status_code=502,
+            )
+        try:
+            values = CONNECTORS["pixelfed"].validate(
+                {"instance_url": flow["instance_url"], "access_token": access_token}
+            )
+        except (UnsafeURLError, ValueError) as exc:
+            return channels_page(
+                request,
+                session,
+                flash(f"Pixelfed returned an unusable access token: {exc}", "error"),
+                status_code=502,
+            )
+
+        was_connected = "pixelfed" in storage.list_connections()
+        storage.save_connection("pixelfed", values, session["username"])
+        publisher.reload_connections()
+        audit(
+            request,
+            session["username"],
+            "channel.updated" if was_connected else "channel.connected",
+            "pixelfed",
+        )
+        response = redirect_with(
+            request,
+            "/admin/channels#channel-pixelfed",
+            flash("Pixelfed connected. Use 'Test connection' to check it."),
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
 
     @app.get("/admin/channels/signal/link")
     async def signal_link(request: Request) -> Response:

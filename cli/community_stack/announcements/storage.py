@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -180,6 +181,13 @@ class AnnouncementStorage:
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS oauth_states (
+                    state_hash TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
                 );
             """)
             conn.execute("""
@@ -900,6 +908,33 @@ class AnnouncementStorage:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    def create_oauth_state(
+        self, state: str, payload: dict[str, str], expires_at: str
+    ) -> None:
+        state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (now,))
+            conn.execute(
+                "INSERT INTO oauth_states (state_hash, payload_json, expires_at) VALUES (?, ?, ?)",
+                (state_hash, json.dumps(payload), expires_at),
+            )
+
+    def consume_oauth_state(self, state: str) -> dict[str, str] | None:
+        state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload_json, expires_at FROM oauth_states WHERE state_hash = ?",
+                (state_hash,),
+            ).fetchone()
+            conn.execute("DELETE FROM oauth_states WHERE state_hash = ?", (state_hash,))
+        if not row or row["expires_at"] <= now:
+            return None
+        payload = json.loads(row["payload_json"])
+        return payload if isinstance(payload, dict) else None
 
     def list_templates(self) -> list[dict]:
         with self._get_connection() as conn:
