@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Vikunja users{% endblock %}
+{% block content %}
+<h1>Vikunja users</h1>
+<p>Create a normal Vikunja account. Projects, teams and task permissions remain managed in Vikunja.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not agent_available %}
+<div class="panel"><p>Vikunja accounts are managed through the system agent, which is not running. See <a href="/admin/services">Services and updates</a> for agent status.</p></div>
+{% elif not supported %}
+<div class="panel"><p>The installed system agent does not support Vikunja account management yet. Update and restart the agent, then reload this page.</p></div>
+{% elif not enabled %}
+<div class="panel"><p>Vikunja is disabled. Enable and deploy it in <a href="/admin/services">Services and updates</a> before creating accounts.</p></div>
+{% else %}
+{% if vikunja_url %}<p><a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a></p>{% endif %}
+<form class="card" method="post" action="/admin/vikunja-users/create" autocomplete="off">
+  <h2>Create an account</h2>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="vikunja-username">Username</label>
+  <input id="vikunja-username" name="username" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" autocomplete="off" required>
+  <label for="vikunja-email">Email address</label>
+  <input id="vikunja-email" name="email" type="email" maxlength="254" autocomplete="off" required>
+  <p class="muted">A temporary password is generated and displayed once after creation. Share it privately; it is not saved by Community Stack.</p>
+  <p><button type="submit">Create Vikunja account</button></p>
+</form>
+{% endif %}
+{% endblock %}

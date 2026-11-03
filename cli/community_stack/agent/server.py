@@ -135,7 +135,10 @@ class AgentService:
         # Bounded so a hostile request cannot bloat the log; passwords are never logged.
         safe_params = (
             {
-                str(k)[:40]: "[REDACTED]" if is_sensitive_key(str(k)) else str(v)[:200]
+                str(k)[:40]: "[REDACTED]"
+                if is_sensitive_key(str(k))
+                or (request.get("op") == "vikunja.users.create" and str(k) == "email")
+                else str(v)[:200]
                 for k, v in list(params.items())[:10]
             }
             if isinstance(params, dict)

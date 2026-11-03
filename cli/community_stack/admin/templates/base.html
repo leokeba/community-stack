@@ -59,6 +59,7 @@
           <p class="nav-heading">People</p>
           {% if perms.accounts %}{{ nav_link("/admin/accounts", "Console accounts") }}{% endif %}
           {% if perms.system %}{{ nav_link("/admin/matrix-users", "Matrix users") }}{% endif %}
+          {% if perms.system %}{{ nav_link("/admin/vikunja-users", "Vikunja users") }}{% endif %}
         </div>
         {% endif %}
         {% if perms.system %}

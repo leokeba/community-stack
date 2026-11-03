@@ -56,8 +56,17 @@ The CLI preserves existing values and refuses to generate missing secrets if
 Vikunja data already exists. Keep `.env` owner-only (`0600`) and include it in
 the protected, encrypted backup repository.
 
-The first user can be created through Vikunja's supported container CLI. Run
-this interactively so the password is not placed in shell history or process
+System administrators can create accounts in **People → Vikunja users** in the
+Community Stack admin console. The page is available only when Vikunja is
+enabled and the current control agent supports the operation. Community Stack
+generates a temporary password, supplies it to Vikunja's supported CLI
+interactively (not in process arguments), and displays it once. Share the
+password privately; Community Stack does not store it. The account is a normal
+Vikunja user, not a Vikunja administrator. Project/team collaboration and
+project-level permissions are configured in Vikunja itself.
+
+The supported container CLI remains available as an operator fallback. Run
+this interactively so a password is not placed in shell history or process
 arguments:
 
 ```bash
@@ -84,6 +93,12 @@ After deployment, the Services and updates page shows an **Open Vikunja** link.
 No shell access or direct configuration-file edits are needed for this default
 setup. The web console and its privileged control agent must already be
 installed and running.
+
+After Vikunja is enabled, administrators with system permissions can create
+ordinary user accounts from **People → Vikunja users**. The generated
+temporary password is shown only in the creation response; if it is lost,
+create a replacement through Vikunja's own supported account-management
+workflow rather than expecting Community Stack to recover it.
 
 ## Lifecycle commands
 

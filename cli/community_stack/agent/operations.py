@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import backups, health, matrix_admin, updates
+from community_stack.agent import backups, health, matrix_admin, updates, vikunja_users
 from community_stack.agent import community as community_profile
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
@@ -204,6 +204,16 @@ def _matrix_call(handler):
     return run
 
 
+def _vikunja_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except vikunja_users.VikunjaUserError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
+
+
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
     result = {"values": settings_catalog.current_values(config)}
@@ -347,6 +357,21 @@ CATALOG: dict[str, Operation] = {
             _matrix_call(matrix_admin.deactivate_user),
             params=(Param("user_id", matrix_admin.USER_ID, required=True),),
             summary="Deactivate a Matrix account.",
+        ),
+        Operation(
+            "vikunja.users.create",
+            CHANGE,
+            "system",
+            _vikunja_call(vikunja_users.create_user),
+            params=(
+                Param("username", re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"), required=True),
+                Param(
+                    "email",
+                    re.compile(r"[A-Za-z0-9][^\s@]{0,63}@[A-Za-z0-9.-]{1,189}\.[A-Za-z]{2,63}"),
+                    required=True,
+                ),
+            ),
+            summary="Create a Vikunja account and return its temporary password once.",
         ),
         Operation(
             "config.get",
