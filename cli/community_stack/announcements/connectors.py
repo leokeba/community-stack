@@ -72,10 +72,13 @@ def _validate_mastodon(values: dict[str, str]) -> dict[str, str]:
 
 def _validate_pixelfed(values: dict[str, str]) -> dict[str, str]:
     url = values.get("instance_url", "").strip().rstrip("/")
+    access_token = values.get("access_token", "").strip()
+    if not re.fullmatch(r"[^\s]{1,4096}", access_token):
+        raise ValueError("The Pixelfed access token must be non-empty and contain no spaces.")
     http.assert_public_https(url)
     return {
         "instance_url": url,
-        "access_token": _token(values, "access_token", "The Pixelfed access token"),
+        "access_token": access_token,
     }
 
 

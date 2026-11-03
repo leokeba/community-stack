@@ -139,6 +139,24 @@ def test_pixelfed_connector_validates_and_builds_adapter(monkeypatch):
     assert adapter.name == "pixelfed"
 
 
+def test_pixelfed_accepts_short_opaque_oauth_tokens(monkeypatch):
+    monkeypatch.setattr(http, "resolve", lambda host: ["93.184.216.34"])
+    assert (
+        CONNECTORS["pixelfed"].validate(
+            {"instance_url": "https://pixelfed.example", "access_token": "a"}
+        )["access_token"]
+        == "a"
+    )
+
+
+@pytest.mark.parametrize("token", ["", "token with spaces", "x" * 4097])
+def test_pixelfed_rejects_empty_whitespace_or_oversized_tokens(token):
+    with pytest.raises(ValueError, match="non-empty"):
+        CONNECTORS["pixelfed"].validate(
+            {"instance_url": "https://pixelfed.example", "access_token": token}
+        )
+
+
 def test_pixelfed_connector_rejects_non_https_server():
     with pytest.raises(http.UnsafeURLError, match="https"):
         CONNECTORS["pixelfed"].validate(
@@ -527,7 +545,7 @@ def test_console_connects_pixelfed_with_oauth(console):
                 200,
                 {"client_id": "pixelfed-client", "client_secret": "pixelfed-client-secret"},
             ),
-            ("POST", "/oauth/token", 200, {"access_token": "pixelfed-oauth-token"}),
+            ("POST", "/oauth/token", 200, {"access_token": "a"}),
         ]
     )
     page = client.get("/admin/channels")
@@ -591,7 +609,7 @@ def test_console_connects_pixelfed_with_oauth(console):
     )
     assert app.state.storage.list_connections()["pixelfed"] == {
         "instance_url": "https://pixelfed.example",
-        "access_token": "pixelfed-oauth-token",
+        "access_token": "a",
     }
     replay = callback_client.get(
         "/admin/channels/pixelfed/callback",
