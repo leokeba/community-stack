@@ -240,10 +240,50 @@ if ! "${compose_proxy[@]}" run --rm --no-deps --entrypoint caddy caddy \
         "$project_dir/services/proxy/Caddyfile"
     exit 1
 fi
-if ! "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy; then
+printf 'Recreating Caddy with the generated optional-service routes...\n'
+if ! sudo -n docker compose --env-file "$project_dir/.env" \
+    -f "$project_dir/services/proxy/docker-compose.yml" \
+    up -d --force-recreate --no-deps caddy; then
     sudo -n -u community install -m 0644 "$caddy_backup" \
         "$project_dir/services/proxy/Caddyfile"
-    "${compose_proxy[@]}" up -d --force-recreate --no-deps caddy || true
+    sudo -n docker compose --env-file "$project_dir/.env" \
+        -f "$project_dir/services/proxy/docker-compose.yml" \
+        up -d --force-recreate --no-deps caddy || true
+    exit 1
+fi
+
+proxy_mounts="$("${docker_cmd[@]}" inspect community_proxy \
+    --format '{{range .Mounts}}{{println .Destination}}{{end}}')"
+for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy; do
+    if ! printf '%s\n' "$proxy_mounts" | grep -qx "$route"; then
+        "${docker_cmd[@]}" logs --tail 80 community_proxy || true
+        printf 'Caddy is missing the generated route mount: %s\n' "$route" >&2
+        exit 1
+    fi
+done
+
+proxy_running=false
+for attempt in $(seq 1 12); do
+    state_line="$("${docker_cmd[@]}" inspect community_proxy \
+        --format '{{.State.Status}} {{.RestartCount}}' 2>/dev/null || echo missing)"
+    read -r proxy_state proxy_restarts <<<"$state_line"
+    if [[ "$proxy_state" == running ]]; then
+        sleep 5
+        next_state_line="$("${docker_cmd[@]}" inspect community_proxy \
+            --format '{{.State.Status}} {{.RestartCount}}' 2>/dev/null || echo missing)"
+        read -r next_proxy_state next_proxy_restarts <<<"$next_state_line"
+        if [[ "$next_proxy_state" == running && "$next_proxy_restarts" == "$proxy_restarts" ]]; then
+            proxy_running=true
+            break
+        fi
+    elif [[ "$proxy_state" == exited || "$proxy_state" == dead ]]; then
+        break
+    fi
+    sleep 2
+done
+if [[ "$proxy_running" != true ]]; then
+    "${docker_cmd[@]}" logs --tail 80 community_proxy || true
+    printf 'Caddy did not remain running after recreation.\n' >&2
     exit 1
 fi
 
@@ -251,9 +291,8 @@ fi
 "${compose_landing[@]}" up -d --force-recreate landing
 
 "${docker_cmd[@]}" inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
-"${docker_cmd[@]}" inspect community_proxy --format '{{.State.Status}}' | grep -qx running
 # Pick up new agent code if the control agent is installed and verify its process restarted.
-bash "$project_dir/scripts/restart-agent.sh"
+sudo -n bash "$project_dir/scripts/restart-agent.sh"
 printf 'Deployment healthy. Prior image tag: %s\n' "${rollback_tag:-unavailable}"
 REMOTE
 

@@ -10,8 +10,17 @@ SCRIPT = Path("scripts/restart-agent.sh")
 def test_deploy_script_uses_the_verified_agent_restart_helper():
     deploy_script = Path("scripts/deploy-vps.sh").read_text(encoding="utf-8")
 
-    assert 'bash "$project_dir/scripts/restart-agent.sh"' in deploy_script
+    assert 'sudo -n bash "$project_dir/scripts/restart-agent.sh"' in deploy_script
     assert "try-restart community-stack-agent.service" not in deploy_script
+
+
+def test_deploy_script_verifies_caddy_route_mounts_and_stable_running_state():
+    deploy_script = Path("scripts/deploy-vps.sh").read_text(encoding="utf-8")
+
+    assert 'grep -qx "$route"' in deploy_script
+    assert "/etc/caddy/vikunja.caddy" in deploy_script
+    assert "{{.State.Status}} {{.RestartCount}}" in deploy_script
+    assert "Caddy did not remain running after recreation" in deploy_script
 
 
 def run_restart_helper(tmp_path, state):
