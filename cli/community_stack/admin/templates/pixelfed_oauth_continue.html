@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Continue to Pixelfed{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Continue to Pixelfed</h1>
+  <p>The OAuth client is ready. Continue to Pixelfed to sign in and approve access.</p>
+  <p><a class="button-link" href="{{ authorization_url }}">Continue to Pixelfed</a></p>
+  <p><a href="/admin/channels#channel-pixelfed">Back to channels</a></p>
+</section>
+{% endblock %}

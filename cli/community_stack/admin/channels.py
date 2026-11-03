@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from community_stack.admin.common import flash
@@ -183,7 +183,11 @@ def register_channels(
             }
         )
         authorize_url = f"{instance_url}/oauth/authorize?{authorization_parameters}"
-        response = RedirectResponse(authorize_url, status_code=303)
+        response = render(
+            request,
+            "pixelfed_oauth_continue.html",
+            page(session, authorization_url=authorize_url),
+        )
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response

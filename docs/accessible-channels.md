@@ -46,9 +46,9 @@ users can already follow that actor, while this connector posts as the
 community's Pixelfed account.
 
 - **Setup:** On **Admin → Channels → Pixelfed**, enter the server URL and choose
-  **Connect with Pixelfed**. The console registers an OAuth client through the
-  Pixelfed API, then sends the administrator to Pixelfed to approve `read` and
-  `write` access. The callback URL is
+  **Connect with Pixelfed**, then follow the **Continue to Pixelfed** link. The
+  console registers an OAuth client through the Pixelfed API and opens the
+  authorization page for approval of `read` and `write` access. The callback URL is
   `https://<community-web-domain>/admin/channels/pixelfed/callback`; the console
   displays its configured URL beside the button. Pixelfed must allow app
   registration through its API. If it does not, an existing access token can

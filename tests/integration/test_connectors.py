@@ -3,6 +3,7 @@
 import os
 import re
 from datetime import datetime, timezone
+from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -531,7 +532,7 @@ def test_console_connects_pixelfed_with_oauth(console):
     )
     page = client.get("/admin/channels")
     assert "https://community.example.org/admin/channels/pixelfed/callback" in page.text
-    assert 'action="/admin/channels/pixelfed/oauth/start" data-native' in page.text
+    assert 'action="/admin/channels/pixelfed/oauth/start"' in page.text
 
     start = client.post(
         "/admin/channels/pixelfed/oauth/start",
@@ -540,8 +541,11 @@ def test_console_connects_pixelfed_with_oauth(console):
             "instance_url": "https://pixelfed.example/",
         },
     )
-    assert start.status_code == 303
-    authorization_url = urlsplit(start.headers["location"])
+    assert start.status_code == 200
+    assert start.headers["cache-control"] == "no-store"
+    link = re.search(r'<a class="button-link" href="([^"]+)">Continue to Pixelfed</a>', start.text)
+    assert link
+    authorization_url = urlsplit(unescape(link.group(1)))
     parameters = parse_qs(authorization_url.query)
     assert authorization_url.path == "/oauth/authorize"
     assert parameters["redirect_uri"] == [
