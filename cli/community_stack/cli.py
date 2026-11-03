@@ -97,7 +97,7 @@ def create_parser() -> argparse.ArgumentParser:
     p_service.add_argument(
         "action", choices=["enable", "disable", "start", "stop", "restart", "status"]
     )
-    p_service.add_argument("service", help="Service name (for example vikunja)")
+    p_service.add_argument("service", help="Service name (for example vikunja or facilmap)")
     p_service.add_argument(
         "-c", "--config", default="community-stack.yaml", help="Path to config file"
     )

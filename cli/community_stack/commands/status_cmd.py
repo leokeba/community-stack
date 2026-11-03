@@ -10,16 +10,22 @@ from community_stack.config import ConfigError, load_config
 
 def run_status(config_path: Path | str = "community-stack.yaml") -> int:
     """Report health and status of all community-stack containers."""
-    vikunja_enabled = False
-    vikunja_url = ""
+    apps = {}
     config_valid = True
     try:
         config = load_config(config_path)
-        vikunja = config.get("services", {}).get("vikunja", {})
-        vikunja_enabled = vikunja.get("enabled", False)
-        if vikunja_enabled:
-            hostname = vikunja.get("hostname") or f"tasks.{config['domain']['base']}"
-            vikunja_url = f"https://{hostname}/"
+        services = config.get("services", {})
+        for service, label, default_host in (
+            ("vikunja", "Vikunja", "tasks"),
+            ("facilmap", "FacilMap", "maps"),
+        ):
+            settings = services.get(service, {})
+            hostname = settings.get("hostname") or f"{default_host}.{config['domain']['base']}"
+            apps[service] = {
+                "label": label,
+                "enabled": settings.get("enabled", False),
+                "url": f"https://{hostname}/",
+            }
     except (ConfigError, OSError) as exc:
         config_valid = False
         print(f"[WARNING] Could not load configuration for optional-service status: {exc}")
@@ -29,10 +35,11 @@ def run_status(config_path: Path | str = "community-stack.yaml") -> int:
         print("          Cannot query container status.")
         if not config_valid:
             print("Vikunja: status unknown because configuration could not be loaded")
-        elif vikunja_enabled:
-            print(f"Vikunja: enabled but unavailable — {vikunja_url}")
+            print("FacilMap: status unknown because configuration could not be loaded")
         else:
-            print("Vikunja: disabled")
+            for app in apps.values():
+                state = "enabled but unavailable" if app["enabled"] else "disabled"
+                print(f"{app['label']}: {state}" + (f" — {app['url']}" if app["enabled"] else ""))
         return 1
 
     containers = docker.list_community_containers()
@@ -56,15 +63,20 @@ def run_status(config_path: Path | str = "community-stack.yaml") -> int:
         print("-" * 80)
         print(f"Total managed containers: {len(containers)}")
 
-    vikunja_container = next(
-        (item for item in containers if item.get("name") == "community_vikunja"), None
-    )
     if not config_valid:
         print("Vikunja: status unknown because configuration could not be loaded")
-    elif vikunja_enabled and vikunja_container:
-        print(f"Vikunja: enabled — {vikunja_container.get('status', 'deployed')} — {vikunja_url}")
-    elif vikunja_enabled:
-        print(f"Vikunja: enabled but not deployed — {vikunja_url}")
-    else:
-        print("Vikunja: disabled")
+        print("FacilMap: status unknown because configuration could not be loaded")
+        return 1
+
+    for service, app in apps.items():
+        container = next(
+            (item for item in containers if item.get("name") == f"community_{service}"), None
+        )
+        if not app["enabled"]:
+            state = "disabled"
+        elif container:
+            state = f"enabled — {container.get('status', 'deployed')}"
+        else:
+            state = "enabled but not deployed"
+        print(f"{app['label']}: {state}" + (f" — {app['url']}" if app["enabled"] else ""))
     return 0

@@ -129,10 +129,12 @@ from pathlib import Path
 import sys
 
 from community_stack.config import load_config
-from community_stack.provision import prepare_vikunja
+from community_stack.provision import prepare_facilmap, prepare_vikunja
 
 root = Path(sys.argv[1])
-prepare_vikunja(root, load_config(root / "community-stack.yaml"), root / ".env")
+config = load_config(root / "community-stack.yaml")
+prepare_vikunja(root, config, root / ".env")
+prepare_facilmap(root, config, root / ".env")
 PY
 # The announcements container runs as the UID/GID in .env (COMMUNITY_STACK_UID/GID), which
 # is not always 1000. Read only those two numbers, and give the contact page folder that
@@ -224,8 +226,10 @@ if missing:
     path.chmod(0o644)
 text = path.read_text(encoding="utf-8")
 route_import = "import /etc/caddy/vikunja.caddy"
-if route_import not in text:
-    path.write_text(text.rstrip() + "\n\n" + route_import + "\n", encoding="utf-8")
+route_imports = [route_import, "import /etc/caddy/facilmap.caddy"]
+missing_imports = [entry for entry in route_imports if entry not in text]
+if missing_imports:
+    path.write_text(text.rstrip() + "\n\n" + "\n".join(missing_imports) + "\n", encoding="utf-8")
     path.chmod(0o644)
 PY
 
@@ -248,8 +252,8 @@ fi
 
 "${docker_cmd[@]}" inspect community_announcements --format '{{.State.Health.Status}}' | grep -qx healthy
 "${docker_cmd[@]}" inspect community_proxy --format '{{.State.Status}}' | grep -qx running
-# Pick up new agent code if the control agent is installed; does nothing otherwise.
-sudo -n systemctl try-restart community-stack-agent.service 2>/dev/null || true
+# Pick up new agent code if the control agent is installed and verify its process restarted.
+bash "$project_dir/scripts/restart-agent.sh"
 printf 'Deployment healthy. Prior image tag: %s\n' "${rollback_tag:-unavailable}"
 REMOTE
 

@@ -42,6 +42,8 @@ All bundled assets, upstream container images, and software components must rema
 | Caddy Server | Caddyserver | Apache-2.0 | Upstream container image |
 | PostgreSQL | PostgreSQL Global Development Group | PostgreSQL (MIT-style) | Upstream container image |
 | Vikunja | Vikunja | AGPL-3.0 | Optional upstream container image |
+| FacilMap | FacilMap | AGPL-3.0 | Optional upstream container image |
+| MariaDB | MariaDB Foundation | GPL-2.0 | Optional FacilMap database image |
 | mautrix-whatsapp | Tulir Asokan / mau.fi | AGPL-3.0 | Upstream container image |
 | Restic | Alexander Neumann | BSD-2-Clause | Upstream binary / package |
 

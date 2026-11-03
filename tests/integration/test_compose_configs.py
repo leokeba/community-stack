@@ -13,7 +13,15 @@ def get_compose_files() -> list[Path]:
 
 def test_compose_files_exist():
     files = get_compose_files()
-    expected_services = {"proxy", "landing", "matrix", "element", "announcements", "vikunja"}
+    expected_services = {
+        "proxy",
+        "landing",
+        "matrix",
+        "element",
+        "announcements",
+        "vikunja",
+        "facilmap",
+    }
     found_services = {f.parent.name for f in files}
     assert expected_services.issubset(found_services), (
         f"Missing services: {expected_services - found_services}"
@@ -56,6 +64,9 @@ def test_all_services_have_healthchecks():
             for svc_name, svc_cfg in data.get("services", {}).items():
                 if f.parent.name == "vikunja" and svc_name == "vikunja":
                     # The official Vikunja image is `scratch` and contains no shell or probe binary.
+                    continue
+                if f.parent.name == "facilmap" and svc_name == "facilmap":
+                    # The pinned official image defines its own Socket.IO health check.
                     continue
                 assert "healthcheck" in svc_cfg, f"Service '{svc_name}' in {f} lacks a healthcheck"
 
@@ -150,3 +161,4 @@ def test_element_uses_the_generated_config_and_caddy_gets_domains():
     with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
         caddy = yaml.safe_load(stream)["services"]["caddy"]
     assert set(caddy["environment"]) == {"WEB_DOMAIN", "MATRIX_DOMAIN", "ACME_EMAIL"}
+    assert "../../data/proxy/vikunja.caddy:/etc/caddy/vikunja.caddy:ro" in caddy["volumes"]

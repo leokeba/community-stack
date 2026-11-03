@@ -99,6 +99,12 @@ The Community Communications Stack is designed for public movements and communit
   - Automated safety check prevents bridging rooms with high security classifications.
   - CLI `check` and `plan` show all active bridge mappings prominently before deployment.
 
+### 2.10 Collaborative Map Link Exposure
+- **Threat:** A FacilMap admin, editable, or read-only URL is forwarded, logged, or published unintentionally.
+- **Impact:** Anyone who obtains a URL receives the permissions encoded by that link; an admin link can change settings or delete the map.
+- **Mitigation:** The console warns that FacilMap has no user accounts or OIDC. Keep map links out of public rooms, rotate a leaked link, and leave search-engine listing disabled unless public discovery is intended.
+- **Residual Risk:** The service itself is publicly reachable and anyone can create maps. Community Stack does not provide authenticated private maps or per-user/group permissions. FacilMap does not upload photos; external image URLs are governed by their host and are not protected by map-link permissions.
+
 ### 2.10 Backup Theft or Incomplete Recovery
 - **Threat:** Backup repository stolen from off-site storage or corrupted during transit.
 - **Impact:** Exposure of database dump or failure to restore when disaster strikes.

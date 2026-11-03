@@ -21,6 +21,8 @@ SERVICE_DIR_MAP = {
     "whatsapp_bridge": "whatsapp_bridge",
     "vikunja": "vikunja",
     "tasks": "vikunja",
+    "facilmap": "facilmap",
+    "maps": "facilmap",
 }
 
 

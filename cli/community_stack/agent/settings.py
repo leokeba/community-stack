@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -17,6 +18,7 @@ from community_stack import docker
 from community_stack.backup import BackupError
 from community_stack.config import validate_config
 from community_stack.config_edit import (
+    ensure_facilmap_config,
     ensure_vikunja_config,
     get_value,
     set_value,
@@ -38,12 +40,13 @@ class Setting:
     key: str
     label: str
     help: str
-    kind: str  # "bool", "int", "choice" or "timezone"
+    kind: str  # "bool", "int", "choice", "hostname", or "timezone"
     default: Any
     choices: tuple[str, ...] = ()
     minimum: int | None = None
     maximum: int | None = None
     service: str | None = None
+    restart_service: str | None = None
     dangerous: bool = False
 
     @property
@@ -70,6 +73,10 @@ class Setting:
         if self.kind == "choice":
             if text not in self.choices:
                 raise SettingsError(f"{self.label}: choose one of {', '.join(self.choices)}.")
+            return text
+        if self.kind == "hostname":
+            if not re.fullmatch(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text):
+                raise SettingsError(f"{self.label}: enter a valid public hostname.")
             return text
         try:
             ZoneInfo(text)
@@ -163,6 +170,25 @@ SETTINGS: dict[str, Setting] = {
             service="vikunja",
             dangerous=True,
         ),
+        Setting(
+            "services.facilmap.enabled",
+            "FacilMap collaborative maps",
+            "Deploy maps.<community domain>. FacilMap has no user accounts or OIDC; anyone "
+            "who can reach it can create maps, and shared map URLs are bearer credentials. "
+            "Do not store sensitive locations.",
+            "bool",
+            False,
+            service="facilmap",
+            dangerous=True,
+        ),
+        Setting(
+            "services.facilmap.hostname",
+            "FacilMap public hostname",
+            "The HTTPS hostname routed to FacilMap. Add its DNS record before enabling the service.",
+            "hostname",
+            "",
+            restart_service="facilmap",
+        ),
     )
 }
 
@@ -170,8 +196,6 @@ SETTINGS: dict[str, Setting] = {
 def parse_changes(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict) or not raw:
         raise SettingsError("No changes were sent.")
-    if len(raw) > len(SETTINGS):
-        raise SettingsError("Too many changes in one request.")
     changes = {}
     for key, value in raw.items():
         setting = SETTINGS.get(key)
@@ -182,7 +206,13 @@ def parse_changes(raw: Any) -> dict[str, Any]:
 
 
 def current_values(config: dict) -> dict[str, Any]:
-    return {key: get_value(config, s.path, s.default) for key, s in SETTINGS.items()}
+    values = {key: get_value(config, s.path, s.default) for key, s in SETTINGS.items()}
+    values["services.facilmap.hostname"] = get_value(
+        config,
+        ("services", "facilmap", "hostname"),
+        f"maps.{get_value(config, ('domain', 'base'), 'example.org')}",
+    )
+    return values
 
 
 def build_plan(context, raw_changes: Any) -> dict[str, Any]:
@@ -197,6 +227,11 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     if any(key.startswith("services.vikunja.") for key in effective):
         try:
             new_text = ensure_vikunja_config(new_text)
+        except (TypeError, ValueError) as exc:
+            raise SettingsError(str(exc)) from exc
+    if any(key.startswith("services.facilmap.") for key in effective):
+        try:
+            new_text = ensure_facilmap_config(new_text)
         except (TypeError, ValueError) as exc:
             raise SettingsError(str(exc)) from exc
     for key, value in effective.items():
@@ -246,6 +281,22 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
         warnings.append(
             f"Vikunja will be deployed at https://{hostname}/. Its accounts are separate "
             "from Matrix, and public link sharing remains disabled."
+        )
+    proposed_config = yaml.safe_load(new_text)
+    if effective.get("services.facilmap.enabled") is True or (
+        "services.facilmap.hostname" in effective
+        and get_value(proposed_config, ("services", "facilmap", "enabled"), False)
+    ):
+        hostname = get_value(
+            proposed_config,
+            ("services", "facilmap", "hostname"),
+            f"maps.{get_value(config, ('domain', 'base'), 'example.org')}",
+        )
+        warnings.append(
+            f"FacilMap will be deployed at https://{hostname}/. It has no accounts or OIDC; "
+            "map admin/edit/read-only URLs are bearer credentials, anyone who reaches the "
+            "service can create maps, and uploaded photos are not supported. Do not store "
+            "sensitive locations."
         )
 
     diff = "".join(
@@ -324,10 +375,10 @@ def wait_for(context, service: str, running: bool) -> None:
 
 
 def set_service(context, service: str, running: bool) -> None:
-    route_path = context.project_dir / "data" / "proxy" / "vikunja.caddy"
+    route_path = context.project_dir / "data" / "proxy" / f"{service}.caddy"
     previous_route = (
         route_path.read_text(encoding="utf-8")
-        if service == "vikunja" and route_path.is_file()
+        if service in ("vikunja", "facilmap") and route_path.is_file()
         else None
     )
     if running:
@@ -335,7 +386,7 @@ def set_service(context, service: str, running: bool) -> None:
             raise SettingsError("Docker could not create the proxy network.")
         if service in ("matrix", "whatsapp_bridge") and not docker.ensure_network("bridge_net"):
             raise SettingsError("Docker could not create the isolated Matrix appservice network.")
-    if running or service == "vikunja":
+    if running or service in ("vikunja", "facilmap"):
         try:
             config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
             prepare_service(context.project_dir, service, config, context.env_path)
@@ -354,7 +405,7 @@ def set_service(context, service: str, running: bool) -> None:
     if result.returncode != 0:
         raise SettingsError(f"Docker could not {'start' if running else 'stop'} {service}.")
     wait_for(context, service, running)
-    if service == "vikunja":
+    if service in ("vikunja", "facilmap"):
         current_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
         if previous_route != current_route:
             try:
@@ -365,9 +416,9 @@ def set_service(context, service: str, running: bool) -> None:
                     capture_output=True,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
-                raise SettingsError("Could not reload Caddy's Vikunja route.") from exc
+                raise SettingsError(f"Could not reload Caddy's {service} route.") from exc
             if result.returncode != 0:
-                raise SettingsError("Caddy could not reload the Vikunja route.")
+                raise SettingsError(f"Caddy could not reload the {service} route.")
     if service == "whatsapp_bridge" and running:
         result = docker.run_compose(
             context.services_dir / "matrix",
@@ -406,22 +457,29 @@ def apply_changes(context, raw_changes: Any) -> dict[str, Any]:
 
     attempted: list[tuple[str, bool]] = []
     try:
-        service_changes = [
-            (key, value) for key, value in effective.items() if SETTINGS[key].service
-        ]
-        service_changes.sort(
+        service_changes = {
+            SETTINGS[key].service: (key, value, SETTINGS[key].service)
+            for key, value in effective.items()
+            if SETTINGS[key].service
+        }
+        proposed_config = yaml.safe_load(plan["_new_text"])
+        for key in effective:
+            service = SETTINGS[key].restart_service
+            if service and get_value(proposed_config, ("services", service, "enabled"), False):
+                service_changes.setdefault(service, (key, True, service))
+        ordered_service_changes = sorted(
+            service_changes.values(),
             key=lambda item: (
                 0
-                if SETTINGS[item[0]].service == "matrix" and item[1]
+                if item[2] == "matrix" and item[1]
                 else 1
-                if SETTINGS[item[0]].service == "whatsapp_bridge" and item[1]
+                if item[2] == "whatsapp_bridge" and item[1]
                 else 0
-                if SETTINGS[item[0]].service == "whatsapp_bridge" and not item[1]
+                if item[2] == "whatsapp_bridge" and not item[1]
                 else 1
-            )
+            ),
         )
-        for key, value in service_changes:
-            service = SETTINGS[key].service
+        for key, value, service in ordered_service_changes:
             if service:
                 attempted.append((service, bool(value)))
                 set_service(context, service, bool(value))

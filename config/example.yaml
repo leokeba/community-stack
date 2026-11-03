@@ -45,6 +45,19 @@ services:
     enable_link_sharing: false
     memory_limit: "512M"
     cpu_limit: 1
+  facilmap:
+    enabled: false
+    # Immutable digest for upstream's 2026-10-30 main build (Node 22, amd64/arm64).
+    version: "sha256:bcef0c14e23f8670ea21d18a15d4331348bf253550a5acf39b19d067546f629f"
+    # hostname: "maps.example.org" # defaults to maps.<domain.base>
+    cache_path: "data/facilmap/cache"
+    database:
+      version: "11.4.12"
+      data_path: "data/facilmap/mariadb"
+      memory_limit: "512M"
+      cpu_limit: 1
+    memory_limit: "512M"
+    cpu_limit: 1
 
 operations:
   backups:

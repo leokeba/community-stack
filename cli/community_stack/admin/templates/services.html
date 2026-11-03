@@ -11,6 +11,7 @@
 </div>
 {% elif values %}
 <p>Changes are previewed before they are made. The server takes a backup first, and if a service does not come back healthy the previous settings are restored automatically.</p>
+{% if agent_outdated %}<p class="notice" role="status">The control agent is running older code. Some settings are unavailable until the agent is updated and restarted.</p>{% endif %}
 <form class="card" method="post" action="/admin/services/review">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% for setting in settings %}
@@ -26,6 +27,8 @@
   </select>
   {% elif setting.kind == "int" %}
   <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="number" min="{{ setting.minimum }}" max="{{ setting.maximum }}" value="{{ values[setting.key] }}" required>
+  {% elif setting.kind == "hostname" %}
+  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" value="{{ values[setting.key] }}" required>
   {% else %}
   <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" list="timezones" value="{{ values[setting.key] }}" required>
   {% endif %}
@@ -34,8 +37,11 @@
   <datalist id="timezones">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
   <p><button type="submit">Review changes</button></p>
 </form>
-{% if values["services.vikunja.enabled"] and vikunja_url %}
+{% if values.get("services.vikunja.enabled") and vikunja_url %}
 <p class="notice" role="status">Vikunja is enabled. <a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a>. User accounts and task permissions are managed in Vikunja.</p>
+{% endif %}
+{% if values.get("services.facilmap.enabled") and facilmap_url %}
+<p class="notice" role="status">FacilMap is enabled. <a href="{{ facilmap_url }}" target="_blank" rel="noopener noreferrer">Open FacilMap</a>. It has no user accounts: map links are bearer credentials, and anyone who reaches the service can create maps. Do not store sensitive locations.</p>
 {% endif %}
 {% if status and status.containers %}
 <h2>Running services</h2>

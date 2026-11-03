@@ -319,6 +319,73 @@
               "default": 1
             }
           }
+        },
+        "facilmap": {
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "default": "sha256:bcef0c14e23f8670ea21d18a15d4331348bf253550a5acf39b19d067546f629f",
+              "description": "Pinned OCI image digest; default is the 2026-10-30 upstream main build"
+            },
+            "hostname": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+              "description": "Public hostname; defaults to maps.<domain.base>"
+            },
+            "cache_path": {
+              "type": "string",
+              "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+              "default": "data/facilmap/cache"
+            },
+            "database": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+                  "default": "11.4.12"
+                },
+                "data_path": {
+                  "type": "string",
+                  "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+                  "default": "data/facilmap/mariadb"
+                },
+                "memory_limit": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*[MG]$",
+                  "default": "512M"
+                },
+                "cpu_limit": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 16,
+                  "default": 1
+                }
+              }
+            },
+            "memory_limit": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*[MG]$",
+              "default": "512M"
+            },
+            "cpu_limit": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 16,
+              "default": 1
+            }
+          }
         }
       }
     },

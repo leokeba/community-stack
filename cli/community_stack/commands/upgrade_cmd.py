@@ -34,19 +34,19 @@ def run_upgrade(
 
     print(f"Initiating safe upgrade for service '{service}' in {svc_dir.name}...\n")
 
-    if dir_name == "vikunja":
+    if dir_name in ("vikunja", "facilmap"):
         try:
             config = load_config(config_path)
         except (ConfigError, OSError) as exc:
             print(f"[ERROR] Could not load configuration: {exc}")
             return 1
-        if not config.get("services", {}).get("vikunja", {}).get("enabled", False):
-            print("[ERROR] Vikunja is disabled in community-stack.yaml.")
+        if not config.get("services", {}).get(dir_name, {}).get("enabled", False):
+            print(f"[ERROR] {service} is disabled in community-stack.yaml.")
             return 1
         try:
             prepare_service(
                 Path(config_path).resolve().parent,
-                "vikunja",
+                dir_name,
                 config,
                 Path(env_path).resolve(),
                 services_root,
@@ -62,8 +62,8 @@ def run_upgrade(
         snapshot = engine.create_snapshot()
         print(f"      Pre-upgrade snapshot created: {snapshot.id}")
     except BackupError as exc:
-        if dir_name == "vikunja":
-            print(f"[ERROR] Vikunja upgrade requires a successful pre-upgrade backup: {exc}")
+        if dir_name in ("vikunja", "facilmap"):
+            print(f"[ERROR] {service} upgrade requires a successful pre-upgrade backup: {exc}")
             return 1
         print(f"[WARN] Pre-upgrade backup failed: {exc}. Continuing with caution.")
 

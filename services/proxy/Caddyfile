@@ -82,6 +82,7 @@
 }
 
 import /etc/caddy/vikunja.caddy
+import /etc/caddy/facilmap.caddy
 
 # ------------------------------------------------------------------------------
 # Local Development & Testing Ingress (http://localhost)

@@ -205,11 +205,17 @@ def _matrix_call(handler):
 
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
-    settings = config.get("services", {}).get("vikunja", {})
-    hostname = settings.get("hostname") or f"tasks.{config['domain']['base']}"
+    services = config.get("services", {})
+    vikunja = services.get("vikunja", {})
+    vikunja_hostname = vikunja.get("hostname") or f"tasks.{config['domain']['base']}"
+    facilmap = services.get("facilmap", {})
+    facilmap_hostname = facilmap.get("hostname") or f"maps.{config['domain']['base']}"
     return {
         "values": settings_catalog.current_values(config),
-        "vikunja_url": f"https://{hostname}/" if settings.get("enabled", False) else None,
+        "vikunja_url": f"https://{vikunja_hostname}/" if vikunja.get("enabled", False) else None,
+        "facilmap_url": (
+            f"https://{facilmap_hostname}/" if facilmap.get("enabled", False) else None
+        ),
     }
 
 

@@ -9,7 +9,7 @@ The Community Communications Stack is organized into four distinct architectural
 | Layer A: Core Community Services                                         |
 | - Matrix Homeserver (Synapse)    - Element Web Client                    |
 | - Public Landing Page            - Canonical Announcement Stream         |
-| - (Optional) Vikunja Collaborative Task Management                      |
+| - (Optional) Vikunja Tasks     - (Optional) FacilMap Maps               |
 +--------------------------------------------------------------------------+
                                      |
 +--------------------------------------------------------------------------+
@@ -55,12 +55,14 @@ Services are packaged as independent Docker Compose modules coordinated by the C
                        [PostgreSQL]
           [Synapse] <--- (bridge_net) ---> [mautrix-whatsapp] (Optional)
   [Caddy] <--- proxy_net ---> [Vikunja] ---> (vikunja_internal) [PostgreSQL]
+  [Caddy] <--- proxy_net ---> [FacilMap] ---> (facilmap_internal) [MariaDB]
 ```
 
 - **`proxy_net` (Bridge):** Connects Caddy to the HTTP ports of Landing Page, Element Web, Announcements API, and Synapse client endpoints.
 - **`matrix_internal` (Internal Bridge, `internal: true`):** Connects Synapse to PostgreSQL. No external internet or host port mapping.
 - **`bridge_net` (Dedicated Bridge):** Connects only Synapse and mautrix-whatsapp. It is not attached to public ingress; the bridge still needs outbound internet access.
 - **`vikunja_internal` (Internal Bridge, `internal: true`):** Connects Vikunja to its dedicated PostgreSQL database. The database is never attached to ingress or published on the host. Vikunja itself is an independent optional Compose project.
+- **`facilmap_internal` (Internal Bridge, `internal: true`):** Connects FacilMap to its dedicated MariaDB database. Only the app joins `proxy_net`; neither service publishes a host port. FacilMap is an independent optional Compose project.
 
 ---
 
@@ -100,3 +102,11 @@ hostname, storage paths, PostgreSQL service, registration/sharing policy, and
 resource limits are configured under `services.vikunja`. The operator CLI
 generates the Caddy route only while the service is enabled. See
 [docs/vikunja.md](vikunja.md) for deployment and recovery details.
+
+FacilMap is also disabled by default. Its image is pinned by immutable OCI
+digest, and its hostname, cache/database storage, MariaDB version, and resource
+limits live under `services.facilmap`. The operator CLI generates its Caddy
+route only while enabled and includes its database dump and cache in backups.
+FacilMap has no user accounts or OIDC: map URLs are bearer credentials, not
+authenticated private access. See [docs/facilmap.md](facilmap.md) for the
+permission model and operational limits.

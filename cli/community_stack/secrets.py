@@ -72,6 +72,9 @@ def get_required_secrets(config: dict[str, Any]) -> list[str]:
     if services.get("vikunja", {}).get("enabled", False):
         required.extend(["VIKUNJA_POSTGRES_PASSWORD", "VIKUNJA_SERVICE_SECRET"])
 
+    if services.get("facilmap", {}).get("enabled", False):
+        required.extend(["FACILMAP_DB_PASSWORD", "FACILMAP_DB_ROOT_PASSWORD"])
+
     backups = operations.get("backups", {})
     if backups.get("enabled", False):
         required.append("RESTIC_PASSWORD")

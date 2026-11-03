@@ -26,6 +26,19 @@ VIKUNJA_DEFAULTS = """  vikunja:
     cpu_limit: 1
 """
 
+FACILMAP_DEFAULTS = """  facilmap:
+    enabled: false
+    version: "sha256:bcef0c14e23f8670ea21d18a15d4331348bf253550a5acf39b19d067546f629f"
+    cache_path: "data/facilmap/cache"
+    database:
+      version: "11.4.12"
+      data_path: "data/facilmap/mariadb"
+      memory_limit: "512M"
+      cpu_limit: 1
+    memory_limit: "512M"
+    cpu_limit: 1
+"""
+
 
 def render_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -131,6 +144,31 @@ def ensure_vikunja_config(text: str) -> str:
             insert_at = index
             break
     lines.insert(insert_at, VIKUNJA_DEFAULTS)
+    return "".join(lines)
+
+
+def ensure_facilmap_config(text: str) -> str:
+    """Add FacilMap defaults to a legacy config without reserializing operator comments."""
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+        raise TypeError("Configuration must contain a services mapping.")
+    if "facilmap" in data["services"]:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    services_index = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
+        None,
+    )
+    if services_index is None:
+        raise ValueError("Configuration must contain a top-level services mapping.")
+    insert_at = len(lines)
+    for index in range(services_index + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith((" ", "\t", "#", "\n")):
+            insert_at = index
+            break
+    lines.insert(insert_at, FACILMAP_DEFAULTS)
     return "".join(lines)
 
 

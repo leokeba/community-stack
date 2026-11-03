@@ -249,6 +249,80 @@ def prepare_vikunja(project_dir: Path, config: dict, env_path: Path) -> str | No
     return f"Prepared Vikunja storage and deployment settings for https://{hostname}/."
 
 
+def prepare_facilmap(project_dir: Path, config: dict, env_path: Path) -> str | None:
+    """Provision FacilMap's Caddy route, persistent directories, and database secrets."""
+    settings = config.get("services", {}).get("facilmap", {})
+    root = project_dir.resolve()
+    hostname = settings.get("hostname") or f"maps.{config['domain']['base']}"
+    route_path = root / "data" / "proxy" / "facilmap.caddy"
+    if settings.get("enabled", False):
+        route_content = (
+            f"{hostname} {{\n    encode zstd gzip\n    reverse_proxy community_facilmap:8080\n}}\n"
+        )
+    else:
+        route_content = "# FacilMap is disabled; no public route is configured.\n"
+    route_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if not route_path.is_file() or route_path.read_text(encoding="utf-8") != route_content:
+        route_path.write_text(route_content, encoding="utf-8")
+        route_path.chmod(0o644)
+
+    if not settings.get("enabled", False):
+        return None
+
+    database = settings.get("database", {})
+    cache_path = root / settings.get("cache_path", "data/facilmap/cache")
+    database_path = root / database.get("data_path", "data/facilmap/mariadb")
+    for path in (cache_path, database_path):
+        if not path.resolve().is_relative_to(root):
+            raise ProvisionError(
+                "FacilMap persistent paths must remain inside the project directory."
+            )
+
+    env_values = parse_env_file(env_path)
+    required = ("FACILMAP_DB_PASSWORD", "FACILMAP_DB_ROOT_PASSWORD")
+    existing_data = database_path.is_dir() and any(database_path.iterdir())
+    missing = [key for key in required if not env_values.get(key)]
+    if missing and existing_data:
+        raise ProvisionError(
+            "FacilMap database credentials are missing from .env while persistent data exists. "
+            "Restore FACILMAP_DB_PASSWORD and FACILMAP_DB_ROOT_PASSWORD before starting it."
+        )
+    generated = {
+        "FACILMAP_DB_PASSWORD": generate_secret(32),
+        "FACILMAP_DB_ROOT_PASSWORD": generate_secret(32),
+    }
+    for key in required:
+        if env_values.get(key):
+            generated.pop(key)
+
+    contact = env_values.get("ACME_EMAIL", "admin@example.org")
+    values = {
+        **generated,
+        "FACILMAP_VERSION": settings.get(
+            "version",
+            "sha256:bcef0c14e23f8670ea21d18a15d4331348bf253550a5acf39b19d067546f629f",
+        ),
+        "FACILMAP_DOMAIN": hostname,
+        "FACILMAP_USER_AGENT": f"CommunityStack-FacilMap/1.0-contact={contact}",
+        "FACILMAP_CACHE_PATH": settings.get("cache_path", "data/facilmap/cache"),
+        "FACILMAP_DATABASE_VERSION": database.get("version", "11.4.12"),
+        "FACILMAP_DATABASE_DATA_PATH": database.get("data_path", "data/facilmap/mariadb"),
+        "FACILMAP_MEMORY_LIMIT": settings.get("memory_limit", "512M"),
+        "FACILMAP_CPU_LIMIT": str(settings.get("cpu_limit", 1)),
+        "FACILMAP_DATABASE_MEMORY_LIMIT": database.get("memory_limit", "512M"),
+        "FACILMAP_DATABASE_CPU_LIMIT": str(database.get("cpu_limit", 1)),
+    }
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    if not env_path.exists():
+        env_path.touch(mode=0o600)
+    set_env_values(env_path, values)
+    if os.name == "posix":
+        env_path.chmod(0o600)
+    for path in (cache_path, database_path):
+        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    return f"Prepared FacilMap storage and deployment settings for https://{hostname}/."
+
+
 def _whatsapp_secrets(env_path: Path, create_missing: bool) -> dict[str, str]:
     values = parse_env_file(env_path)
     missing = [key for key in ("WHATSAPP_AS_TOKEN", "WHATSAPP_HS_TOKEN") if not values.get(key)]
@@ -429,6 +503,8 @@ def prepare_service(
         return prepare_element(project_dir, config)
     if service == "vikunja":
         return prepare_vikunja(project_dir, config, env_path)
+    if service == "facilmap":
+        return prepare_facilmap(project_dir, config, env_path)
     if service == "whatsapp_bridge":
         return prepare_whatsapp(
             project_dir, config, env_path, services_dir or project_dir / "services"

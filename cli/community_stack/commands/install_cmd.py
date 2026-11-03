@@ -36,27 +36,27 @@ def run_install(
 
     services_root = get_services_dir()
     env_p = Path(env_path).resolve()
-    vikunja_cfg = config.get("services", {}).get("vikunja", {})
-    route_path = Path(config_path).resolve().parent / "data" / "proxy" / "vikunja.caddy"
-    previous_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
-    try:
-        prepared = prepare_service(
-            Path(config_path).resolve().parent,
-            "vikunja",
-            config,
-            env_p,
-            services_root,
+    route_changes = {}
+    for optional_service in ("vikunja", "facilmap"):
+        route_path = (
+            Path(config_path).resolve().parent / "data" / "proxy" / f"{optional_service}.caddy"
         )
-    except ProvisionError as exc:
-        print(f"[ERROR] {exc}")
-        return 1
-    if prepared:
-        print(prepared)
-    vikunja_route_changed = (
-        previous_route != route_path.read_text(encoding="utf-8")
-        if route_path.is_file()
-        else previous_route is not None
-    )
+        previous_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
+        try:
+            prepared = prepare_service(
+                Path(config_path).resolve().parent,
+                optional_service,
+                config,
+                env_p,
+                services_root,
+            )
+        except ProvisionError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+        if prepared:
+            print(prepared)
+        current_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
+        route_changes[optional_service] = previous_route != current_route
 
     print("Executing pre-flight checks before deployment...\n")
     checks = run_checks(config_path=config_path, env_path=env_path)
@@ -111,8 +111,9 @@ def run_install(
     if services_cfg.get("whatsapp_bridge", {}).get("enabled", False):
         services_to_deploy.append("whatsapp_bridge")
 
-    if vikunja_cfg.get("enabled", False):
-        services_to_deploy.append("vikunja")
+    for optional_service in ("vikunja", "facilmap"):
+        if services_cfg.get(optional_service, {}).get("enabled", False):
+            services_to_deploy.append(optional_service)
 
     print(f"\n[2/4] Deploying enabled services: {', '.join(services_to_deploy)}")
 
@@ -157,7 +158,7 @@ def run_install(
                 print("[ERROR] Synapse could not reload the WhatsApp appservice registration.")
                 return 1
 
-    if vikunja_route_changed:
+    if any(route_changes.values()):
         reloaded = docker.run_compose(
             services_root / "proxy",
             ["restart", "caddy"],
@@ -165,7 +166,7 @@ def run_install(
             capture_output=True,
         )
         if reloaded.returncode != 0:
-            print("[ERROR] Caddy could not reload the optional Vikunja route.")
+            print("[ERROR] Caddy could not reload optional application routes.")
             return 1
 
     print("\n[3/4] Deployment finished. Verifying container status...")

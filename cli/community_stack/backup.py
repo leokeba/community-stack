@@ -47,6 +47,7 @@ RESTIC_SETTINGS = ("RESTIC_CACHE_DIR", "RESTIC_REPOSITORY")
 REQUIRED_SNAPSHOT_FILES = ("manifest.json", "community-stack.yaml")
 EXPECTED_SNAPSHOT_FILES = ("data.tar.gz", "postgres_synapse.dump")
 VIKUNJA_DUMP_FILE = "postgres_vikunja.dump"
+FACILMAP_DUMP_FILE = "mariadb_facilmap.sql"
 
 
 def is_restic_available() -> bool:
@@ -104,6 +105,28 @@ def dump_vikunja_database(target_file: Path) -> bool:
         "-F",
         "c",
     ]
+    try:
+        with open(target_file, "wb") as target:
+            result = subprocess.run(cmd, stdout=target, stderr=subprocess.PIPE, check=False)
+        return result.returncode == 0 and target_file.stat().st_size > 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def dump_facilmap_database(target_file: Path) -> bool:
+    """Create a MariaDB logical dump without exposing the database password in argv."""
+    if not is_docker_available():
+        return False
+    script = (
+        "set -eu; "
+        'credentials="$(mktemp)"; trap \'rm -f "$credentials"\' EXIT; '
+        "umask 077; "
+        'printf "[client]\\nuser=%s\\npassword=%s\\n" '
+        '"$MARIADB_USER" "$MARIADB_PASSWORD" > "$credentials"; '
+        'mariadb-dump --defaults-extra-file="$credentials" --single-transaction '
+        '--quick --routines --events --triggers "$MARIADB_DATABASE"'
+    )
+    cmd = ["docker", "exec", "community_facilmap_db", "sh", "-ec", script]
     try:
         with open(target_file, "wb") as target:
             result = subprocess.run(cmd, stdout=target, stderr=subprocess.PIPE, check=False)
@@ -261,6 +284,49 @@ class BackupEngine:
                 "The backup completed, but Vikunja could not be restarted; inspect its service logs."
             )
 
+    def _pause_facilmap(self) -> bool:
+        if not self.config.get("services", {}).get("facilmap", {}).get("enabled", False):
+            return False
+        if not is_docker_available():
+            raise BackupError(
+                "FacilMap is enabled but Docker is unavailable; its backup was not taken."
+            )
+        try:
+            state = subprocess.run(
+                ["docker", "inspect", "--format={{.State.Running}}", "community_facilmap"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise BackupError(f"Could not inspect FacilMap before backup: {exc}") from exc
+        if state.returncode != 0:
+            raise BackupError("FacilMap is enabled but its application container is not deployed.")
+        if state.stdout.strip().lower() != "true":
+            return False
+        compose = docker.run_compose(
+            self.project_root / "services" / "facilmap",
+            ["stop", "facilmap"],
+            env_file=self.env_path,
+            capture_output=True,
+        )
+        if compose.returncode != 0:
+            raise BackupError("Could not stop FacilMap for a consistent application backup.")
+        return True
+
+    def _resume_facilmap(self) -> None:
+        compose = docker.run_compose(
+            self.project_root / "services" / "facilmap",
+            ["start", "facilmap"],
+            env_file=self.env_path,
+            capture_output=True,
+        )
+        if compose.returncode != 0:
+            raise BackupError(
+                "The backup completed, but FacilMap could not be restarted; "
+                "inspect its service logs."
+            )
+
     def create_snapshot(self) -> SnapshotInfo:
         """Create a timestamped, owner-only (0600) backup snapshot.
 
@@ -276,9 +342,11 @@ class BackupEngine:
         staging_dir = self.backup_dir / f"staging_{snapshot_id}"
         staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         vikunja_paused = False
+        facilmap_paused = False
 
         try:
             vikunja_paused = self._pause_vikunja()
+            facilmap_paused = self._pause_facilmap()
 
             # 1. Database dump
             db_dump_file = staging_dir / "postgres_synapse.dump"
@@ -300,6 +368,18 @@ class BackupEngine:
                         "Could not create the Vikunja PostgreSQL dump. "
                         "Check community_vikunja_db health and database logs."
                     )
+
+            facilmap_enabled = (
+                self.config.get("services", {}).get("facilmap", {}).get("enabled", False)
+            )
+            if facilmap_enabled:
+                facilmap_dump = staging_dir / FACILMAP_DUMP_FILE
+                if not dump_facilmap_database(facilmap_dump):
+                    raise BackupError(
+                        "Could not create the FacilMap MariaDB dump. "
+                        "Check community_facilmap_db health and database logs."
+                    )
+            databases_included = db_dumped or vikunja_enabled or facilmap_enabled
 
             # 2. Archive data directory
             data_dir = self.project_root / "data"
@@ -343,6 +423,18 @@ class BackupEngine:
                             database_relative + "/"
                         ):
                             return None
+                    if facilmap_enabled:
+                        database_path = (
+                            self.config.get("services", {})
+                            .get("facilmap", {})
+                            .get("database", {})
+                            .get("data_path", "data/facilmap/mariadb")
+                        )
+                        database_relative = database_path.removeprefix("./").removeprefix("data/")
+                        if relative_name == database_relative or relative_name.startswith(
+                            database_relative + "/"
+                        ):
+                            return None
                     return member
 
                 with tarfile.open(data_tar, "w:gz") as tar:
@@ -366,6 +458,8 @@ class BackupEngine:
                 "project": self.config.get("project", {}).get("name", "community"),
                 "profile": self.config.get("project", {}).get("profile", "starter"),
                 "db_dumped": db_dumped,
+                "vikunja_dumped": vikunja_enabled,
+                "facilmap_dumped": facilmap_enabled,
             }
             manifest_file = staging_dir / "manifest.json"
             manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -373,7 +467,7 @@ class BackupEngine:
             files_count = sum(1 for _ in staging_dir.rglob("*"))
             if self.encryption == "restic":
                 return self._store_in_restic(
-                    staging_dir, snapshot_id, timestamp, files_count, db_dumped
+                    staging_dir, snapshot_id, timestamp, files_count, databases_included
                 )
 
             # 5. Pack into snapshot archive
@@ -402,16 +496,20 @@ class BackupEngine:
                 target="local",
                 files_count=files_count,
                 size_bytes=size_bytes,
-                db_included=db_dumped,
+                db_included=databases_included,
                 warnings=warnings,
             )
         finally:
             try:
-                if vikunja_paused:
-                    self._resume_vikunja()
+                if facilmap_paused:
+                    self._resume_facilmap()
             finally:
-                if staging_dir.exists():
-                    shutil.rmtree(staging_dir, ignore_errors=True)
+                try:
+                    if vikunja_paused:
+                        self._resume_vikunja()
+                finally:
+                    if staging_dir.exists():
+                        shutil.rmtree(staging_dir, ignore_errors=True)
 
     def _store_in_restic(
         self,
@@ -508,6 +606,7 @@ class BackupEngine:
                 has_data = any("data.tar.gz" in m for m in members)
                 has_dump = any("postgres_synapse.dump" in m for m in members)
                 has_vikunja_dump = any(VIKUNJA_DUMP_FILE in m for m in members)
+                has_facilmap_dump = any(FACILMAP_DUMP_FILE in m for m in members)
 
                 if not has_manifest:
                     messages.append("ERROR: Missing manifest.json in snapshot.")
@@ -524,6 +623,12 @@ class BackupEngine:
                     and not has_vikunja_dump
                 ):
                     messages.append("ERROR: Missing Vikunja PostgreSQL dump in snapshot.")
+                    return False, messages
+                if (
+                    self.config.get("services", {}).get("facilmap", {}).get("enabled", False)
+                    and not has_facilmap_dump
+                ):
+                    messages.append("ERROR: Missing FacilMap MariaDB dump in snapshot.")
                     return False, messages
 
                 messages.append("All critical recovery components verified present.")
@@ -560,6 +665,8 @@ class BackupEngine:
         required = list(REQUIRED_SNAPSHOT_FILES)
         if self.config.get("services", {}).get("vikunja", {}).get("enabled", False):
             required.append(VIKUNJA_DUMP_FILE)
+        if self.config.get("services", {}).get("facilmap", {}).get("enabled", False):
+            required.append(FACILMAP_DUMP_FILE)
         missing = [name for name in required if name not in names]
         if missing:
             messages.append(f"ERROR: Missing {', '.join(missing)} in snapshot.")
@@ -655,6 +762,9 @@ class BackupEngine:
         vikunja_dump = snap_content / VIKUNJA_DUMP_FILE
         if vikunja_dump.is_file():
             shutil.copy(vikunja_dump, target_backups / VIKUNJA_DUMP_FILE)
+        facilmap_dump = snap_content / FACILMAP_DUMP_FILE
+        if facilmap_dump.is_file():
+            shutil.copy(facilmap_dump, target_backups / FACILMAP_DUMP_FILE)
 
         # Validate restored configuration
         try:

@@ -1,0 +1,55 @@
+services:
+  facilmap-db:
+    image: mariadb:${FACILMAP_DATABASE_VERSION:-11.4.12}
+    container_name: community_facilmap_db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: facilmap
+      MARIADB_USER: facilmap
+      MARIADB_PASSWORD: ${FACILMAP_DB_PASSWORD:?Set FACILMAP_DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${FACILMAP_DB_ROOT_PASSWORD:?Set FACILMAP_DB_ROOT_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ../../${FACILMAP_DATABASE_DATA_PATH:-data/facilmap/mariadb}:/var/lib/mysql
+    networks:
+      - facilmap_internal
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--su-mysql", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: ${FACILMAP_DATABASE_MEMORY_LIMIT:-512M}
+    cpus: ${FACILMAP_DATABASE_CPU_LIMIT:-1}
+
+  facilmap:
+    image: facilmap/facilmap@${FACILMAP_VERSION:?Set FACILMAP_VERSION in .env}
+    container_name: community_facilmap
+    restart: unless-stopped
+    environment:
+      USER_AGENT: ${FACILMAP_USER_AGENT:?Set FACILMAP_USER_AGENT in .env}
+      TRUST_PROXY: "true"
+      BASE_URL: https://${FACILMAP_DOMAIN}
+      DB_TYPE: mysql
+      DB_HOST: facilmap-db
+      DB_NAME: facilmap
+      DB_USER: facilmap
+      DB_PASSWORD: ${FACILMAP_DB_PASSWORD:?Set FACILMAP_DB_PASSWORD in .env}
+    volumes:
+      - ../../${FACILMAP_CACHE_PATH:-data/facilmap/cache}:/opt/facilmap/cache
+    networks:
+      - proxy_net
+      - facilmap_internal
+    depends_on:
+      facilmap-db:
+        condition: service_healthy
+    mem_limit: ${FACILMAP_MEMORY_LIMIT:-512M}
+    cpus: ${FACILMAP_CPU_LIMIT:-1}
+
+networks:
+  proxy_net:
+    external: true
+  facilmap_internal:
+    internal: true

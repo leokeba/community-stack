@@ -17,7 +17,7 @@ The Community Communications Stack is designed to survive total server loss, hos
 
 ### What is Backed Up
 Every snapshot created by `community-stack backup` captures:
-1. **PostgreSQL databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata.
+1. **Databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata. When FacilMap is enabled, `mariadb_facilmap.sql` contains its maps, settings, features, and calculated routes.
 2. **Persistent Storage (`data/`):**
    - Synapse configuration, media store, and signing keys (`data/matrix`).
    - Caddy certificates and ACME state (`data/caddy`).
@@ -27,6 +27,7 @@ Every snapshot created by `community-stack backup` captures:
    - The `/connect` page is rebuilt from configuration and announcements, so it is not backed up separately (`data/landing/connect`).
    - Element Web branding and client configuration (`data/element`).
    - Vikunja attachments (`data/vikunja/files`). Its live PostgreSQL directory is excluded; it is backed up as a consistent database dump instead.
+   - FacilMap cache (`data/facilmap/cache`). Its live MariaDB directory is excluded; map data is backed up with `mariadb-dump`.
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
 4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
 5. **Snapshot Manifest (`manifest.json`):** Timestamp, project identifier, and integrity checksum metadata.
@@ -44,6 +45,13 @@ its PostgreSQL dump and attachment archive are captured. PostgreSQL's online
 `pg_dump` provides a consistent database snapshot, and stopping the app keeps
 file uploads aligned with that snapshot. A failed Vikunja dump or failed
 application restart is reported as a backup failure.
+
+When FacilMap is enabled, its application container is stopped while the
+MariaDB logical dump and cache archive are taken, then restarted. This keeps
+map writes quiescent and avoids copying a live database directory. The dump
+failure or an app restart failure makes the whole snapshot fail. FacilMap does
+not upload photos; external image URLs are part of map text, but the externally
+hosted image files are not included.
 
 ### Encryption
 
@@ -172,20 +180,25 @@ If the primary server is lost or destroyed:
    chmod 600 /opt/community-stack/.env
    ```
 6. **Repoint DNS records** to the new server's IP address.
-7. **Deploy and start services:**
+7. **Restore FacilMap before starting the application, if enabled.** Start
+   only its database, import the dump into the initialized `facilmap` database,
+   then continue with the full install. See
+   [FacilMap restore instructions](facilmap.md#backup-restore-and-upgrade) for
+   the password-safe import command.
+8. **Deploy and start services:**
    ```bash
    uv run community-stack check
    uv run community-stack install
    ```
-8. **Restore the PostgreSQL database dump:**
+9. **Restore the PostgreSQL database dump:**
    ```bash
    docker exec -i community_postgres pg_restore -U synapse_user -d synapse --clean < /opt/community-stack-recovered/backups/postgres_synapse.dump
    ```
-9. **Restart Matrix Synapse:**
+10. **Restart Matrix Synapse:**
    ```bash
    docker restart community_synapse
    ```
-10. **Verify service status:**
+11. **Verify service status:**
     ```bash
     uv run community-stack status
     uv run community-stack doctor

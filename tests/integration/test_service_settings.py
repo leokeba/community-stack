@@ -122,6 +122,29 @@ def test_vikunja_can_be_enabled_from_a_legacy_configuration(project):
     assert "https://tasks.example.org/" in plan["warnings"][0]
 
 
+def test_stale_agent_does_not_report_a_full_settings_form_as_too_many(project, monkeypatch):
+    root, _ = project
+    settings = dict(agent_settings.SETTINGS)
+    settings.pop("services.vikunja.enabled")
+    monkeypatch.setattr(agent_settings, "SETTINGS", settings)
+    submitted = {
+        "project.timezone": "UTC",
+        "operations.backups.schedule": "daily",
+        "operations.backups.retention_days": "14",
+        "operations.backups.encryption": "none",
+        "services.element.enabled": "true",
+        "services.signal.enabled": "false",
+        "services.whatsapp_bridge.enabled": "false",
+        "services.matrix.enabled": "true",
+        "services.facilmap.enabled": "false",
+        "services.facilmap.hostname": "maps.example.org",
+        "services.vikunja.enabled": "false",
+    }
+
+    with pytest.raises(agent_settings.SettingsError, match="cannot be changed"):
+        agent_settings.build_plan(context(root), submitted)
+
+
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
@@ -298,6 +321,24 @@ def test_console_reviews_and_applies_a_change(console):
     assert "Nothing was changed." in unchanged.text
 
 
+def test_console_warns_and_hides_settings_unsupported_by_a_stale_agent(console, monkeypatch):
+    _, client = console
+    current_settings = agent_settings.SETTINGS
+    stale_settings = {
+        key: setting
+        for key, setting in current_settings.items()
+        if key != "services.vikunja.enabled"
+    }
+    monkeypatch.setattr(agent_settings, "SETTINGS", stale_settings)
+
+    page = client.get("/admin/services")
+
+    assert page.status_code == 200
+    assert "control agent is running older code" in page.text
+    assert "Vikunja task management" not in page.text
+    assert "Community time zone" in page.text
+
+
 def test_console_provisions_and_deploys_vikunja(console):
     root, client = console
     page = client.get("/admin/services")
@@ -327,6 +368,39 @@ def test_console_provisions_and_deploys_vikunja(console):
 
     settings_page = client.get("/admin/services")
     assert 'href="https://tasks.example.org/"' in settings_page.text
+
+
+def test_console_provisions_and_deploys_facilmap(console):
+    root, client = console
+    page = client.get("/admin/services")
+    assert "FacilMap collaborative maps" in page.text
+    values = {**form_values(page), "setting:services.facilmap.enabled": "true"}
+
+    review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
+    assert review.status_code == 200
+    assert "https://maps.example.org/" in review.text
+    assert "bearer credentials" in review.text
+    assert "Confirm with your password" in review.text
+
+    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
+    applied = client.post(
+        "/admin/services/apply",
+        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+    )
+    assert applied.status_code == 200
+    assert "Changes applied" in applied.text
+
+    config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
+    assert config["services"]["facilmap"]["enabled"] is True
+    env = (root / ".env").read_text(encoding="utf-8")
+    assert "FACILMAP_DB_PASSWORD=" in env
+    assert "FACILMAP_DB_ROOT_PASSWORD=" in env
+    route = (root / "data" / "proxy" / "facilmap.caddy").read_text(encoding="utf-8")
+    assert "maps.example.org" in route
+
+    settings_page = client.get("/admin/services")
+    assert 'href="https://maps.example.org/"' in settings_page.text
+    assert "anyone who reaches the service can create maps" in settings_page.text
 
 
 def test_console_asks_for_the_password_before_stopping_matrix(console):

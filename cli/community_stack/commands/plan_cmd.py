@@ -112,6 +112,18 @@ def run_plan(
     else:
         print("  [DISABLED] Vikunja (not deployed)")
 
+    facilmap_cfg = services.get("facilmap", {})
+    if facilmap_cfg.get("enabled", False):
+        hostname = facilmap_cfg.get("hostname") or f"maps.{domain.get('base')}"
+        print(
+            f"  [ENABLED]  FacilMap (pinned image {facilmap_cfg.get('version', 'not configured')})"
+        )
+        print(f"             - URL: https://{hostname}/")
+        print("             - Database: dedicated MariaDB (private internal network)")
+        print("             - Maps use bearer links; the app has no user accounts or OIDC.")
+    else:
+        print("  [DISABLED] FacilMap (not deployed)")
+
     print("\n--- OPERATIONS & PERSISTENCE ---")
     backups_cfg = operations.get("backups", {})
     if backups_cfg.get("enabled"):

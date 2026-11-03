@@ -61,6 +61,11 @@ Vikunja is optional and disabled by default. To add it, follow the
 Compose project, dedicated private PostgreSQL database, and a generated Caddy
 route for its HTTPS hostname.
 
+FacilMap is also optional and disabled by default. Administrators can enable
+it, set its hostname, and deploy it from **Admin → Services and settings**.
+Review its bearer-link permission model before enabling it; see the
+[FacilMap guide](facilmap.md).
+
 The rest of this guide describes the same steps by hand.
 
 ---
@@ -291,6 +296,9 @@ creates and verifies a restrictive pre-deployment backup, and transfers only
 tracked source files. It preserves the VPS `.env`, `community-stack.yaml`,
 `data/`, `backups/`, and production-specific Caddy hostnames. It builds the
 announcements image, waits for health, and then validates and recreates Caddy.
+If the control-agent systemd unit is installed, deployment restarts it and
+verifies that its process start time advanced; a failed or unverified restart
+fails the deployment instead of being silently ignored.
 SSH authentication uses the local SSH agent; the web application receives no
 SSH key, Docker socket, or deployment shell access.
 

@@ -42,3 +42,29 @@
       VIKUNJA_CPU_LIMIT: "{{ services.vikunja.cpu_limit | default(1) }}"
     state: present
   when: services.vikunja.enabled | default(false)
+
+- name: Ensure FacilMap cache storage exists
+  ansible.builtin.file:
+    path: "{{ project_root | default('/opt/community-stack') }}/{{ services.facilmap.cache_path | default('data/facilmap/cache') }}"
+    state: directory
+    mode: "0750"
+  when: services.facilmap.enabled | default(false)
+
+- name: Deploy optional FacilMap collaborative maps service
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/facilmap"
+    env_files:
+      - ../../.env
+    environment:
+      FACILMAP_VERSION: "{{ services.facilmap.version | default('sha256:bcef0c14e23f8670ea21d18a15d4331348bf253550a5acf39b19d067546f629f') }}"
+      FACILMAP_DOMAIN: "{{ services.facilmap.hostname | default('maps.' ~ domain.base) }}"
+      FACILMAP_USER_AGENT: "CommunityStack-FacilMap/1.0-contact={{ acme_email | default('admin@example.org') }}"
+      FACILMAP_CACHE_PATH: "{{ services.facilmap.cache_path | default('data/facilmap/cache') }}"
+      FACILMAP_DATABASE_VERSION: "{{ services.facilmap.database.version | default('11.4.12') }}"
+      FACILMAP_DATABASE_DATA_PATH: "{{ services.facilmap.database.data_path | default('data/facilmap/mariadb') }}"
+      FACILMAP_MEMORY_LIMIT: "{{ services.facilmap.memory_limit | default('512M') }}"
+      FACILMAP_CPU_LIMIT: "{{ services.facilmap.cpu_limit | default(1) }}"
+      FACILMAP_DATABASE_MEMORY_LIMIT: "{{ services.facilmap.database.memory_limit | default('512M') }}"
+      FACILMAP_DATABASE_CPU_LIMIT: "{{ services.facilmap.database.cpu_limit | default(1) }}"
+    state: present
+  when: services.facilmap.enabled | default(false)

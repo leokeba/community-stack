@@ -40,11 +40,14 @@ def audit_network_isolation() -> list[str]:
     containers = list_community_containers()
     for c in containers:
         name = c.get("name", "")
-        # Flag if postgres exposes host ports directly
-        if "postgres" in name and "5432->" in c.get("status", ""):
-            findings.append(f"[CRITICAL] Container {name} is exposing database port 5432 publicly!")
+        # Flag if a database exposes host ports directly.
+        exposed_port = "5432" if "postgres" in name else "3306" if "facilmap_db" in name else None
+        if exposed_port and f"{exposed_port}->" in c.get("status", ""):
+            findings.append(
+                f"[CRITICAL] Container {name} is exposing database port {exposed_port} publicly!"
+            )
     if not findings:
-        findings.append("[OK]   Internal network isolation verified (No database ports exposed).")
+        findings.append("[OK]   Internal network isolation verified (no database ports exposed).")
     return findings
 
 
@@ -140,6 +143,107 @@ def audit_vikunja(
     return healthy, messages
 
 
+def audit_facilmap(
+    config: dict, config_path: Path | str, env_path: Path | str
+) -> tuple[bool, list[str]]:
+    """Check optional FacilMap containers, storage, HTTPS Socket.IO, database, and backup."""
+    settings = config.get("services", {}).get("facilmap", {})
+    if not settings.get("enabled", False):
+        return True, ["[INFO] FacilMap is disabled; optional-service checks skipped."]
+
+    messages: list[str] = []
+    healthy = True
+    containers = {item.get("name"): item for item in list_community_containers()}
+    for container_name, label in (
+        ("community_facilmap", "application"),
+        ("community_facilmap_db", "database"),
+    ):
+        container = containers.get(container_name)
+        if not container:
+            messages.append(f"[FAIL] FacilMap {label} container is not deployed.")
+            healthy = False
+        elif container.get("state") != "running":
+            messages.append(f"[FAIL] FacilMap {label} container is not running.")
+            healthy = False
+        elif "(healthy)" in container.get("status", ""):
+            messages.append(f"[OK] FacilMap {label} container is healthy.")
+        else:
+            messages.append(f"[FAIL] FacilMap {label} container is running but not healthy.")
+            healthy = False
+
+    project_root = Path(config_path).resolve().parent
+    cache_path = project_root / settings.get("cache_path", "data/facilmap/cache")
+    database_path = project_root / settings.get("database", {}).get(
+        "data_path", "data/facilmap/mariadb"
+    )
+    try:
+        if cache_path.is_dir() and database_path.is_dir():
+            if shutil.disk_usage(cache_path).free > 0 and shutil.disk_usage(database_path).free > 0:
+                messages.append(
+                    f"[OK] FacilMap cache and database storage are present at "
+                    f"{cache_path} and {database_path}."
+                )
+            else:
+                messages.append("[FAIL] FacilMap persistent storage has no free space.")
+                healthy = False
+        else:
+            messages.append(
+                f"[FAIL] FacilMap persistent storage is missing: {cache_path}, {database_path}."
+            )
+            healthy = False
+    except OSError as exc:
+        messages.append(f"[FAIL] FacilMap persistent storage check failed: {exc}")
+        healthy = False
+
+    hostname = settings.get("hostname") or f"maps.{config['domain']['base']}"
+    if hostname.endswith(("example.org", ".test", ".local", "localhost")):
+        messages.append(f"[WARN] Skipping HTTPS reachability for placeholder host {hostname}.")
+        healthy = False
+    else:
+        try:
+            with urllib.request.urlopen(f"https://{hostname}/", timeout=10) as response:
+                if response.status == 200:
+                    messages.append("[OK] FacilMap application is reachable through HTTPS.")
+                else:
+                    messages.append(
+                        f"[FAIL] FacilMap HTTPS application endpoint returned {response.status}."
+                    )
+                    healthy = False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            messages.append(f"[FAIL] FacilMap is not reachable through HTTPS: {exc}")
+            healthy = False
+        try:
+            url = f"https://{hostname}/socket.io/?EIO=4&transport=polling"
+            with urllib.request.urlopen(url, timeout=10) as response:
+                body = response.read(512).decode("utf-8", errors="replace")
+                if response.status == 200 and body.startswith("0{"):
+                    messages.append(
+                        "[OK] FacilMap Socket.IO polling handshake is reachable through HTTPS."
+                    )
+                else:
+                    messages.append(
+                        f"[FAIL] FacilMap HTTPS Socket.IO endpoint returned "
+                        f"{response.status}: {body[:160]}"
+                    )
+                    healthy = False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            messages.append(f"[FAIL] FacilMap Socket.IO is not reachable through HTTPS: {exc}")
+            healthy = False
+
+    try:
+        engine = BackupEngine(config_path=config_path, env_path=env_path)
+        backup_ok, backup_messages = engine.verify_backup()
+        if backup_ok:
+            messages.append("[OK] A FacilMap-inclusive backup is present and structurally valid.")
+        else:
+            messages.append("[FAIL] FacilMap backup check failed: " + "; ".join(backup_messages))
+            healthy = False
+    except (BackupError, ConfigError, OSError) as exc:
+        messages.append(f"[FAIL] FacilMap backup check failed: {exc}")
+        healthy = False
+    return healthy, messages
+
+
 def run_doctor(
     config_path: Path | str = "community-stack.yaml", env_path: Path | str = ".env"
 ) -> int:
@@ -194,13 +298,18 @@ def run_doctor(
         print(f"  Secrets file {env_file} is absent.")
 
     vikunja_ok = True
+    facilmap_ok = True
     if cfg:
         print("\n--- VIKUNJA SERVICE DIAGNOSTICS ---")
         vikunja_ok, messages = audit_vikunja(cfg, config_path, env_path)
+        for message in messages:
+            print(f"  {message}")
+        print("\n--- FACILMAP SERVICE DIAGNOSTICS ---")
+        facilmap_ok, messages = audit_facilmap(cfg, config_path, env_path)
         for message in messages:
             print(f"  {message}")
 
     print("\n================================================================================")
     print("Doctor report complete. All sensitive tokens and passwords have been redacted.")
     print("================================================================================")
-    return 0 if checks.ok and vikunja_ok else 1
+    return 0 if checks.ok and vikunja_ok and facilmap_ok else 1

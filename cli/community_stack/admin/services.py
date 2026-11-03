@@ -32,12 +32,24 @@ def register_services(
         message: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
-        values, status, components, vikunja_url, error = None, None, [], None, None
+        values, status, components, vikunja_url, facilmap_url, error = (
+            None,
+            None,
+            [],
+            None,
+            None,
+            None,
+        )
+        settings = []
+        agent_outdated = False
         if agent.available():
             try:
                 config = await run_in_threadpool(agent.call, "config.get", session["username"])
                 values = config["values"]
+                settings = [setting for setting in SETTINGS.values() if setting.key in values]
+                agent_outdated = len(settings) != len(SETTINGS)
                 vikunja_url = config.get("vikunja_url")
+                facilmap_url = config.get("facilmap_url")
                 status = await run_in_threadpool(agent.call, "status.get", session["username"])
                 components = (
                     await run_in_threadpool(agent.call, "services.versions", session["username"])
@@ -50,11 +62,13 @@ def register_services(
             page(
                 session,
                 agent_available=agent.available(),
-                settings=SETTINGS.values(),
+                settings=settings,
+                agent_outdated=agent_outdated,
                 values=values,
                 status=status,
                 components=components,
                 vikunja_url=vikunja_url,
+                facilmap_url=facilmap_url,
                 timezones=sorted(available_timezones()),
                 error=error,
                 **({"flash": message} if message else {}),

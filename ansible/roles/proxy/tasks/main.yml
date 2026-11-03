@@ -35,6 +35,21 @@
       {% endif %}
   register: vikunja_route_file
 
+- name: Configure the optional FacilMap Caddy route
+  ansible.builtin.copy:
+    dest: "{{ project_root | default('/opt/community-stack') }}/data/proxy/facilmap.caddy"
+    mode: "0644"
+    content: |
+      {% if services.facilmap.enabled | default(false) %}
+      {{ services.facilmap.hostname | default('maps.' ~ domain.base) }} {
+          encode zstd gzip
+          reverse_proxy community_facilmap:8080
+      }
+      {% else %}
+      # FacilMap is disabled; no public route is configured.
+      {% endif %}
+  register: facilmap_route_file
+
 - name: Deploy Caddy Ingress Compose stack
   community.docker.docker_compose_v2:
     project_src: "{{ project_root | default('/opt/community-stack') }}/services/proxy"
@@ -44,4 +59,4 @@
   community.docker.docker_compose_v2:
     project_src: "{{ project_root | default('/opt/community-stack') }}/services/proxy"
     state: restarted
-  when: vikunja_route_file.changed
+  when: vikunja_route_file.changed or facilmap_route_file.changed

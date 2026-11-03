@@ -38,6 +38,16 @@ def test_prepare_vikunja_generates_secrets_and_persistent_paths(tmp_path):
     assert env_file.stat().st_mode & 0o777 == 0o600
 
 
+def test_prepare_disabled_vikunja_creates_the_empty_route_before_proxy_start(tmp_path):
+    config = load_config("community-stack.yaml")
+
+    prepare_vikunja(tmp_path, config, tmp_path / ".env")
+
+    route = tmp_path / "data/proxy/vikunja.caddy"
+    assert route.is_file()
+    assert "Vikunja is disabled" in route.read_text(encoding="utf-8")
+
+
 def test_prepare_vikunja_refuses_to_regenerate_secrets_for_existing_data(tmp_path):
     config = load_config("community-stack.yaml")
     config["services"]["vikunja"]["enabled"] = True
