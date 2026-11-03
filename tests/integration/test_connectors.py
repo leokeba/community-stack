@@ -531,6 +531,7 @@ def test_console_connects_pixelfed_with_oauth(console):
     )
     page = client.get("/admin/channels")
     assert "https://community.example.org/admin/channels/pixelfed/callback" in page.text
+    assert 'action="/admin/channels/pixelfed/oauth/start" data-native' in page.text
 
     start = client.post(
         "/admin/channels/pixelfed/oauth/start",

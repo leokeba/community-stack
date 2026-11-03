@@ -35,7 +35,7 @@
         {% if connector.setup_page %}<p><a href="{{ connector.setup_page[1] }}">{{ connector.setup_page[0] }}</a></p>{% endif %}
         {% if item.available %}
         {% if connector.kind == "pixelfed" %}
-        <form method="post" action="/admin/channels/pixelfed/oauth/start">
+        <form method="post" action="/admin/channels/pixelfed/oauth/start" data-native>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label for="pixelfed-oauth-instance-url">Pixelfed server address</label>
           <input id="pixelfed-oauth-instance-url" name="instance_url" type="text" value="{{ item["values"]["instance_url"] }}" placeholder="https://pixelfed.social" required>
