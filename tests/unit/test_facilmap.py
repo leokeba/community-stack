@@ -70,6 +70,41 @@ def test_prepare_facilmap_refuses_to_regenerate_database_credentials(tmp_path):
         prepare_facilmap(tmp_path, config, env_file)
 
 
+def test_prepare_facilmap_does_not_inspect_protected_storage_when_credentials_exist(
+    tmp_path, monkeypatch
+):
+    config = enabled_config()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "FACILMAP_DB_PASSWORD=existing-password\n"
+        "FACILMAP_DB_ROOT_PASSWORD=existing-root-password\n",
+        encoding="utf-8",
+    )
+    database_path = tmp_path / "data/facilmap/mariadb"
+    cache_path = tmp_path / "data/facilmap/cache"
+    original_is_dir = Path.is_dir
+    original_mkdir = Path.mkdir
+
+    def is_dir(path):
+        if path == database_path:
+            raise PermissionError("protected database volume")
+        return original_is_dir(path)
+
+    def mkdir(path, *args, **kwargs):
+        if path in (database_path, cache_path):
+            raise PermissionError("protected persistent volume")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+
+    prepare_facilmap(tmp_path, config, env_file)
+
+    contents = env_file.read_text(encoding="utf-8")
+    assert "FACILMAP_DB_PASSWORD=existing-password" in contents
+    assert "FACILMAP_DB_ROOT_PASSWORD=existing-root-password" in contents
+
+
 def test_facilmap_compose_keeps_database_private_and_waits_for_health():
     compose = yaml.safe_load(
         Path("services/facilmap/docker-compose.yml").read_text(encoding="utf-8")

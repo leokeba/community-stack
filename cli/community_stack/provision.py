@@ -291,13 +291,20 @@ def prepare_facilmap(project_dir: Path, config: dict, env_path: Path) -> str | N
 
     env_values = parse_env_file(env_path)
     required = ("FACILMAP_DB_PASSWORD", "FACILMAP_DB_ROOT_PASSWORD")
-    existing_data = database_path.is_dir() and any(database_path.iterdir())
     missing = [key for key in required if not env_values.get(key)]
-    if missing and existing_data:
-        raise ProvisionError(
-            "FacilMap database credentials are missing from .env while persistent data exists. "
-            "Restore FACILMAP_DB_PASSWORD and FACILMAP_DB_ROOT_PASSWORD before starting it."
-        )
+    if missing:
+        try:
+            existing_data = database_path.is_dir() and any(database_path.iterdir())
+        except OSError as exc:
+            raise ProvisionError(
+                "FacilMap credentials are missing and database storage cannot be inspected. "
+                "Restore FACILMAP_DB_PASSWORD and FACILMAP_DB_ROOT_PASSWORD before starting it."
+            ) from exc
+        if existing_data:
+            raise ProvisionError(
+                "FacilMap database credentials are missing from .env while persistent data exists. "
+                "Restore FACILMAP_DB_PASSWORD and FACILMAP_DB_ROOT_PASSWORD before starting it."
+            )
     generated = {
         "FACILMAP_DB_PASSWORD": generate_secret(32),
         "FACILMAP_DB_ROOT_PASSWORD": generate_secret(32),
@@ -329,8 +336,9 @@ def prepare_facilmap(project_dir: Path, config: dict, env_path: Path) -> str | N
     set_env_values(env_path, values)
     if os.name == "posix":
         env_path.chmod(0o600)
-    for path in (cache_path, database_path):
-        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if missing:
+        for path in (cache_path, database_path):
+            path.mkdir(mode=0o750, parents=True, exist_ok=True)
     return f"Prepared FacilMap storage and deployment settings for https://{hostname}/."
 
 
