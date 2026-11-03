@@ -6,6 +6,7 @@ from pathlib import Path
 
 from community_stack import docker
 from community_stack.backup import BackupEngine, BackupError
+from community_stack.collaborative_apps import COLLABORATIVE_APPS_BY_KEY
 from community_stack.commands.logs_cmd import SERVICE_DIR_MAP, get_services_root
 from community_stack.config import ConfigError, load_config
 from community_stack.provision import ProvisionError, prepare_service
@@ -34,7 +35,7 @@ def run_upgrade(
 
     print(f"Initiating safe upgrade for service '{service}' in {svc_dir.name}...\n")
 
-    if dir_name in ("vikunja", "facilmap"):
+    if dir_name in COLLABORATIVE_APPS_BY_KEY:
         try:
             config = load_config(config_path)
         except (ConfigError, OSError) as exc:
@@ -62,7 +63,7 @@ def run_upgrade(
         snapshot = engine.create_snapshot()
         print(f"      Pre-upgrade snapshot created: {snapshot.id}")
     except BackupError as exc:
-        if dir_name in ("vikunja", "facilmap"):
+        if dir_name in COLLABORATIVE_APPS_BY_KEY:
             print(f"[ERROR] {service} upgrade requires a successful pre-upgrade backup: {exc}")
             return 1
         print(f"[WARN] Pre-upgrade backup failed: {exc}. Continuing with caution.")

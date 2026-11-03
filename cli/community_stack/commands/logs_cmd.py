@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from community_stack import docker
+from community_stack.collaborative_apps import COLLABORATIVE_SERVICE_ALIASES
 
 SERVICE_DIR_MAP = {
     "matrix": "matrix",
@@ -19,11 +20,8 @@ SERVICE_DIR_MAP = {
     "proxy": "proxy",
     "whatsapp": "whatsapp_bridge",
     "whatsapp_bridge": "whatsapp_bridge",
-    "vikunja": "vikunja",
-    "tasks": "vikunja",
-    "facilmap": "facilmap",
-    "maps": "facilmap",
 }
+SERVICE_DIR_MAP.update(COLLABORATIVE_SERVICE_ALIASES)
 
 
 def get_services_root() -> Path:

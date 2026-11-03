@@ -110,3 +110,18 @@ route only while enabled and includes its database dump and cache in backups.
 FacilMap has no user accounts or OIDC: map URLs are bearer credentials, not
 authenticated private access. See [docs/facilmap.md](facilmap.md) for the
 permission model and operational limits.
+
+## 5. Collaborative Application Operations
+
+Vikunja and FacilMap share a deliberately small operational catalog in
+`cli/community_stack/collaborative_apps.py`. It defines their CLI aliases,
+display names, default public hostnames, managed container names, and database
+backup metadata. Service lookup, status and URL reporting, database-port
+diagnostics, and the common backup pause/resume and dump-verification flow use
+that catalog.
+
+Application-specific Compose definitions, provisioning, secrets, database dump
+commands, storage semantics, health checks, and sharing models remain in their
+respective integrations. The catalog is an internal code-level reuse point, not
+a plugin API or marketplace; each new application still needs an explicit
+implementation and tested operational behavior.

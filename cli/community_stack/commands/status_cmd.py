@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from community_stack import docker
+from community_stack.collaborative_apps import COLLABORATIVE_APPS, COLLABORATIVE_APPS_BY_KEY
 from community_stack.config import ConfigError, load_config
 
 
@@ -14,17 +15,11 @@ def run_status(config_path: Path | str = "community-stack.yaml") -> int:
     config_valid = True
     try:
         config = load_config(config_path)
-        services = config.get("services", {})
-        for service, label, default_host in (
-            ("vikunja", "Vikunja", "tasks"),
-            ("facilmap", "FacilMap", "maps"),
-        ):
-            settings = services.get(service, {})
-            hostname = settings.get("hostname") or f"{default_host}.{config['domain']['base']}"
-            apps[service] = {
-                "label": label,
-                "enabled": settings.get("enabled", False),
-                "url": f"https://{hostname}/",
+        for app in COLLABORATIVE_APPS:
+            apps[app.key] = {
+                "label": app.label,
+                "enabled": app.is_enabled(config),
+                "url": app.public_url(config),
             }
     except (ConfigError, OSError) as exc:
         config_valid = False
@@ -34,8 +29,8 @@ def run_status(config_path: Path | str = "community-stack.yaml") -> int:
         print("[WARNING] Docker daemon is not accessible or not running.")
         print("          Cannot query container status.")
         if not config_valid:
-            print("Vikunja: status unknown because configuration could not be loaded")
-            print("FacilMap: status unknown because configuration could not be loaded")
+            for app in COLLABORATIVE_APPS:
+                print(f"{app.label}: status unknown because configuration could not be loaded")
         else:
             for app in apps.values():
                 state = "enabled but unavailable" if app["enabled"] else "disabled"
@@ -64,13 +59,15 @@ def run_status(config_path: Path | str = "community-stack.yaml") -> int:
         print(f"Total managed containers: {len(containers)}")
 
     if not config_valid:
-        print("Vikunja: status unknown because configuration could not be loaded")
-        print("FacilMap: status unknown because configuration could not be loaded")
+        for app in COLLABORATIVE_APPS:
+            print(f"{app.label}: status unknown because configuration could not be loaded")
         return 1
 
     for service, app in apps.items():
+        definition = COLLABORATIVE_APPS_BY_KEY[service]
         container = next(
-            (item for item in containers if item.get("name") == f"community_{service}"), None
+            (item for item in containers if item.get("name") == definition.container_name),
+            None,
         )
         if not app["enabled"]:
             state = "disabled"

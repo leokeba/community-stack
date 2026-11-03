@@ -17,6 +17,7 @@ from community_stack.agent import backups, health, matrix_admin, updates
 from community_stack.agent import community as community_profile
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
+from community_stack.collaborative_apps import COLLABORATIVE_APPS
 from community_stack.config import ConfigError, load_config
 
 READ = "read"
@@ -205,18 +206,10 @@ def _matrix_call(handler):
 
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
-    services = config.get("services", {})
-    vikunja = services.get("vikunja", {})
-    vikunja_hostname = vikunja.get("hostname") or f"tasks.{config['domain']['base']}"
-    facilmap = services.get("facilmap", {})
-    facilmap_hostname = facilmap.get("hostname") or f"maps.{config['domain']['base']}"
-    return {
-        "values": settings_catalog.current_values(config),
-        "vikunja_url": f"https://{vikunja_hostname}/" if vikunja.get("enabled", False) else None,
-        "facilmap_url": (
-            f"https://{facilmap_hostname}/" if facilmap.get("enabled", False) else None
-        ),
-    }
+    result = {"values": settings_catalog.current_values(config)}
+    for app in COLLABORATIVE_APPS:
+        result[f"{app.key}_url"] = app.public_url(config) if app.is_enabled(config) else None
+    return result
 
 
 def config_plan(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:

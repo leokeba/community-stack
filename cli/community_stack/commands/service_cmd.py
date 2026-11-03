@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from community_stack import docker
+from community_stack.collaborative_apps import COLLABORATIVE_APPS_BY_KEY
 from community_stack.commands.logs_cmd import SERVICE_DIR_MAP, get_services_root
 from community_stack.commands.status_cmd import run_status
 from community_stack.config import ConfigError, load_config, validate_config
@@ -50,8 +51,8 @@ def run_service(
     env_file = Path(env_path).resolve()
 
     if action in ("enable", "disable"):
-        if directory not in ("vikunja", "facilmap"):
-            print("[ERROR] Enable/disable via this command is supported for Vikunja and FacilMap.")
+        if directory not in COLLABORATIVE_APPS_BY_KEY:
+            print("[ERROR] Enable/disable via this command is supported for collaborative apps.")
             return 1
         if action == "disable" and not docker.is_docker_available():
             print(f"[ERROR] Docker is unavailable; {service} was not disabled.")
@@ -116,7 +117,7 @@ def run_service(
 
     if action == "status":
         return run_status(config_path=config_file)
-    if directory in ("vikunja", "facilmap") and action in ("start", "restart"):
+    if directory in COLLABORATIVE_APPS_BY_KEY and action in ("start", "restart"):
         try:
             config = load_config(config_file)
         except (ConfigError, OSError) as exc:

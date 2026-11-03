@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from community_stack.backup import BackupEngine, BackupError
+from community_stack.collaborative_apps import COLLABORATIVE_APPS, COLLABORATIVE_APPS_BY_KEY
 from community_stack.config import ConfigError, load_config
 from community_stack.docker import is_docker_available, list_community_containers
 from community_stack.redact import redact_dict
@@ -41,7 +42,14 @@ def audit_network_isolation() -> list[str]:
     for c in containers:
         name = c.get("name", "")
         # Flag if a database exposes host ports directly.
-        exposed_port = "5432" if "postgres" in name else "3306" if "facilmap_db" in name else None
+        exposed_port = next(
+            (
+                str(app.database_port)
+                for app in COLLABORATIVE_APPS
+                if name == app.database_container_name
+            ),
+            "5432" if "postgres" in name else None,
+        )
         if exposed_port and f"{exposed_port}->" in c.get("status", ""):
             findings.append(
                 f"[CRITICAL] Container {name} is exposing database port {exposed_port} publicly!"
@@ -62,9 +70,10 @@ def audit_vikunja(
     messages: list[str] = []
     healthy = True
     containers = {item.get("name"): item for item in list_community_containers()}
+    app = COLLABORATIVE_APPS_BY_KEY["vikunja"]
     for container_name, label in (
-        ("community_vikunja", "application"),
-        ("community_vikunja_db", "database"),
+        (app.container_name, "application"),
+        (app.database_container_name, "database"),
     ):
         container = containers.get(container_name)
         if not container:
@@ -88,7 +97,7 @@ def audit_vikunja(
     files_path = project_root / settings.get("files_path", "data/vikunja/files")
     try:
         database_path = project_root / settings.get("database", {}).get(
-            "data_path", "data/vikunja/postgres"
+            "data_path", app.database_path_default
         )
         if (
             files_path.is_dir()
@@ -108,7 +117,7 @@ def audit_vikunja(
         messages.append(f"[FAIL] Vikunja persistent storage check failed: {exc}")
         healthy = False
 
-    hostname = settings.get("hostname") or f"tasks.{config['domain']['base']}"
+    hostname = app.public_hostname(config)
     if hostname.endswith(("example.org", ".test", ".local", "localhost")):
         messages.append(f"[WARN] Skipping HTTPS reachability for placeholder host {hostname}.")
         healthy = False
@@ -154,9 +163,10 @@ def audit_facilmap(
     messages: list[str] = []
     healthy = True
     containers = {item.get("name"): item for item in list_community_containers()}
+    app = COLLABORATIVE_APPS_BY_KEY["facilmap"]
     for container_name, label in (
-        ("community_facilmap", "application"),
-        ("community_facilmap_db", "database"),
+        (app.container_name, "application"),
+        (app.database_container_name, "database"),
     ):
         container = containers.get(container_name)
         if not container:
@@ -174,7 +184,7 @@ def audit_facilmap(
     project_root = Path(config_path).resolve().parent
     cache_path = project_root / settings.get("cache_path", "data/facilmap/cache")
     database_path = project_root / settings.get("database", {}).get(
-        "data_path", "data/facilmap/mariadb"
+        "data_path", app.database_path_default
     )
     try:
         if cache_path.is_dir() and database_path.is_dir():
@@ -195,7 +205,7 @@ def audit_facilmap(
         messages.append(f"[FAIL] FacilMap persistent storage check failed: {exc}")
         healthy = False
 
-    hostname = settings.get("hostname") or f"maps.{config['domain']['base']}"
+    hostname = app.public_hostname(config)
     if hostname.endswith(("example.org", ".test", ".local", "localhost")):
         messages.append(f"[WARN] Skipping HTTPS reachability for placeholder host {hostname}.")
         healthy = False

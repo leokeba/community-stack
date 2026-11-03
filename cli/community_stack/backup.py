@@ -19,6 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from community_stack import docker
+from community_stack.collaborative_apps import (
+    COLLABORATIVE_APPS,
+    COLLABORATIVE_APPS_BY_KEY,
+    CollaborativeApp,
+)
 from community_stack.config import ConfigError, load_config
 from community_stack.docker import is_docker_available
 from community_stack.secrets import parse_env_file
@@ -46,8 +51,8 @@ RESTIC_ENV_PASSTHROUGH = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "XDG_CACHE
 RESTIC_SETTINGS = ("RESTIC_CACHE_DIR", "RESTIC_REPOSITORY")
 REQUIRED_SNAPSHOT_FILES = ("manifest.json", "community-stack.yaml")
 EXPECTED_SNAPSHOT_FILES = ("data.tar.gz", "postgres_synapse.dump")
-VIKUNJA_DUMP_FILE = "postgres_vikunja.dump"
-FACILMAP_DUMP_FILE = "mariadb_facilmap.sql"
+VIKUNJA_DUMP_FILE = COLLABORATIVE_APPS_BY_KEY["vikunja"].database_dump_file
+FACILMAP_DUMP_FILE = COLLABORATIVE_APPS_BY_KEY["facilmap"].database_dump_file
 
 
 def is_restic_available() -> bool:
@@ -96,7 +101,7 @@ def dump_vikunja_database(target_file: Path) -> bool:
     cmd = [
         "docker",
         "exec",
-        "community_vikunja_db",
+        COLLABORATIVE_APPS_BY_KEY["vikunja"].database_container_name,
         "pg_dump",
         "-U",
         "vikunja",
@@ -126,13 +131,28 @@ def dump_facilmap_database(target_file: Path) -> bool:
         'mariadb-dump --defaults-extra-file="$credentials" --single-transaction '
         '--quick --routines --events --triggers "$MARIADB_DATABASE"'
     )
-    cmd = ["docker", "exec", "community_facilmap_db", "sh", "-ec", script]
+    cmd = [
+        "docker",
+        "exec",
+        COLLABORATIVE_APPS_BY_KEY["facilmap"].database_container_name,
+        "sh",
+        "-ec",
+        script,
+    ]
     try:
         with open(target_file, "wb") as target:
             result = subprocess.run(cmd, stdout=target, stderr=subprocess.PIPE, check=False)
         return result.returncode == 0 and target_file.stat().st_size > 0
     except (subprocess.SubprocessError, OSError):
         return False
+
+
+def dump_collaborative_database(app: CollaborativeApp, target_file: Path) -> bool:
+    if app.key == "vikunja":
+        return dump_vikunja_database(target_file)
+    if app.key == "facilmap":
+        return dump_facilmap_database(target_file)
+    raise BackupError(f"No database dump implementation is configured for {app.label}.")
 
 
 class BackupEngine:
@@ -242,90 +262,65 @@ class BackupEngine:
             raise BackupError("No backup snapshots found.")
         return snapshots[-1]
 
-    def _pause_vikunja(self) -> bool:
-        if not self.config.get("services", {}).get("vikunja", {}).get("enabled", False):
+    def _pause_collaborative_app(self, app: CollaborativeApp) -> bool:
+        if not app.is_enabled(self.config):
             return False
         if not is_docker_available():
             raise BackupError(
-                "Vikunja is enabled but Docker is unavailable; its backup was not taken."
+                f"{app.label} is enabled but Docker is unavailable; its backup was not taken."
             )
         try:
             state = subprocess.run(
-                ["docker", "inspect", "--format={{.State.Running}}", "community_vikunja"],
+                [
+                    "docker",
+                    "inspect",
+                    "--format={{.State.Running}}",
+                    app.container_name,
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
             )
         except OSError as exc:
-            raise BackupError(f"Could not inspect Vikunja before backup: {exc}") from exc
+            raise BackupError(f"Could not inspect {app.label} before backup: {exc}") from exc
         if state.returncode != 0:
-            raise BackupError("Vikunja is enabled but its application container is not deployed.")
+            raise BackupError(
+                f"{app.label} is enabled but its application container is not deployed."
+            )
         if state.stdout.strip().lower() != "true":
             return False
         compose = docker.run_compose(
-            self.project_root / "services" / "vikunja",
-            ["stop", "vikunja"],
+            self.project_root / "services" / app.key,
+            ["stop", app.key],
             env_file=self.env_path,
             capture_output=True,
         )
         if compose.returncode != 0:
-            raise BackupError("Could not stop Vikunja for a consistent application backup.")
+            raise BackupError(f"Could not stop {app.label} for a consistent application backup.")
         return True
 
-    def _resume_vikunja(self) -> None:
+    def _resume_collaborative_app(self, app: CollaborativeApp) -> None:
         compose = docker.run_compose(
-            self.project_root / "services" / "vikunja",
-            ["start", "vikunja"],
+            self.project_root / "services" / app.key,
+            ["start", app.key],
             env_file=self.env_path,
             capture_output=True,
         )
         if compose.returncode != 0:
             raise BackupError(
-                "The backup completed, but Vikunja could not be restarted; inspect its service logs."
-            )
-
-    def _pause_facilmap(self) -> bool:
-        if not self.config.get("services", {}).get("facilmap", {}).get("enabled", False):
-            return False
-        if not is_docker_available():
-            raise BackupError(
-                "FacilMap is enabled but Docker is unavailable; its backup was not taken."
-            )
-        try:
-            state = subprocess.run(
-                ["docker", "inspect", "--format={{.State.Running}}", "community_facilmap"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError as exc:
-            raise BackupError(f"Could not inspect FacilMap before backup: {exc}") from exc
-        if state.returncode != 0:
-            raise BackupError("FacilMap is enabled but its application container is not deployed.")
-        if state.stdout.strip().lower() != "true":
-            return False
-        compose = docker.run_compose(
-            self.project_root / "services" / "facilmap",
-            ["stop", "facilmap"],
-            env_file=self.env_path,
-            capture_output=True,
-        )
-        if compose.returncode != 0:
-            raise BackupError("Could not stop FacilMap for a consistent application backup.")
-        return True
-
-    def _resume_facilmap(self) -> None:
-        compose = docker.run_compose(
-            self.project_root / "services" / "facilmap",
-            ["start", "facilmap"],
-            env_file=self.env_path,
-            capture_output=True,
-        )
-        if compose.returncode != 0:
-            raise BackupError(
-                "The backup completed, but FacilMap could not be restarted; "
+                f"The backup completed, but {app.label} could not be restarted; "
                 "inspect its service logs."
             )
+
+    def _resume_collaborative_apps(self, apps: list[CollaborativeApp]) -> None:
+        resume_error = None
+        for app in reversed(apps):
+            try:
+                self._resume_collaborative_app(app)
+            except BackupError as exc:
+                resume_error = exc
+        if resume_error is not None:
+            raise resume_error
 
     def create_snapshot(self) -> SnapshotInfo:
         """Create a timestamped, owner-only (0600) backup snapshot.
@@ -341,12 +336,14 @@ class BackupEngine:
         snapshot_id = f"snap_{timestamp}"
         staging_dir = self.backup_dir / f"staging_{snapshot_id}"
         staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        vikunja_paused = False
-        facilmap_paused = False
+        paused_apps: list[CollaborativeApp] = []
+        vikunja_enabled = COLLABORATIVE_APPS_BY_KEY["vikunja"].is_enabled(self.config)
+        facilmap_enabled = COLLABORATIVE_APPS_BY_KEY["facilmap"].is_enabled(self.config)
 
         try:
-            vikunja_paused = self._pause_vikunja()
-            facilmap_paused = self._pause_facilmap()
+            for app in COLLABORATIVE_APPS:
+                if self._pause_collaborative_app(app):
+                    paused_apps.append(app)
 
             # 1. Database dump
             db_dump_file = staging_dir / "postgres_synapse.dump"
@@ -358,28 +355,18 @@ class BackupEngine:
                     encoding="utf-8",
                 )
 
-            vikunja_enabled = (
-                self.config.get("services", {}).get("vikunja", {}).get("enabled", False)
-            )
-            if vikunja_enabled:
-                vikunja_dump = staging_dir / VIKUNJA_DUMP_FILE
-                if not dump_vikunja_database(vikunja_dump):
+            for app in COLLABORATIVE_APPS:
+                if not app.is_enabled(self.config):
+                    continue
+                app_dump = staging_dir / app.database_dump_file
+                if not dump_collaborative_database(app, app_dump):
                     raise BackupError(
-                        "Could not create the Vikunja PostgreSQL dump. "
-                        "Check community_vikunja_db health and database logs."
+                        f"Could not create the {app.label} {app.database_engine} dump. "
+                        f"Check {app.database_container_name} health and database logs."
                     )
-
-            facilmap_enabled = (
-                self.config.get("services", {}).get("facilmap", {}).get("enabled", False)
+            databases_included = db_dumped or any(
+                app.is_enabled(self.config) for app in COLLABORATIVE_APPS
             )
-            if facilmap_enabled:
-                facilmap_dump = staging_dir / FACILMAP_DUMP_FILE
-                if not dump_facilmap_database(facilmap_dump):
-                    raise BackupError(
-                        "Could not create the FacilMap MariaDB dump. "
-                        "Check community_facilmap_db health and database logs."
-                    )
-            databases_included = db_dumped or vikunja_enabled or facilmap_enabled
 
             # 2. Archive data directory
             data_dir = self.project_root / "data"
@@ -411,24 +398,14 @@ class BackupEngine:
                     for database in live_databases:
                         if relative_name == database or relative_name.startswith(database + "-"):
                             return None
-                    if vikunja_enabled:
+                    for app in COLLABORATIVE_APPS:
+                        if not app.is_enabled(self.config):
+                            continue
                         database_path = (
                             self.config.get("services", {})
-                            .get("vikunja", {})
+                            .get(app.key, {})
                             .get("database", {})
-                            .get("data_path", "data/vikunja/postgres")
-                        )
-                        database_relative = database_path.removeprefix("./").removeprefix("data/")
-                        if relative_name == database_relative or relative_name.startswith(
-                            database_relative + "/"
-                        ):
-                            return None
-                    if facilmap_enabled:
-                        database_path = (
-                            self.config.get("services", {})
-                            .get("facilmap", {})
-                            .get("database", {})
-                            .get("data_path", "data/facilmap/mariadb")
+                            .get("data_path", app.database_path_default)
                         )
                         database_relative = database_path.removeprefix("./").removeprefix("data/")
                         if relative_name == database_relative or relative_name.startswith(
@@ -501,15 +478,10 @@ class BackupEngine:
             )
         finally:
             try:
-                if facilmap_paused:
-                    self._resume_facilmap()
+                self._resume_collaborative_apps(paused_apps)
             finally:
-                try:
-                    if vikunja_paused:
-                        self._resume_vikunja()
-                finally:
-                    if staging_dir.exists():
-                        shutil.rmtree(staging_dir, ignore_errors=True)
+                if staging_dir.exists():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
 
     def _store_in_restic(
         self,
@@ -605,8 +577,6 @@ class BackupEngine:
                 has_config = any("community-stack.yaml" in m for m in members)
                 has_data = any("data.tar.gz" in m for m in members)
                 has_dump = any("postgres_synapse.dump" in m for m in members)
-                has_vikunja_dump = any(VIKUNJA_DUMP_FILE in m for m in members)
-                has_facilmap_dump = any(FACILMAP_DUMP_FILE in m for m in members)
 
                 if not has_manifest:
                     messages.append("ERROR: Missing manifest.json in snapshot.")
@@ -618,18 +588,14 @@ class BackupEngine:
                     messages.append("WARNING: Missing data directory archive in snapshot.")
                 if not has_dump:
                     messages.append("WARNING: Missing database dump in snapshot.")
-                if (
-                    self.config.get("services", {}).get("vikunja", {}).get("enabled", False)
-                    and not has_vikunja_dump
-                ):
-                    messages.append("ERROR: Missing Vikunja PostgreSQL dump in snapshot.")
-                    return False, messages
-                if (
-                    self.config.get("services", {}).get("facilmap", {}).get("enabled", False)
-                    and not has_facilmap_dump
-                ):
-                    messages.append("ERROR: Missing FacilMap MariaDB dump in snapshot.")
-                    return False, messages
+                for app in COLLABORATIVE_APPS:
+                    if not app.is_enabled(self.config):
+                        continue
+                    if not any(app.database_dump_file in member for member in members):
+                        messages.append(
+                            f"ERROR: Missing {app.label} {app.database_engine} dump in snapshot."
+                        )
+                        return False, messages
 
                 messages.append("All critical recovery components verified present.")
                 return True, messages
@@ -663,10 +629,9 @@ class BackupEngine:
             and node.get("path", "").startswith(root + "/")
         }
         required = list(REQUIRED_SNAPSHOT_FILES)
-        if self.config.get("services", {}).get("vikunja", {}).get("enabled", False):
-            required.append(VIKUNJA_DUMP_FILE)
-        if self.config.get("services", {}).get("facilmap", {}).get("enabled", False):
-            required.append(FACILMAP_DUMP_FILE)
+        required.extend(
+            app.database_dump_file for app in COLLABORATIVE_APPS if app.is_enabled(self.config)
+        )
         missing = [name for name in required if name not in names]
         if missing:
             messages.append(f"ERROR: Missing {', '.join(missing)} in snapshot.")
@@ -759,12 +724,10 @@ class BackupEngine:
         dump_src = snap_content / "postgres_synapse.dump"
         if dump_src.is_file():
             shutil.copy(dump_src, target_backups / "postgres_synapse.dump")
-        vikunja_dump = snap_content / VIKUNJA_DUMP_FILE
-        if vikunja_dump.is_file():
-            shutil.copy(vikunja_dump, target_backups / VIKUNJA_DUMP_FILE)
-        facilmap_dump = snap_content / FACILMAP_DUMP_FILE
-        if facilmap_dump.is_file():
-            shutil.copy(facilmap_dump, target_backups / FACILMAP_DUMP_FILE)
+        for app in COLLABORATIVE_APPS:
+            app_dump = snap_content / app.database_dump_file
+            if app_dump.is_file():
+                shutil.copy(app_dump, target_backups / app.database_dump_file)
 
         # Validate restored configuration
         try:
