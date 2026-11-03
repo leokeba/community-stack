@@ -201,14 +201,21 @@ def prepare_vikunja(project_dir: Path, config: dict, env_path: Path) -> str | No
     env_values = parse_env_file(env_path)
     required = ("VIKUNJA_POSTGRES_PASSWORD", "VIKUNJA_SERVICE_SECRET")
     missing = [key for key in required if not env_values.get(key)]
-    existing_data = (database_path / "PG_VERSION").is_file()
-    if files_path.is_dir():
-        existing_data = existing_data or any(files_path.iterdir())
-    if missing and existing_data:
-        raise ProvisionError(
-            "Vikunja secrets are missing from .env while persistent data exists. "
-            "Restore VIKUNJA_POSTGRES_PASSWORD and VIKUNJA_SERVICE_SECRET before starting it."
-        )
+    if missing:
+        try:
+            existing_data = (database_path / "PG_VERSION").is_file()
+            if files_path.is_dir():
+                existing_data = existing_data or any(files_path.iterdir())
+        except OSError as exc:
+            raise ProvisionError(
+                "Vikunja secrets are missing and persistent storage cannot be inspected. "
+                "Restore VIKUNJA_POSTGRES_PASSWORD and VIKUNJA_SERVICE_SECRET before starting it."
+            ) from exc
+        if existing_data:
+            raise ProvisionError(
+                "Vikunja secrets are missing from .env while persistent data exists. "
+                "Restore VIKUNJA_POSTGRES_PASSWORD and VIKUNJA_SERVICE_SECRET before starting it."
+            )
     generated = {
         "VIKUNJA_POSTGRES_PASSWORD": generate_secret(32),
         "VIKUNJA_SERVICE_SECRET": generate_secret(32),
@@ -244,8 +251,12 @@ def prepare_vikunja(project_dir: Path, config: dict, env_path: Path) -> str | No
     set_env_values(env_path, values)
     if os.name == "posix":
         env_path.chmod(0o600)
-    for path in (files_path, database_path):
-        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if missing:
+        try:
+            for path in (files_path, database_path):
+                path.mkdir(mode=0o750, parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ProvisionError(f"Could not prepare Vikunja storage: {exc}") from exc
     return f"Prepared Vikunja storage and deployment settings for https://{hostname}/."
 
 

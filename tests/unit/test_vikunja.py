@@ -61,6 +61,54 @@ def test_prepare_vikunja_refuses_to_regenerate_secrets_for_existing_data(tmp_pat
         prepare_vikunja(tmp_path, config, env_file)
 
 
+def test_prepare_vikunja_does_not_inspect_protected_storage_when_secrets_exist(
+    tmp_path, monkeypatch
+):
+    config = load_config("community-stack.yaml")
+    config["services"]["vikunja"]["enabled"] = True
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "VIKUNJA_POSTGRES_PASSWORD=existing-password\nVIKUNJA_SERVICE_SECRET=existing-secret\n",
+        encoding="utf-8",
+    )
+    database_marker = tmp_path / "data/vikunja/postgres/PG_VERSION"
+    original_is_file = Path.is_file
+
+    def is_file(path):
+        if path == database_marker:
+            raise PermissionError("protected database volume")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+
+    prepare_vikunja(tmp_path, config, env_file)
+
+    secrets = parse_env_file(env_file)
+    assert secrets["VIKUNJA_POSTGRES_PASSWORD"] == "existing-password"
+    assert secrets["VIKUNJA_SERVICE_SECRET"] == "existing-secret"
+
+
+def test_prepare_vikunja_refuses_to_generate_secrets_if_storage_cannot_be_inspected(
+    tmp_path, monkeypatch
+):
+    config = load_config("community-stack.yaml")
+    config["services"]["vikunja"]["enabled"] = True
+    env_file = tmp_path / ".env"
+    env_file.write_text("RESTIC_PASSWORD=keep-this\n", encoding="utf-8")
+    database_marker = tmp_path / "data/vikunja/postgres/PG_VERSION"
+    original_is_file = Path.is_file
+
+    def is_file(path):
+        if path == database_marker:
+            raise PermissionError("protected database volume")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+
+    with pytest.raises(ProvisionError, match="persistent storage cannot be inspected"):
+        prepare_vikunja(tmp_path, config, env_file)
+
+
 def test_vikunja_doctor_skips_disabled_service():
     healthy, messages = audit_vikunja(
         {"services": {"vikunja": {"enabled": False}}}, "unused.yaml", ".env"
