@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ "Pixelfed connected" if success else "Pixelfed authorization" }}{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <h1>{{ "Pixelfed connected" if success else "Pixelfed authorization" }}</h1>
+  <p class="{{ 'notice' if success else 'error' }}" role="{{ 'status' if success else 'alert' }}">{{ message }}</p>
+  <p><a class="button-link" href="/admin/channels#channel-pixelfed">Return to Channels</a></p>
+</div>
+{% endblock %}

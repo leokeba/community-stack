@@ -19,6 +19,9 @@ from community_stack.announcements.adapters.signal import SIGNAL_API, signal_sen
 from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
 from community_stack.config import ConfigError, load_config
 
+PIXELFED_OAUTH_STATE_COOKIE = "community_pixelfed_oauth_state"
+PIXELFED_OAUTH_CALLBACK_PATH = "/admin/channels/pixelfed/callback"
+
 
 def register_channels(
     app: FastAPI,
@@ -188,42 +191,54 @@ def register_channels(
             "pixelfed_oauth_continue.html",
             page(session, authorization_url=authorize_url),
         )
+        response.set_cookie(
+            PIXELFED_OAUTH_STATE_COOKIE,
+            state,
+            max_age=600,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path=PIXELFED_OAUTH_CALLBACK_PATH,
+        )
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
-    @app.get("/admin/channels/pixelfed/callback")
+    @app.get(PIXELFED_OAUTH_CALLBACK_PATH)
     async def pixelfed_oauth_callback(request: Request) -> Response:
-        session = require(request, "settings")
         state = request.query_params.get("state", "")
-        flow = storage.consume_oauth_state(state) if state else None
-        if not flow or not (
-            flow.get("username") == session["username"]
-            and secrets.compare_digest(flow.get("csrf_token", ""), session["csrf_token"])
-        ):
-            return channels_page(
+        cookie_state = request.cookies.get(PIXELFED_OAUTH_STATE_COOKIE, "")
+        if not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+            return pixelfed_oauth_result(
                 request,
-                session,
-                flash(
-                    "Pixelfed authorization expired or could not be verified. Please retry.",
-                    "error",
-                ),
+                "Pixelfed authorization expired or could not be verified. Please retry.",
+                success=False,
+                status_code=400,
+                clear_state_cookie=False,
+            )
+
+        flow = storage.consume_oauth_state(state) if state else None
+        if not flow or not flow.get("username") or not flow.get("csrf_token"):
+            return pixelfed_oauth_result(
+                request,
+                "Pixelfed authorization expired or could not be verified. Please retry.",
+                success=False,
                 status_code=400,
             )
 
         provider_error = request.query_params.get("error")
         if provider_error:
-            return redirect_with(
+            return pixelfed_oauth_result(
                 request,
-                "/admin/channels#channel-pixelfed",
-                flash(f"Pixelfed authorization was not completed: {provider_error[:200]}", "error"),
+                f"Pixelfed authorization was not completed: {provider_error[:200]}",
+                success=False,
             )
         code = request.query_params.get("code", "")
         if not code or len(code) > 4096:
-            return channels_page(
+            return pixelfed_oauth_result(
                 request,
-                session,
-                flash("Pixelfed did not return an authorization code. Please retry.", "error"),
+                "Pixelfed did not return an authorization code. Please retry.",
+                success=False,
                 status_code=400,
             )
 
@@ -243,10 +258,10 @@ def register_channels(
         access_token = body.get("access_token") if isinstance(body, dict) else None
         if status != 200 or not isinstance(access_token, str):
             detail = http.error_text(status, body)
-            return channels_page(
+            return pixelfed_oauth_result(
                 request,
-                session,
-                flash(f"Pixelfed could not issue an access token: {detail}", "error"),
+                f"Pixelfed could not issue an access token: {detail}",
+                success=False,
                 status_code=502,
             )
         try:
@@ -254,29 +269,52 @@ def register_channels(
                 {"instance_url": flow["instance_url"], "access_token": access_token}
             )
         except (UnsafeURLError, ValueError) as exc:
-            return channels_page(
+            return pixelfed_oauth_result(
                 request,
-                session,
-                flash(f"Pixelfed returned an unusable access token: {exc}", "error"),
+                f"Pixelfed returned an unusable access token: {exc}",
+                success=False,
                 status_code=502,
             )
 
         was_connected = "pixelfed" in storage.list_connections()
-        storage.save_connection("pixelfed", values, session["username"])
+        storage.save_connection("pixelfed", values, flow["username"])
         publisher.reload_connections()
         audit(
             request,
-            session["username"],
+            flow["username"],
             "channel.updated" if was_connected else "channel.connected",
             "pixelfed",
         )
-        response = redirect_with(
+        return pixelfed_oauth_result(
             request,
-            "/admin/channels#channel-pixelfed",
-            flash("Pixelfed connected. Use 'Test connection' to check it."),
+            "Pixelfed connected. Return to Channels to test the connection.",
+            success=True,
+        )
+
+    def pixelfed_oauth_result(
+        request: Request,
+        message: str,
+        *,
+        success: bool,
+        status_code: int = 200,
+        clear_state_cookie: bool = True,
+    ) -> Response:
+        response = render(
+            request,
+            "pixelfed_oauth_result.html",
+            {"message": message, "success": success},
+            status_code=status_code,
         )
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
+        if clear_state_cookie:
+            response.delete_cookie(
+                PIXELFED_OAUTH_STATE_COOKIE,
+                path=PIXELFED_OAUTH_CALLBACK_PATH,
+                secure=True,
+                httponly=True,
+                samesite="lax",
+            )
         return response
 
     @app.get("/admin/channels/signal/link")

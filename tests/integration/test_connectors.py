@@ -543,6 +543,8 @@ def test_console_connects_pixelfed_with_oauth(console):
     )
     assert start.status_code == 200
     assert start.headers["cache-control"] == "no-store"
+    assert "community_pixelfed_oauth_state=" in start.headers["set-cookie"]
+    assert "samesite=lax" in start.headers["set-cookie"].lower()
     link = re.search(r'<a class="button-link" href="([^"]+)">Continue to Pixelfed</a>', start.text)
     assert link
     authorization_url = urlsplit(unescape(link.group(1)))
@@ -555,17 +557,43 @@ def test_console_connects_pixelfed_with_oauth(console):
     assert parameters["response_type"] == ["code"]
     assert parameters["state"]
 
-    callback = client.get(
+    oauth_state_cookie = client.cookies.get("community_pixelfed_oauth_state")
+    invalid_callback_client = TestClient(app, base_url="https://community.test")
+    invalid_callback_client.cookies.set(
+        "community_pixelfed_oauth_state",
+        "wrong-state",
+        domain="community.test",
+        path="/admin/channels/pixelfed/callback",
+    )
+    invalid_callback = invalid_callback_client.get(
         "/admin/channels/pixelfed/callback",
         params={"code": "authorization-code", "state": parameters["state"][0]},
     )
-    assert callback.status_code == 303
-    assert callback.headers["location"] == "/admin/channels#channel-pixelfed"
+    assert invalid_callback.status_code == 400
+
+    callback_client = TestClient(app, base_url="https://community.test", follow_redirects=False)
+    callback_client.cookies.set(
+        "community_pixelfed_oauth_state",
+        oauth_state_cookie,
+        domain="community.test",
+        path="/admin/channels/pixelfed/callback",
+    )
+    assert callback_client.cookies.get("community_admin_session") is None
+    callback = callback_client.get(
+        "/admin/channels/pixelfed/callback",
+        params={"code": "authorization-code", "state": parameters["state"][0]},
+    )
+    assert callback.status_code == 200
+    assert "Pixelfed connected" in callback.text
+    assert any(
+        "community_pixelfed_oauth_state=" in cookie and "max-age=0" in cookie.lower()
+        for cookie in callback.headers.get_list("set-cookie")
+    )
     assert app.state.storage.list_connections()["pixelfed"] == {
         "instance_url": "https://pixelfed.example",
         "access_token": "pixelfed-oauth-token",
     }
-    replay = client.get(
+    replay = callback_client.get(
         "/admin/channels/pixelfed/callback",
         params={"code": "authorization-code", "state": parameters["state"][0]},
     )

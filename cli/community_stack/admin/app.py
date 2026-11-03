@@ -153,7 +153,12 @@ def create_app(
 
     @app.middleware("http")
     async def console_headers(request: Request, call_next):
-        response = await call_next(request)
+        oauth_callback = request.url.path == "/admin/channels/pixelfed/callback"
+        try:
+            response = await call_next(request)
+        finally:
+            if oauth_callback:
+                request.scope["query_string"] = b""
         if request.url.path.startswith("/admin") and response.headers.get(
             "content-type", ""
         ).startswith("text/html"):

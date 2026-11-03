@@ -50,7 +50,8 @@ community's Pixelfed account.
   console registers an OAuth client through the Pixelfed API and opens the
   authorization page for approval of `read` and `write` access. The callback URL is
   `https://<community-web-domain>/admin/channels/pixelfed/callback`; the console
-  displays its configured URL beside the button. Pixelfed must allow app
+  displays its configured URL beside the button. After approval, follow the
+  return link to the admin console. Pixelfed must allow app
   registration through its API. If it does not, an existing access token can
   still be entered using the manual option.
 - **Publishing:** Posts are public. The announcement's shared image and alt
