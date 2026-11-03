@@ -173,13 +173,15 @@ def register_channels(
             },
             (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
         )
-        authorization_parameters = urlencode({
-            'client_id': body['client_id'],
-            'redirect_uri': redirect_uri,
-            'response_type': 'code',
-            'scope': 'read write',
-            'state': state,
-        })
+        authorization_parameters = urlencode(
+            {
+                "client_id": body["client_id"],
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "read write",
+                "state": state,
+            }
+        )
         authorize_url = f"{instance_url}/oauth/authorize?{authorization_parameters}"
         response = RedirectResponse(authorize_url, status_code=303)
         response.headers["Cache-Control"] = "no-store"
@@ -198,7 +200,10 @@ def register_channels(
             return channels_page(
                 request,
                 session,
-                flash("Pixelfed authorization expired or could not be verified. Please retry.", "error"),
+                flash(
+                    "Pixelfed authorization expired or could not be verified. Please retry.",
+                    "error",
+                ),
                 status_code=400,
             )
 

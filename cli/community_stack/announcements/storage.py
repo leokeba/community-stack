@@ -909,9 +909,7 @@ class AnnouncementStorage:
                 (key, value),
             )
 
-    def create_oauth_state(
-        self, state: str, payload: dict[str, str], expires_at: str
-    ) -> None:
+    def create_oauth_state(self, state: str, payload: dict[str, str], expires_at: str) -> None:
         state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
