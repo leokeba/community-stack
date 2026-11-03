@@ -151,5 +151,10 @@ def run_checks(
         web_domain = config.get("domain", {}).get("web")
         if web_domain and web_domain != base_domain:
             check_dns_resolution(web_domain, result)
+        vikunja = config.get("services", {}).get("vikunja", {})
+        if vikunja.get("enabled", False):
+            tasks_domain = vikunja.get("hostname") or f"tasks.{base_domain}"
+            if tasks_domain not in {base_domain, matrix_domain, web_domain}:
+                check_dns_resolution(tasks_domain, result)
 
     return result

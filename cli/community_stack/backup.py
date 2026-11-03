@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from community_stack import docker
 from community_stack.config import ConfigError, load_config
 from community_stack.docker import is_docker_available
 from community_stack.secrets import parse_env_file
@@ -45,6 +46,7 @@ RESTIC_ENV_PASSTHROUGH = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "XDG_CACHE
 RESTIC_SETTINGS = ("RESTIC_CACHE_DIR", "RESTIC_REPOSITORY")
 REQUIRED_SNAPSHOT_FILES = ("manifest.json", "community-stack.yaml")
 EXPECTED_SNAPSHOT_FILES = ("data.tar.gz", "postgres_synapse.dump")
+VIKUNJA_DUMP_FILE = "postgres_vikunja.dump"
 
 
 def is_restic_available() -> bool:
@@ -82,6 +84,30 @@ def dump_postgres_database(
         with open(target_file, "wb") as f:
             res = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=False)
         return res.returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def dump_vikunja_database(target_file: Path) -> bool:
+    """Create an application-consistent custom-format dump from Vikunja's private DB."""
+    if not is_docker_available():
+        return False
+    cmd = [
+        "docker",
+        "exec",
+        "community_vikunja_db",
+        "pg_dump",
+        "-U",
+        "vikunja",
+        "-d",
+        "vikunja",
+        "-F",
+        "c",
+    ]
+    try:
+        with open(target_file, "wb") as target:
+            result = subprocess.run(cmd, stdout=target, stderr=subprocess.PIPE, check=False)
+        return result.returncode == 0 and target_file.stat().st_size > 0
     except (subprocess.SubprocessError, OSError):
         return False
 
@@ -193,6 +219,48 @@ class BackupEngine:
             raise BackupError("No backup snapshots found.")
         return snapshots[-1]
 
+    def _pause_vikunja(self) -> bool:
+        if not self.config.get("services", {}).get("vikunja", {}).get("enabled", False):
+            return False
+        if not is_docker_available():
+            raise BackupError(
+                "Vikunja is enabled but Docker is unavailable; its backup was not taken."
+            )
+        try:
+            state = subprocess.run(
+                ["docker", "inspect", "--format={{.State.Running}}", "community_vikunja"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise BackupError(f"Could not inspect Vikunja before backup: {exc}") from exc
+        if state.returncode != 0:
+            raise BackupError("Vikunja is enabled but its application container is not deployed.")
+        if state.stdout.strip().lower() != "true":
+            return False
+        compose = docker.run_compose(
+            self.project_root / "services" / "vikunja",
+            ["stop", "vikunja"],
+            env_file=self.env_path,
+            capture_output=True,
+        )
+        if compose.returncode != 0:
+            raise BackupError("Could not stop Vikunja for a consistent application backup.")
+        return True
+
+    def _resume_vikunja(self) -> None:
+        compose = docker.run_compose(
+            self.project_root / "services" / "vikunja",
+            ["start", "vikunja"],
+            env_file=self.env_path,
+            capture_output=True,
+        )
+        if compose.returncode != 0:
+            raise BackupError(
+                "The backup completed, but Vikunja could not be restarted; inspect its service logs."
+            )
+
     def create_snapshot(self) -> SnapshotInfo:
         """Create a timestamped, owner-only (0600) backup snapshot.
 
@@ -207,8 +275,11 @@ class BackupEngine:
         snapshot_id = f"snap_{timestamp}"
         staging_dir = self.backup_dir / f"staging_{snapshot_id}"
         staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        vikunja_paused = False
 
         try:
+            vikunja_paused = self._pause_vikunja()
+
             # 1. Database dump
             db_dump_file = staging_dir / "postgres_synapse.dump"
             db_dumped = dump_postgres_database(db_dump_file, self.env_path)
@@ -218,6 +289,17 @@ class BackupEngine:
                     f"# Offline backup marker - database was not active at {timestamp}\n",
                     encoding="utf-8",
                 )
+
+            vikunja_enabled = (
+                self.config.get("services", {}).get("vikunja", {}).get("enabled", False)
+            )
+            if vikunja_enabled:
+                vikunja_dump = staging_dir / VIKUNJA_DUMP_FILE
+                if not dump_vikunja_database(vikunja_dump):
+                    raise BackupError(
+                        "Could not create the Vikunja PostgreSQL dump. "
+                        "Check community_vikunja_db health and database logs."
+                    )
 
             # 2. Archive data directory
             data_dir = self.project_root / "data"
@@ -248,6 +330,18 @@ class BackupEngine:
                     relative_name = member.name.removeprefix("data/")
                     for database in live_databases:
                         if relative_name == database or relative_name.startswith(database + "-"):
+                            return None
+                    if vikunja_enabled:
+                        database_path = (
+                            self.config.get("services", {})
+                            .get("vikunja", {})
+                            .get("database", {})
+                            .get("data_path", "data/vikunja/postgres")
+                        )
+                        database_relative = database_path.removeprefix("./").removeprefix("data/")
+                        if relative_name == database_relative or relative_name.startswith(
+                            database_relative + "/"
+                        ):
                             return None
                     return member
 
@@ -312,9 +406,12 @@ class BackupEngine:
                 warnings=warnings,
             )
         finally:
-            # Clean up staging directory
-            if staging_dir.exists():
-                shutil.rmtree(staging_dir, ignore_errors=True)
+            try:
+                if vikunja_paused:
+                    self._resume_vikunja()
+            finally:
+                if staging_dir.exists():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
 
     def _store_in_restic(
         self,
@@ -410,6 +507,7 @@ class BackupEngine:
                 has_config = any("community-stack.yaml" in m for m in members)
                 has_data = any("data.tar.gz" in m for m in members)
                 has_dump = any("postgres_synapse.dump" in m for m in members)
+                has_vikunja_dump = any(VIKUNJA_DUMP_FILE in m for m in members)
 
                 if not has_manifest:
                     messages.append("ERROR: Missing manifest.json in snapshot.")
@@ -421,6 +519,12 @@ class BackupEngine:
                     messages.append("WARNING: Missing data directory archive in snapshot.")
                 if not has_dump:
                     messages.append("WARNING: Missing database dump in snapshot.")
+                if (
+                    self.config.get("services", {}).get("vikunja", {}).get("enabled", False)
+                    and not has_vikunja_dump
+                ):
+                    messages.append("ERROR: Missing Vikunja PostgreSQL dump in snapshot.")
+                    return False, messages
 
                 messages.append("All critical recovery components verified present.")
                 return True, messages
@@ -453,7 +557,10 @@ class BackupEngine:
             if "node" in (node.get("message_type"), node.get("struct_type"))
             and node.get("path", "").startswith(root + "/")
         }
-        missing = [name for name in REQUIRED_SNAPSHOT_FILES if name not in names]
+        required = list(REQUIRED_SNAPSHOT_FILES)
+        if self.config.get("services", {}).get("vikunja", {}).get("enabled", False):
+            required.append(VIKUNJA_DUMP_FILE)
+        missing = [name for name in required if name not in names]
         if missing:
             messages.append(f"ERROR: Missing {', '.join(missing)} in snapshot.")
             return False, messages
@@ -545,6 +652,9 @@ class BackupEngine:
         dump_src = snap_content / "postgres_synapse.dump"
         if dump_src.is_file():
             shutil.copy(dump_src, target_backups / "postgres_synapse.dump")
+        vikunja_dump = snap_content / VIKUNJA_DUMP_FILE
+        if vikunja_dump.is_file():
+            shutil.copy(vikunja_dump, target_backups / VIKUNJA_DUMP_FILE)
 
         # Validate restored configuration
         try:

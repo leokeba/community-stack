@@ -28,18 +28,42 @@ def run_install(
     env_path: Path | str = ".env",
 ) -> int:
     """Deploy enabled services according to configuration."""
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        print(f"[ERROR] Failed to load configuration: {exc}")
+        return 1
+
+    services_root = get_services_dir()
+    env_p = Path(env_path).resolve()
+    vikunja_cfg = config.get("services", {}).get("vikunja", {})
+    route_path = Path(config_path).resolve().parent / "data" / "proxy" / "vikunja.caddy"
+    previous_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
+    try:
+        prepared = prepare_service(
+            Path(config_path).resolve().parent,
+            "vikunja",
+            config,
+            env_p,
+            services_root,
+        )
+    except ProvisionError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+    if prepared:
+        print(prepared)
+    vikunja_route_changed = (
+        previous_route != route_path.read_text(encoding="utf-8")
+        if route_path.is_file()
+        else previous_route is not None
+    )
+
     print("Executing pre-flight checks before deployment...\n")
     checks = run_checks(config_path=config_path, env_path=env_path)
     if not checks.ok:
         print("[ERROR] Pre-flight checks failed. Fix the issues below before installing:")
         for err in checks.errors:
             print(f"  - {err}")
-        return 1
-
-    try:
-        config = load_config(config_path)
-    except ConfigError as exc:
-        print(f"[ERROR] Failed to load configuration: {exc}")
         return 1
 
     if not docker.is_docker_available():
@@ -59,8 +83,6 @@ def run_install(
         return 1
     print("      Network 'bridge_net' is ready.")
 
-    services_root = get_services_dir()
-    env_p = Path(env_path).resolve()
     services_to_deploy: list[str] = []
 
     # Proxy is always deployed as ingress
@@ -88,6 +110,9 @@ def run_install(
 
     if services_cfg.get("whatsapp_bridge", {}).get("enabled", False):
         services_to_deploy.append("whatsapp_bridge")
+
+    if vikunja_cfg.get("enabled", False):
+        services_to_deploy.append("vikunja")
 
     print(f"\n[2/4] Deploying enabled services: {', '.join(services_to_deploy)}")
 
@@ -131,6 +156,17 @@ def run_install(
             if restarted.returncode != 0:
                 print("[ERROR] Synapse could not reload the WhatsApp appservice registration.")
                 return 1
+
+    if vikunja_route_changed:
+        reloaded = docker.run_compose(
+            services_root / "proxy",
+            ["restart", "caddy"],
+            env_file=env_p,
+            capture_output=True,
+        )
+        if reloaded.returncode != 0:
+            print("[ERROR] Caddy could not reload the optional Vikunja route.")
+            return 1
 
     print("\n[3/4] Deployment finished. Verifying container status...")
     from community_stack.commands.status_cmd import run_status

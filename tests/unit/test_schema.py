@@ -61,3 +61,31 @@ def test_schema_allows_valid_whatsapp_bridge_mapping(base_config):
     ]
     errors = validate_config(cfg)
     assert errors == []
+
+
+def test_vikunja_is_optional_and_validates_service_settings(base_config):
+    assert base_config["services"]["vikunja"]["enabled"] is False
+    config = copy.deepcopy(base_config)
+    config["services"]["vikunja"].update(
+        enabled=True,
+        version="2.7.1",
+        hostname="tasks.community.org",
+        files_path="data/collaboration/files",
+        database={"type": "postgres", "data_path": "data/collaboration/postgres"},
+    )
+    assert validate_config(config) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("version", "latest"),
+        ("files_path", "../outside"),
+        ("enable_link_sharing", "yes"),
+        ("cpu_limit", 0),
+    ],
+)
+def test_vikunja_rejects_invalid_settings(base_config, field, value):
+    config = copy.deepcopy(base_config)
+    config["services"]["vikunja"][field] = value
+    assert validate_config(config)

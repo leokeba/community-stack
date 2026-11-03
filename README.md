@@ -197,6 +197,7 @@ uv run community-stack bridge disable --confirm
 | 🚀 [**Deployment Guide**](docs/deployment.md) | Step-by-step installation on clean Debian 12 / Ubuntu VPS |
 | 💾 [**Backup & Recovery Runbook**](docs/backup-restore.md) | Disaster recovery, off-host S3 backups, and restore drills |
 | 💬 [**WhatsApp Integration Guide**](docs/whatsapp-integration.md) | mautrix-whatsapp setup, allowlisted bridging, and privacy risks |
+| ✅ [**Vikunja Collaborative Tasks**](docs/vikunja.md) | Optional project/task management, operations, authentication, and recovery |
 | 📡 [**Accessible Channels**](docs/accessible-channels.md) | Channel prototypes and evaluation for ActivityPub, email, SMS, and IVR |
 | 🌐 [**Multi-Host Resilience & Offline Continuity**](docs/multi-host-resilience.md) | Warm standby host provisioning, captive portals, and Meshtastic |
 | 📘 [**Operator Handbook**](docs/operations.md) | Daily maintenance, incident response runbooks, and decommissioning |

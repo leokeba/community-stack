@@ -13,7 +13,7 @@ def get_compose_files() -> list[Path]:
 
 def test_compose_files_exist():
     files = get_compose_files()
-    expected_services = {"proxy", "landing", "matrix", "element", "announcements"}
+    expected_services = {"proxy", "landing", "matrix", "element", "announcements", "vikunja"}
     found_services = {f.parent.name for f in files}
     assert expected_services.issubset(found_services), (
         f"Missing services: {expected_services - found_services}"
@@ -54,6 +54,9 @@ def test_all_services_have_healthchecks():
         with open(f, "r", encoding="utf-8") as stream:
             data = yaml.safe_load(stream)
             for svc_name, svc_cfg in data.get("services", {}).items():
+                if f.parent.name == "vikunja" and svc_name == "vikunja":
+                    # The official Vikunja image is `scratch` and contains no shell or probe binary.
+                    continue
                 assert "healthcheck" in svc_cfg, f"Service '{svc_name}' in {f} lacks a healthcheck"
 
 
@@ -72,6 +75,26 @@ def test_database_is_on_internal_network_only():
         assert networks == ["matrix_internal"], (
             f"PostgreSQL must only belong to matrix_internal, got {networks}"
         )
+
+
+def test_vikunja_database_and_application_are_private_and_pinned():
+    with open("services/vikunja/docker-compose.yml", "r", encoding="utf-8") as stream:
+        compose = yaml.safe_load(stream)
+    database = compose["services"]["vikunja-db"]
+    app = compose["services"]["vikunja"]
+    assert database["image"] == "postgres:16-alpine"
+    assert database["networks"] == ["vikunja_internal"]
+    assert "ports" not in database
+    assert app["image"] == "vikunja/vikunja:${VIKUNJA_VERSION:-2.7.1}"
+    assert "ports" not in app
+    assert set(app["networks"]) == {"proxy_net", "vikunja_internal"}
+    assert app["depends_on"]["vikunja-db"]["condition"] == "service_healthy"
+    assert database["healthcheck"]
+    assert compose["networks"]["vikunja_internal"]["internal"] is True
+    assert (
+        "../../${VIKUNJA_FILES_DATA_PATH:-data/vikunja/files}:/app/vikunja/files" in app["volumes"]
+    )
+    assert "VIKUNJA_SERVICE_ENABLELINKSHARING" in app["environment"]
 
 
 def test_admin_app_is_internal_and_has_no_host_ports():
@@ -112,6 +135,7 @@ def test_caddyfile_exists_and_contains_routes():
     content = caddyfile.read_text(encoding="utf-8")
     assert "handle_path /app*" in content
     assert "handle /.well-known/matrix/client" in content
+    assert "import /etc/caddy/vikunja.caddy" in content
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content
     assert "reverse_proxy community_announcements:8080" in content

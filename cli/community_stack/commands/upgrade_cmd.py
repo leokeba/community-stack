@@ -7,7 +7,7 @@ from pathlib import Path
 from community_stack import docker
 from community_stack.backup import BackupEngine, BackupError
 from community_stack.commands.logs_cmd import SERVICE_DIR_MAP, get_services_root
-from community_stack.config import load_config
+from community_stack.config import ConfigError, load_config
 from community_stack.provision import ProvisionError, prepare_service
 
 
@@ -34,6 +34,27 @@ def run_upgrade(
 
     print(f"Initiating safe upgrade for service '{service}' in {svc_dir.name}...\n")
 
+    if dir_name == "vikunja":
+        try:
+            config = load_config(config_path)
+        except (ConfigError, OSError) as exc:
+            print(f"[ERROR] Could not load configuration: {exc}")
+            return 1
+        if not config.get("services", {}).get("vikunja", {}).get("enabled", False):
+            print("[ERROR] Vikunja is disabled in community-stack.yaml.")
+            return 1
+        try:
+            prepare_service(
+                Path(config_path).resolve().parent,
+                "vikunja",
+                config,
+                Path(env_path).resolve(),
+                services_root,
+            )
+        except ProvisionError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
+
     # Step 1: Pre-upgrade snapshot
     print("[1/3] Creating pre-upgrade safety backup snapshot...")
     try:
@@ -41,6 +62,9 @@ def run_upgrade(
         snapshot = engine.create_snapshot()
         print(f"      Pre-upgrade snapshot created: {snapshot.id}")
     except BackupError as exc:
+        if dir_name == "vikunja":
+            print(f"[ERROR] Vikunja upgrade requires a successful pre-upgrade backup: {exc}")
+            return 1
         print(f"[WARN] Pre-upgrade backup failed: {exc}. Continuing with caution.")
 
     if not docker.is_docker_available():

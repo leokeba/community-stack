@@ -34,6 +34,9 @@
   <datalist id="timezones">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
   <p><button type="submit">Review changes</button></p>
 </form>
+{% if values["services.vikunja.enabled"] and vikunja_url %}
+<p class="notice" role="status">Vikunja is enabled. <a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a>. User accounts and task permissions are managed in Vikunja.</p>
+{% endif %}
 {% if status and status.containers %}
 <h2>Running services</h2>
 <table>

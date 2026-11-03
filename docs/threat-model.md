@@ -107,10 +107,19 @@ The Community Communications Stack is designed for public movements and communit
   - Regular automated integrity check via `community-stack backup verify`.
   - Non-destructive test restore drill (`community-stack restore --target /tmp/drill-restore`).
 
+### 2.11 Vikunja Sharing and Webhook Abuse
+- **Threat:** A public project link grants broader access than intended, or a project webhook sends task data to an attacker-controlled endpoint.
+- **Impact:** Anonymous disclosure or modification of community tasks, or server-side request forgery against reachable services.
+- **Mitigation:**
+  - Public link sharing and self-registration are disabled by default; link shares are only enabled through explicit configuration.
+  - Vikunja link shares can grant Read, Read & Write, or Admin access, optionally password-protected; operators must review the selected right and revoke links when no longer needed.
+  - Vikunja webhooks are delivered once, signed HMAC is supported, and default outgoing-request protections reject private, loopback, and link-local destinations. Matrix delivery is not configured.
+  - Vikunja's database is isolated from ingress and its application runs without a host-published port.
+
 ---
 
 ## 3. Explicit Operational Assumptions & Non-Guarantees
 
 1. **Not an Anonymous Whistleblowing Platform:** This stack is built for open community coordination. It does not replace SecureDrop or Tor-based anonymity tools.
-2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
+2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp, and optional Vikunja). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
 3. **Physical Host Security:** Host security depends on proper hardware hygiene, strong SSH keys, and encrypted storage.

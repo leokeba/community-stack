@@ -19,6 +19,8 @@ SERVICE_DIR_MAP = {
     "proxy": "proxy",
     "whatsapp": "whatsapp_bridge",
     "whatsapp_bridge": "whatsapp_bridge",
+    "vikunja": "vikunja",
+    "tasks": "vikunja",
 }
 
 

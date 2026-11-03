@@ -32,11 +32,12 @@ def register_services(
         message: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
-        values, status, components, error = None, None, [], None
+        values, status, components, vikunja_url, error = None, None, [], None, None
         if agent.available():
             try:
                 config = await run_in_threadpool(agent.call, "config.get", session["username"])
                 values = config["values"]
+                vikunja_url = config.get("vikunja_url")
                 status = await run_in_threadpool(agent.call, "status.get", session["username"])
                 components = (
                     await run_in_threadpool(agent.call, "services.versions", session["username"])
@@ -53,6 +54,7 @@ def register_services(
                 values=values,
                 status=status,
                 components=components,
+                vikunja_url=vikunja_url,
                 timezones=sorted(available_timezones()),
                 error=error,
                 **({"flash": message} if message else {}),

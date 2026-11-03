@@ -13,6 +13,19 @@ import yaml
 KEY_LINE = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z0-9_]+):(?P<rest>.*)$")
 TRAILING_COMMENT = re.compile(r"\s+#.*$")
 
+VIKUNJA_DEFAULTS = """  vikunja:
+    enabled: false
+    version: "2.7.1"
+    files_path: "data/vikunja/files"
+    database:
+      type: "postgres"
+      data_path: "data/vikunja/postgres"
+    allow_registration: false
+    enable_link_sharing: false
+    memory_limit: "512M"
+    cpu_limit: 1
+"""
+
 
 def render_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -94,6 +107,31 @@ def get_value(config: dict, path: tuple[str, ...], default: Any = None) -> Any:
             return default
         node = node[key]
     return node
+
+
+def ensure_vikunja_config(text: str) -> str:
+    """Add Vikunja defaults to a legacy config without reserializing operator comments."""
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+        raise TypeError("Configuration must contain a services mapping.")
+    if "vikunja" in data["services"]:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    services_index = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
+        None,
+    )
+    if services_index is None:
+        raise ValueError("Configuration must contain a top-level services mapping.")
+    insert_at = len(lines)
+    for index in range(services_index + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith((" ", "\t", "#", "\n")):
+            insert_at = index
+            break
+    lines.insert(insert_at, VIKUNJA_DEFAULTS)
+    return "".join(lines)
 
 
 def write_in_place(path: Path, text: str) -> None:

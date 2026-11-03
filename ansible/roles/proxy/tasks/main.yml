@@ -14,7 +14,34 @@
     driver: bridge
     state: present
 
+- name: Ensure generated Vikunja Caddy route directory exists
+  ansible.builtin.file:
+    path: "{{ project_root | default('/opt/community-stack') }}/data/proxy"
+    state: directory
+    mode: "0750"
+
+- name: Configure the optional Vikunja Caddy route
+  ansible.builtin.copy:
+    dest: "{{ project_root | default('/opt/community-stack') }}/data/proxy/vikunja.caddy"
+    mode: "0644"
+    content: |
+      {% if services.vikunja.enabled | default(false) %}
+      {{ services.vikunja.hostname | default('tasks.' ~ domain.base) }} {
+          encode zstd gzip
+          reverse_proxy community_vikunja:3456
+      }
+      {% else %}
+      # Vikunja is disabled; no public route is configured.
+      {% endif %}
+  register: vikunja_route_file
+
 - name: Deploy Caddy Ingress Compose stack
   community.docker.docker_compose_v2:
     project_src: "{{ project_root | default('/opt/community-stack') }}/services/proxy"
     state: present
+
+- name: Reload Caddy after an optional Vikunja route change
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/proxy"
+    state: restarted
+  when: vikunja_route_file.changed

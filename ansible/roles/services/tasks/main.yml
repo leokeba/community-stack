@@ -16,3 +16,29 @@
     project_src: "{{ project_root | default('/opt/community-stack') }}/services/element"
     state: present
   when: services.element.enabled | default(true)
+
+- name: Ensure Vikunja attachment storage is writable by its unprivileged user
+  ansible.builtin.file:
+    path: "{{ project_root | default('/opt/community-stack') }}/{{ services.vikunja.files_path | default('data/vikunja/files') }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0750"
+  when: services.vikunja.enabled | default(false)
+
+- name: Deploy optional Vikunja collaborative service
+  community.docker.docker_compose_v2:
+    project_src: "{{ project_root | default('/opt/community-stack') }}/services/vikunja"
+    env_files:
+      - ../../.env
+    environment:
+      VIKUNJA_VERSION: "{{ services.vikunja.version | default('2.7.1') }}"
+      VIKUNJA_DOMAIN: "{{ services.vikunja.hostname | default('tasks.' ~ domain.base) }}"
+      VIKUNJA_FILES_DATA_PATH: "{{ services.vikunja.files_path | default('data/vikunja/files') }}"
+      VIKUNJA_DATABASE_DATA_PATH: "{{ services.vikunja.database.data_path | default('data/vikunja/postgres') }}"
+      VIKUNJA_ALLOW_REGISTRATION: "{{ services.vikunja.allow_registration | default(false) | string | lower }}"
+      VIKUNJA_ENABLE_LINK_SHARING: "{{ services.vikunja.enable_link_sharing | default(false) | string | lower }}"
+      VIKUNJA_MEMORY_LIMIT: "{{ services.vikunja.memory_limit | default('512M') }}"
+      VIKUNJA_CPU_LIMIT: "{{ services.vikunja.cpu_limit | default(1) }}"
+    state: present
+  when: services.vikunja.enabled | default(false)

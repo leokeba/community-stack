@@ -41,6 +41,17 @@ services:
     enabled: false
     mode: "none" # none | announcements_only | selective_bridge
     mapped_rooms: []
+  vikunja:
+    enabled: false
+    version: "2.7.1"
+    files_path: "data/vikunja/files"
+    database:
+      type: "postgres"
+      data_path: "data/vikunja/postgres"
+    allow_registration: false
+    enable_link_sharing: false
+    memory_limit: "512M"
+    cpu_limit: 1
 
 operations:
   backups:
@@ -156,6 +167,7 @@ def run_init(
         base / "data" / "element",
         base / "data" / "announcements",
         base / "data" / "landing" / "feed",
+        base / "data" / "proxy",
         base / "backups",
     ]
     for d in dirs_to_create:

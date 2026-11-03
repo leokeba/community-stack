@@ -124,6 +124,16 @@ else
     sudo -n -u community "$project_dir/.venv/bin/pip" install --quiet -e "$project_dir"
 fi
 sudo -n -u community "$project_dir/.venv/bin/community-stack" --help >/dev/null
+sudo -n -u community "$project_dir/.venv/bin/python" - "$project_dir" <<'PY'
+from pathlib import Path
+import sys
+
+from community_stack.config import load_config
+from community_stack.provision import prepare_vikunja
+
+root = Path(sys.argv[1])
+prepare_vikunja(root, load_config(root / "community-stack.yaml"), root / ".env")
+PY
 # The announcements container runs as the UID/GID in .env (COMMUNITY_STACK_UID/GID), which
 # is not always 1000. Read only those two numbers, and give the contact page folder that
 # owner before Docker can create it as root.
@@ -211,6 +221,11 @@ if missing:
     if text.count(anchor) != 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
     path.write_text(text.replace(anchor, "".join(missing) + anchor), encoding="utf-8")
+    path.chmod(0o644)
+text = path.read_text(encoding="utf-8")
+route_import = "import /etc/caddy/vikunja.caddy"
+if route_import not in text:
+    path.write_text(text.rstrip() + "\n\n" + route_import + "\n", encoding="utf-8")
     path.chmod(0o644)
 PY
 

@@ -56,6 +56,11 @@ UID 991, and Element's `data/element/config.json` pointing at this
 homeserver. Caddy receives `WEB_DOMAIN`, `MATRIX_DOMAIN` and `ACME_EMAIL` from
 `.env`.
 
+Vikunja is optional and disabled by default. To add it, follow the
+[Vikunja installation and operations guide](vikunja.md); it uses a separate
+Compose project, dedicated private PostgreSQL database, and a generated Caddy
+route for its HTTPS hostname.
+
 The rest of this guide describes the same steps by hand.
 
 ---

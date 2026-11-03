@@ -13,6 +13,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-admin@example.org}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../data/proxy/vikunja.caddy:/etc/caddy/vikunja.caddy:ro
       - ../../data/caddy/data:/data
       - ../../data/caddy/config:/config
     networks:

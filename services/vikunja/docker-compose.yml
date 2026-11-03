@@ -1,0 +1,51 @@
+services:
+  vikunja-db:
+    image: postgres:16-alpine
+    container_name: community_vikunja_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vikunja
+      POSTGRES_USER: vikunja
+      POSTGRES_PASSWORD: ${VIKUNJA_POSTGRES_PASSWORD:?Set VIKUNJA_POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - ../../${VIKUNJA_DATABASE_DATA_PATH:-data/vikunja/postgres}:/var/lib/postgresql/data
+    networks:
+      - vikunja_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vikunja -d vikunja"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vikunja:
+    image: vikunja/vikunja:${VIKUNJA_VERSION:-2.7.1}
+    container_name: community_vikunja
+    restart: unless-stopped
+    user: "${VIKUNJA_UID:-1000}:${VIKUNJA_GID:-1000}"
+    environment:
+      VIKUNJA_SERVICE_PUBLICURL: https://${VIKUNJA_DOMAIN:-tasks.example.org}/
+      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_SERVICE_SECRET:?Set VIKUNJA_SERVICE_SECRET in .env}
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: ${VIKUNJA_ALLOW_REGISTRATION:-false}
+      VIKUNJA_SERVICE_ENABLELINKSHARING: ${VIKUNJA_ENABLE_LINK_SHARING:-false}
+      VIKUNJA_DATABASE_TYPE: postgres
+      VIKUNJA_DATABASE_HOST: vikunja-db
+      VIKUNJA_DATABASE_DATABASE: vikunja
+      VIKUNJA_DATABASE_USER: vikunja
+      VIKUNJA_DATABASE_PASSWORD: ${VIKUNJA_POSTGRES_PASSWORD:?Set VIKUNJA_POSTGRES_PASSWORD in .env}
+    volumes:
+      - ../../${VIKUNJA_FILES_DATA_PATH:-data/vikunja/files}:/app/vikunja/files
+    networks:
+      - proxy_net
+      - vikunja_internal
+    depends_on:
+      vikunja-db:
+        condition: service_healthy
+    mem_limit: ${VIKUNJA_MEMORY_LIMIT:-512M}
+    cpus: ${VIKUNJA_CPU_LIMIT:-1}
+
+networks:
+  proxy_net:
+    external: true
+  vikunja_internal:
+    internal: true

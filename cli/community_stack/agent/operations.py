@@ -205,7 +205,12 @@ def _matrix_call(handler):
 
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
-    return {"values": settings_catalog.current_values(config)}
+    settings = config.get("services", {}).get("vikunja", {})
+    hostname = settings.get("hostname") or f"tasks.{config['domain']['base']}"
+    return {
+        "values": settings_catalog.current_values(config),
+        "vikunja_url": f"https://{hostname}/" if settings.get("enabled", False) else None,
+    }
 
 
 def config_plan(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:

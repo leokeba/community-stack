@@ -6,6 +6,7 @@ Nothing here overwrites an existing file: operators' own configuration wins.
 from __future__ import annotations
 
 import json
+import os
 import re
 import string
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
+from community_stack.config_edit import set_env_values
 from community_stack.secrets import generate_secret, parse_env_file
 
 SYNAPSE_UID = 991
@@ -166,6 +168,85 @@ def prepare_element(project_dir: Path, config: dict) -> str | None:
     path.write_text(json.dumps(element_config(config), indent=2) + "\n", encoding="utf-8")
     path.chmod(0o644)
     return f"Generated Element configuration for {_domain(config, 'matrix')}."
+
+
+def prepare_vikunja(project_dir: Path, config: dict, env_path: Path) -> str | None:
+    """Provision Vikunja's optional Caddy route, storage directories, and stable secrets."""
+    settings = config.get("services", {}).get("vikunja", {})
+    root = project_dir.resolve()
+    hostname = settings.get("hostname") or f"tasks.{config['domain']['base']}"
+    route_path = root / "data" / "proxy" / "vikunja.caddy"
+    if settings.get("enabled", False):
+        route_content = (
+            f"{hostname} {{\n    encode zstd gzip\n    reverse_proxy community_vikunja:3456\n}}\n"
+        )
+    else:
+        route_content = "# Vikunja is disabled; no public route is configured.\n"
+    route_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if not route_path.is_file() or route_path.read_text(encoding="utf-8") != route_content:
+        route_path.write_text(route_content, encoding="utf-8")
+        route_path.chmod(0o644)
+
+    if not settings.get("enabled", False):
+        return None
+
+    files_path = root / settings.get("files_path", "data/vikunja/files")
+    database_path = root / settings.get("database", {}).get("data_path", "data/vikunja/postgres")
+    for path in (files_path, database_path):
+        if not path.resolve().is_relative_to(root):
+            raise ProvisionError(
+                "Vikunja persistent paths must remain inside the project directory."
+            )
+
+    env_values = parse_env_file(env_path)
+    required = ("VIKUNJA_POSTGRES_PASSWORD", "VIKUNJA_SERVICE_SECRET")
+    missing = [key for key in required if not env_values.get(key)]
+    existing_data = (database_path / "PG_VERSION").is_file()
+    if files_path.is_dir():
+        existing_data = existing_data or any(files_path.iterdir())
+    if missing and existing_data:
+        raise ProvisionError(
+            "Vikunja secrets are missing from .env while persistent data exists. "
+            "Restore VIKUNJA_POSTGRES_PASSWORD and VIKUNJA_SERVICE_SECRET before starting it."
+        )
+    generated = {
+        "VIKUNJA_POSTGRES_PASSWORD": generate_secret(32),
+        "VIKUNJA_SERVICE_SECRET": generate_secret(32),
+    }
+    for key in required:
+        if env_values.get(key):
+            generated.pop(key)
+    if generated:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        if not env_path.exists():
+            env_path.touch(mode=0o600)
+        set_env_values(env_path, generated)
+        if env_path.stat().st_mode & 0o077:
+            env_path.chmod(0o600)
+
+    values = {
+        "VIKUNJA_VERSION": settings.get("version", "2.7.1"),
+        "VIKUNJA_DOMAIN": hostname,
+        "VIKUNJA_FILES_DATA_PATH": settings.get("files_path", "data/vikunja/files"),
+        "VIKUNJA_DATABASE_DATA_PATH": settings.get("database", {}).get(
+            "data_path", "data/vikunja/postgres"
+        ),
+        "VIKUNJA_ALLOW_REGISTRATION": str(settings.get("allow_registration", False)).lower(),
+        "VIKUNJA_ENABLE_LINK_SHARING": str(settings.get("enable_link_sharing", False)).lower(),
+        "VIKUNJA_MEMORY_LIMIT": settings.get("memory_limit", "512M"),
+        "VIKUNJA_CPU_LIMIT": str(settings.get("cpu_limit", 1)),
+        "VIKUNJA_UID": str(os.getuid()) if hasattr(os, "getuid") else "1000",
+        "VIKUNJA_GID": str(os.getgid()) if hasattr(os, "getgid") else "1000",
+    }
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    if not env_path.exists():
+        env_path.touch(mode=0o600)
+    set_env_values(env_path, values)
+    if os.name == "posix":
+        env_path.chmod(0o600)
+    for path in (files_path, database_path):
+        path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    return f"Prepared Vikunja storage and deployment settings for https://{hostname}/."
 
 
 def _whatsapp_secrets(env_path: Path, create_missing: bool) -> dict[str, str]:
@@ -346,6 +427,8 @@ def prepare_service(
         )
     if service == "element":
         return prepare_element(project_dir, config)
+    if service == "vikunja":
+        return prepare_vikunja(project_dir, config, env_path)
     if service == "whatsapp_bridge":
         return prepare_whatsapp(
             project_dir, config, env_path, services_dir or project_dir / "services"

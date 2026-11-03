@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import urllib.error
+import urllib.request
 from pathlib import Path
 
+from community_stack.backup import BackupEngine, BackupError
 from community_stack.config import ConfigError, load_config
 from community_stack.docker import is_docker_available, list_community_containers
 from community_stack.redact import redact_dict
@@ -42,6 +46,98 @@ def audit_network_isolation() -> list[str]:
     if not findings:
         findings.append("[OK]   Internal network isolation verified (No database ports exposed).")
     return findings
+
+
+def audit_vikunja(
+    config: dict, config_path: Path | str, env_path: Path | str
+) -> tuple[bool, list[str]]:
+    """Check optional Vikunja containers, storage, HTTPS/API, database and backup."""
+    settings = config.get("services", {}).get("vikunja", {})
+    if not settings.get("enabled", False):
+        return True, ["[INFO] Vikunja is disabled; optional-service checks skipped."]
+
+    messages: list[str] = []
+    healthy = True
+    containers = {item.get("name"): item for item in list_community_containers()}
+    for container_name, label in (
+        ("community_vikunja", "application"),
+        ("community_vikunja_db", "database"),
+    ):
+        container = containers.get(container_name)
+        if not container:
+            messages.append(f"[FAIL] Vikunja {label} container is not deployed.")
+            healthy = False
+        elif container.get("state") != "running":
+            messages.append(f"[FAIL] Vikunja {label} container is not running.")
+            healthy = False
+        elif "(healthy)" in container.get("status", ""):
+            messages.append(f"[OK] Vikunja {label} container is healthy.")
+        elif container_name == "community_vikunja":
+            messages.append(
+                "[INFO] Vikunja application is running; its official scratch image "
+                "is checked through the public /health endpoint below."
+            )
+        else:
+            messages.append(f"[WARN] Vikunja {label} container is running without healthy status.")
+            healthy = False
+
+    project_root = Path(config_path).resolve().parent
+    files_path = project_root / settings.get("files_path", "data/vikunja/files")
+    try:
+        database_path = project_root / settings.get("database", {}).get(
+            "data_path", "data/vikunja/postgres"
+        )
+        if (
+            files_path.is_dir()
+            and database_path.is_dir()
+            and os.access(files_path, os.W_OK)
+            and os.access(database_path, os.W_OK)
+            and shutil.disk_usage(files_path).free > 0
+        ):
+            messages.append(f"[OK] Vikunja persistent files are available at {files_path}.")
+        else:
+            messages.append(
+                f"[FAIL] Vikunja files or database storage are unavailable/writable: "
+                f"{files_path}, {database_path}."
+            )
+            healthy = False
+    except OSError as exc:
+        messages.append(f"[FAIL] Vikunja persistent storage check failed: {exc}")
+        healthy = False
+
+    hostname = settings.get("hostname") or f"tasks.{config['domain']['base']}"
+    if hostname.endswith(("example.org", ".test", ".local", "localhost")):
+        messages.append(f"[WARN] Skipping HTTPS reachability for placeholder host {hostname}.")
+        healthy = False
+    else:
+        try:
+            with urllib.request.urlopen(f"https://{hostname}/health", timeout=5) as response:
+                body = response.read(64).decode("utf-8", errors="replace").strip()
+                if response.status == 200 and body == "OK":
+                    messages.append(
+                        "[OK] Vikunja /health is reachable through HTTPS (database included)."
+                    )
+                else:
+                    messages.append(
+                        f"[FAIL] Vikunja HTTPS health endpoint returned {response.status}: {body}"
+                    )
+                    healthy = False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            messages.append(f"[FAIL] Vikunja is not reachable through HTTPS: {exc}")
+            healthy = False
+
+    try:
+        engine = BackupEngine(config_path=config_path, env_path=env_path)
+        backup_ok, backup_messages = engine.verify_backup()
+        if backup_ok:
+            messages.append("[OK] A Vikunja-inclusive backup is present and structurally valid.")
+        else:
+            messages.append("[FAIL] Vikunja backup check failed: " + "; ".join(backup_messages))
+            healthy = False
+    except (BackupError, ConfigError, OSError) as exc:
+        messages.append(f"[FAIL] Vikunja backup check failed: {exc}")
+        healthy = False
+    return healthy, messages
 
 
 def run_doctor(
@@ -84,6 +180,7 @@ def run_doctor(
         print(yaml.safe_dump(safe_cfg, default_flow_style=False, indent=2))
     except (ConfigError, OSError) as exc:
         print(f"  Could not load configuration: {exc}")
+        cfg = {}
 
     # 5. Environment Secrets Audit (Redacted)
     print("--- SECRETS AUDIT (REDACTED) ---")
@@ -96,7 +193,14 @@ def run_doctor(
     else:
         print(f"  Secrets file {env_file} is absent.")
 
+    vikunja_ok = True
+    if cfg:
+        print("\n--- VIKUNJA SERVICE DIAGNOSTICS ---")
+        vikunja_ok, messages = audit_vikunja(cfg, config_path, env_path)
+        for message in messages:
+            print(f"  {message}")
+
     print("\n================================================================================")
     print("Doctor report complete. All sensitive tokens and passwords have been redacted.")
     print("================================================================================")
-    return 0 if checks.ok else 1
+    return 0 if checks.ok and vikunja_ok else 1

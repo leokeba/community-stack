@@ -20,6 +20,7 @@ from community_stack.commands.install_cmd import run_install
 from community_stack.commands.logs_cmd import run_logs
 from community_stack.commands.plan_cmd import run_plan
 from community_stack.commands.restore_cmd import run_restore
+from community_stack.commands.service_cmd import run_service
 from community_stack.commands.status_cmd import run_status
 from community_stack.commands.subscribers_cmd import run_subscribers
 from community_stack.commands.upgrade_cmd import run_upgrade
@@ -84,7 +85,23 @@ def create_parser() -> argparse.ArgumentParser:
     p_install.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
 
     # status
-    subparsers.add_parser("status", help="Report service health and version information")
+    p_status = subparsers.add_parser("status", help="Report service health and version information")
+    p_status.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+
+    # service lifecycle
+    p_service = subparsers.add_parser(
+        "service", help="Enable, disable, start, stop, restart, or inspect a service"
+    )
+    p_service.add_argument(
+        "action", choices=["enable", "disable", "start", "stop", "restart", "status"]
+    )
+    p_service.add_argument("service", help="Service name (for example vikunja)")
+    p_service.add_argument(
+        "-c", "--config", default="community-stack.yaml", help="Path to config file"
+    )
+    p_service.add_argument("-e", "--env", default=".env", help="Path to secrets .env file")
 
     # logs
     p_logs = subparsers.add_parser("logs", help="View or stream service logs")
@@ -500,7 +517,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "install":
         return run_install(config_path=args.config, env_path=args.env)
     elif args.command == "status":
-        return run_status()
+        return run_status(config_path=args.config)
+    elif args.command == "service":
+        return run_service(
+            action=args.action,
+            service=args.service,
+            config_path=args.config,
+            env_path=args.env,
+        )
     elif args.command == "logs":
         return run_logs(service=args.service, follow=args.follow, tail=args.tail)
     elif args.command == "backup":

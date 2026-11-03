@@ -17,7 +17,7 @@ The Community Communications Stack is designed to survive total server loss, hos
 
 ### What is Backed Up
 Every snapshot created by `community-stack backup` captures:
-1. **PostgreSQL Database (`postgres_synapse.dump`):** Matrix Synapse state, accounts, joined rooms, key material, and messages.
+1. **PostgreSQL databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata.
 2. **Persistent Storage (`data/`):**
    - Synapse configuration, media store, and signing keys (`data/matrix`).
    - Caddy certificates and ACME state (`data/caddy`).
@@ -26,6 +26,7 @@ Every snapshot created by `community-stack backup` captures:
    - Subscriber records, consent history and the email send ledger (`data/announcements/subscribers.db`). Both databases are copied through SQLite's backup API, so a backup taken during a write is consistent. The unsubscribe signing key lives in `announcements.db`; a restore that lacks it breaks existing unsubscribe links.
    - The `/connect` page is rebuilt from configuration and announcements, so it is not backed up separately (`data/landing/connect`).
    - Element Web branding and client configuration (`data/element`).
+   - Vikunja attachments (`data/vikunja/files`). Its live PostgreSQL directory is excluded; it is backed up as a consistent database dump instead.
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
 4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
 5. **Snapshot Manifest (`manifest.json`):** Timestamp, project identifier, and integrity checksum metadata.
@@ -37,6 +38,12 @@ not leave a partial database in the snapshot. The SQLite database contains
 password hashes and authentication/session records as well as public
 announcement content, and `.env` holds every service secret, so snapshots are
 sensitive data.
+
+When Vikunja is enabled, the application container is stopped briefly while
+its PostgreSQL dump and attachment archive are captured. PostgreSQL's online
+`pg_dump` provides a consistent database snapshot, and stopping the app keeps
+file uploads aligned with that snapshot. A failed Vikunja dump or failed
+application restart is reported as a backup failure.
 
 ### Encryption
 
@@ -193,6 +200,15 @@ To upgrade an individual service without downtime or data risk:
 ```bash
 uv run community-stack upgrade matrix
 ```
+
+Vikunja upgrades require a successful pre-upgrade snapshot:
+
+```bash
+# Pin the intended release in services.vikunja.version first.
+uv run community-stack upgrade vikunja
+```
+
+See [Vikunja recovery and upgrade details](vikunja.md#backup-restore-and-upgrade).
 
 What the upgrade command does:
 1. Automatically creates a pre-upgrade snapshot before making any container changes.

@@ -253,6 +253,72 @@
               "type": "boolean"
             }
           }
+        },
+        "vikunja": {
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+              "default": "2.7.1"
+            },
+            "hostname": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+              "description": "Public hostname; defaults to tasks.<domain.base>"
+            },
+            "files_path": {
+              "type": "string",
+              "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+              "default": "data/vikunja/files"
+            },
+            "database": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "postgres"
+                  ],
+                  "default": "postgres"
+                },
+                "data_path": {
+                  "type": "string",
+                  "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+                  "default": "data/vikunja/postgres"
+                }
+              }
+            },
+            "allow_registration": {
+              "type": "boolean",
+              "default": false
+            },
+            "enable_link_sharing": {
+              "type": "boolean",
+              "default": false,
+              "description": "Vikunja link sharing; enable only after reviewing its permission model"
+            },
+            "memory_limit": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*[MG]$",
+              "default": "512M"
+            },
+            "cpu_limit": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 16,
+              "default": 1
+            }
+          }
         }
       }
     },

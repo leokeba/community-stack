@@ -69,6 +69,9 @@ def get_required_secrets(config: dict[str, Any]) -> list[str]:
             ]
         )
 
+    if services.get("vikunja", {}).get("enabled", False):
+        required.extend(["VIKUNJA_POSTGRES_PASSWORD", "VIKUNJA_SERVICE_SECRET"])
+
     backups = operations.get("backups", {})
     if backups.get("enabled", False):
         required.append("RESTIC_PASSWORD")
@@ -148,6 +151,8 @@ POSTGRES_PASSWORD={postgres_pw}
 
 SYNAPSE_SECRET_KEY={synapse_secret}
 SYNAPSE_REGISTRATION_SHARED_SECRET={synapse_reg_secret}
+
+# Vikunja secrets are provisioned on first install if Vikunja is enabled.
 
 RESTIC_PASSWORD={restic_pw}
 

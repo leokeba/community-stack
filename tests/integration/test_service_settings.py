@@ -107,6 +107,21 @@ def test_plan_shows_the_diff_without_changing_anything(project):
     assert fake.calls == []
 
 
+def test_vikunja_can_be_enabled_from_a_legacy_configuration(project):
+    root, _ = project
+    config_path = root / "community-stack.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["services"].pop("vikunja")
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    plan = agent_settings.build_plan(context(root), {"services.vikunja.enabled": "true"})
+    proposed = yaml.safe_load(plan["_new_text"])
+
+    assert proposed["services"]["vikunja"]["enabled"] is True
+    assert proposed["services"]["vikunja"]["version"] == "2.7.1"
+    assert "https://tasks.example.org/" in plan["warnings"][0]
+
+
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
@@ -281,6 +296,37 @@ def test_console_reviews_and_applies_a_change(console):
 
     unchanged = client.post("/admin/services/review", data={"csrf_token": csrf(page), **hidden})
     assert "Nothing was changed." in unchanged.text
+
+
+def test_console_provisions_and_deploys_vikunja(console):
+    root, client = console
+    page = client.get("/admin/services")
+    assert "Vikunja task management" in page.text
+    values = {**form_values(page), "setting:services.vikunja.enabled": "true"}
+
+    review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
+    assert review.status_code == 200
+    assert "https://tasks.example.org/" in review.text
+    assert "Confirm with your password" in review.text
+
+    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
+    applied = client.post(
+        "/admin/services/apply",
+        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+    )
+    assert applied.status_code == 200
+    assert "Changes applied" in applied.text
+
+    config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
+    assert config["services"]["vikunja"]["enabled"] is True
+    env = (root / ".env").read_text(encoding="utf-8")
+    assert "VIKUNJA_POSTGRES_PASSWORD=" in env
+    assert "VIKUNJA_SERVICE_SECRET=" in env
+    route = (root / "data" / "proxy" / "vikunja.caddy").read_text(encoding="utf-8")
+    assert "tasks.example.org" in route
+
+    settings_page = client.get("/admin/services")
+    assert 'href="https://tasks.example.org/"' in settings_page.text
 
 
 def test_console_asks_for_the_password_before_stopping_matrix(console):

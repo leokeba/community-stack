@@ -16,7 +16,12 @@ import yaml
 from community_stack import docker
 from community_stack.backup import BackupError
 from community_stack.config import validate_config
-from community_stack.config_edit import get_value, set_value, write_in_place
+from community_stack.config_edit import (
+    ensure_vikunja_config,
+    get_value,
+    set_value,
+    write_in_place,
+)
 from community_stack.provision import ProvisionError, prepare_service
 from community_stack.secrets import parse_env_file
 
@@ -148,6 +153,16 @@ SETTINGS: dict[str, Setting] = {
             service="matrix",
             dangerous=True,
         ),
+        Setting(
+            "services.vikunja.enabled",
+            "Vikunja task management",
+            "Deploy Vikunja at tasks.<community domain> with its own accounts. Add the "
+            "hostname's DNS record before enabling it.",
+            "bool",
+            False,
+            service="vikunja",
+            dangerous=True,
+        ),
     )
 }
 
@@ -179,6 +194,11 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     effective = {key: value for key, value in changes.items() if current[key] != value}
 
     new_text = old_text
+    if any(key.startswith("services.vikunja.") for key in effective):
+        try:
+            new_text = ensure_vikunja_config(new_text)
+        except (TypeError, ValueError) as exc:
+            raise SettingsError(str(exc)) from exc
     for key, value in effective.items():
         try:
             new_text = set_value(new_text, SETTINGS[key].path, value)
@@ -217,6 +237,16 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
         config, ("services", "announcements", "channels", "matrix_room", "enabled"), False
     ):
         warnings.append("Matrix announcements will fail while Matrix is off.")
+    if effective.get("services.vikunja.enabled") is True:
+        hostname = get_value(
+            yaml.safe_load(new_text),
+            ("services", "vikunja", "hostname"),
+            f"tasks.{get_value(config, ('domain', 'base'), 'example.org')}",
+        )
+        warnings.append(
+            f"Vikunja will be deployed at https://{hostname}/. Its accounts are separate "
+            "from Matrix, and public link sharing remains disabled."
+        )
 
     diff = "".join(
         difflib.unified_diff(
@@ -294,16 +324,24 @@ def wait_for(context, service: str, running: bool) -> None:
 
 
 def set_service(context, service: str, running: bool) -> None:
+    route_path = context.project_dir / "data" / "proxy" / "vikunja.caddy"
+    previous_route = (
+        route_path.read_text(encoding="utf-8")
+        if service == "vikunja" and route_path.is_file()
+        else None
+    )
     if running:
         if not docker.ensure_network("proxy_net"):
             raise SettingsError("Docker could not create the proxy network.")
         if service in ("matrix", "whatsapp_bridge") and not docker.ensure_network("bridge_net"):
             raise SettingsError("Docker could not create the isolated Matrix appservice network.")
+    if running or service == "vikunja":
         try:
             config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
             prepare_service(context.project_dir, service, config, context.env_path)
-        except ProvisionError as exc:
+        except (OSError, ValueError, ProvisionError) as exc:
             raise SettingsError(str(exc)) from exc
+    if running:
         args = ["up", "-d", "--remove-orphans"]
     else:
         args = ["down"]
@@ -316,6 +354,20 @@ def set_service(context, service: str, running: bool) -> None:
     if result.returncode != 0:
         raise SettingsError(f"Docker could not {'start' if running else 'stop'} {service}.")
     wait_for(context, service, running)
+    if service == "vikunja":
+        current_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
+        if previous_route != current_route:
+            try:
+                result = docker.run_compose(
+                    context.services_dir / "proxy",
+                    ["restart", "caddy"],
+                    env_file=context.env_path,
+                    capture_output=True,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise SettingsError("Could not reload Caddy's Vikunja route.") from exc
+            if result.returncode != 0:
+                raise SettingsError("Caddy could not reload the Vikunja route.")
     if service == "whatsapp_bridge" and running:
         result = docker.run_compose(
             context.services_dir / "matrix",

@@ -96,6 +96,22 @@ def run_plan(
     if wa_cfg.get("enabled"):
         print("  - bridge_net:      Isolated Appservice link between Synapse and WhatsApp bridge")
 
+    vikunja_cfg = services.get("vikunja", {})
+    print("\n--- COLLABORATIVE APPLICATIONS ---")
+    if vikunja_cfg.get("enabled", False):
+        hostname = vikunja_cfg.get("hostname") or f"tasks.{domain.get('base')}"
+        print(f"  [ENABLED]  Vikunja ({vikunja_cfg.get('version', '2.7.1')})")
+        print(f"             - URL: https://{hostname}/")
+        print("             - Database: dedicated PostgreSQL (private internal network)")
+        print(
+            f"             - Registration: {'Open' if vikunja_cfg.get('allow_registration') else 'Closed'}"
+        )
+        print(
+            f"             - Public link sharing: {'Enabled' if vikunja_cfg.get('enable_link_sharing') else 'Disabled'}"
+        )
+    else:
+        print("  [DISABLED] Vikunja (not deployed)")
+
     print("\n--- OPERATIONS & PERSISTENCE ---")
     backups_cfg = operations.get("backups", {})
     if backups_cfg.get("enabled"):
