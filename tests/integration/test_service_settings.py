@@ -87,8 +87,10 @@ def test_yaml_edits_keep_comments_and_the_file_inode(tmp_path):
     assert os.stat(path).st_ino == inode
     assert "# keep me" in text and "enabled: false # and me" in text
     assert yaml.safe_load(text)["project"]["timezone"] == "Europe/Paris"
-    with pytest.raises(ValueError, match="missing"):
-        set_value(text, ("services", "element", "enabled"), True)
+    # A service with no section yet gets one, and the rest of the file is unchanged.
+    created = set_value(text, ("services", "element", "enabled"), True)
+    assert yaml.safe_load(created)["services"]["element"] == {"enabled": True}
+    assert "# keep me" in created and "enabled: false # and me" in created
 
 
 def test_plan_shows_the_diff_without_changing_anything(project):

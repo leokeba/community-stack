@@ -99,11 +99,64 @@ def set_value(text: str, path: tuple[str, ...], value: Any) -> str:
             if len(current) == len(parent) + 1 and child_indent is None:
                 child_indent = indent
     if parent_end is None or parent_indent is None:
-        raise ValueError(f"Section {'.'.join(path[:-1])} is missing from the configuration.")
+        return _add_missing_block(text, path, value)
     indent = " " * (child_indent if child_indent is not None else parent_indent + 2)
     if not lines[parent_end].endswith("\n"):
         lines[parent_end] += "\n"
     lines.insert(parent_end + 1, f"{indent}{path[-1]}: {render_value(value)}\n")
+    return _verified("".join(lines), path, value)
+
+
+def _add_missing_block(text: str, path: tuple[str, ...], value: Any) -> str:
+    """Add the sections that do not exist yet, under the deepest section that does."""
+    data = yaml.safe_load(text) or {}
+    existing = len(path) - 1
+    while existing > 0 and not isinstance(get_value(data, path[:existing], None), dict):
+        existing -= 1
+    if existing == 0 and not isinstance(data, dict):
+        raise ValueError("The configuration must be a YAML mapping.")
+    lines = text.splitlines(keepends=True)
+    if existing == 0:
+        # Top-level section missing: append it at the end of the file.
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        indent = 0
+        insert_at = len(lines)
+    else:
+        # Find the ancestor's own line and where its block ends.
+        ancestor = path[:existing]
+        stack: list[tuple[int, str]] = []
+        start = None
+        indent = 0
+        insert_at = len(lines)
+        for index, line in enumerate(lines):
+            match = KEY_LINE.match(line.rstrip("\n"))
+            if not match:
+                continue
+            key_indent = len(match["indent"])
+            if start is not None and key_indent <= indent:
+                insert_at = index
+                break
+            while stack and stack[-1][0] >= key_indent:
+                stack.pop()
+            stack.append((key_indent, match["key"]))
+            if tuple(key for _, key in stack) == ancestor and start is None:
+                start, indent = index, key_indent
+        if start is None:
+            raise ValueError(f"Section {'.'.join(ancestor)} is missing from the configuration.")
+        # Insert after the last content line of the ancestor's block.
+        while insert_at > start + 1 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        if not lines[insert_at - 1].endswith("\n"):
+            lines[insert_at - 1] += "\n"
+    new_lines: list[str] = []
+    # Keys nest two spaces deeper than their parent; a new top-level key starts at column 0.
+    depth = indent if existing > 0 else -2
+    for key in path[existing:-1]:
+        depth += 2
+        new_lines.append(f"{' ' * depth}{key}:\n")
+    new_lines.append(f"{' ' * (depth + 2)}{path[-1]}: {render_value(value)}\n")
+    lines[insert_at:insert_at] = new_lines
     return _verified("".join(lines), path, value)
 
 

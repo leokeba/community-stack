@@ -136,3 +136,18 @@ def test_meta_release_notes_point_at_the_upstream_tag():
     assert updates.release_notes("dock.mau.dev/mautrix/meta:v26.10").endswith(
         "mautrix/meta/releases/tag/v0.2610.0"
     )
+
+
+def test_enabling_a_bridge_that_has_no_config_section_yet_creates_it():
+    from community_stack.config_edit import set_value
+
+    text = "domain:\n  base: x.org\nservices:\n  matrix:\n    enabled: true\n  whatsapp_bridge:\n    enabled: false\n"
+    out = set_value(text, ("services", "signal_bridge", "enabled"), True)
+    assert yaml.safe_load(out)["services"]["signal_bridge"] == {"enabled": True}
+    assert "# " not in out and yaml.safe_load(out)["services"]["whatsapp_bridge"] == {
+        "enabled": False
+    }
+    out = set_value(
+        "services:\n  matrix:\n    enabled: true\n", ("services", "meta_bridge", "enabled"), False
+    )
+    assert yaml.safe_load(out)["services"]["meta_bridge"] == {"enabled": False}
