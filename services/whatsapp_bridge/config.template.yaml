@@ -28,6 +28,13 @@ database:
 
 bridge:
   personal_filtering_spaces: false
+  # Do not create a room and Matrix accounts for every contact or chat on the linked phone.
+  # Only chats listed under portal_create_filter are bridged automatically.
+  history_sync:
+    max_initial_conversations: 0
+  portal_create_filter:
+    mode: allow
+    list: []
   # Shared relay: the admin login relays messages from Matrix users who are not logged in.
   relay:
     enabled: true

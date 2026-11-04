@@ -334,3 +334,15 @@ def test_the_template_enables_shared_relay_for_admins_only():
         Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
     )
     assert template["bridge"]["relay"] == {"enabled": True, "admin_only": True}
+
+
+def test_the_template_bridges_no_chats_until_they_are_listed():
+    from pathlib import Path
+
+    import yaml
+
+    template = yaml.safe_load(
+        Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
+    )
+    assert template["bridge"]["history_sync"]["max_initial_conversations"] == 0
+    assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
