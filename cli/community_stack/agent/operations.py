@@ -255,6 +255,10 @@ def whatsapp_status(context: AgentContext, params: dict[str, Any]) -> dict[str, 
     return bridges.status(context)
 
 
+def whatsapp_rooms(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    return {"rooms": bridges.portal_rooms(context)}
+
+
 CATALOG: dict[str, Operation] = {
     op.name: op
     for op in (
@@ -397,6 +401,13 @@ CATALOG: dict[str, Operation] = {
             "system",
             _bridge_call(whatsapp_status),
             summary="Whether the WhatsApp bridge is enabled, registered and running.",
+        ),
+        Operation(
+            "bridge.whatsapp.rooms",
+            READ,
+            "system",
+            _bridge_call(whatsapp_rooms),
+            summary="List the Matrix rooms the WhatsApp bridge created for chats.",
         ),
         Operation(
             "bridge.whatsapp.command",

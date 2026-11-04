@@ -67,6 +67,23 @@
   <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group also appear in Matrix. Only bridge a group intended for this purpose, and tell its members first. Bridged messages are readable by the server operator, so do not claim end-to-end encryption across WhatsApp.</p>
 </section>
 
+<section class="panel" id="bridged-rooms">
+  <h2>Bridged rooms</h2>
+  {% if rooms %}
+  <p>These Matrix rooms were created by the bridge for WhatsApp chats. Copy a room ID into the WhatsApp destination on the <a href="/admin/channels">Channels page</a>, and invite the announcements account to it.</p>
+  <table>
+    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th></tr></thead>
+    <tbody>
+    {% for room in rooms %}
+    <tr><td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No bridged rooms yet. WhatsApp creates a room for a group after the bridge receives a message from it. Ask someone in the group to send a message, then reload this page.</p>
+  {% endif %}
+</section>
+
 {% if replies %}
 <section class="panel" id="bridge-replies">
   <h2>Bridge bot reply</h2>

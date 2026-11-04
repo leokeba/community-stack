@@ -340,6 +340,30 @@ def diagnose(context) -> list[dict[str, Any]]:
     return checks
 
 
+def portal_rooms(context) -> list[dict[str, Any]]:
+    """Rooms the bridge created for WhatsApp chats: rooms the bot is in, minus the command chat."""
+    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
+    status, joined = _matrix(context, "GET", "/_matrix/client/v3/joined_rooms")
+    if status != 200:
+        raise BridgeError("Synapse did not list the rooms for the admin account.")
+    command_room = _load_room(context)
+    rooms = []
+    for room_id in joined.get("joined_rooms", []):
+        if room_id == command_room:
+            continue
+        members = _joined(context, room_id) or set()
+        if bot not in members:
+            continue
+        status, state = _matrix(
+            context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
+        )
+        name = state.get("name") if status == 200 else ""
+        rooms.append(
+            {"room_id": room_id, "name": name or "(unnamed room)", "members": len(members)}
+        )
+    return sorted(rooms, key=lambda room: room["name"].lower())
+
+
 def status(context) -> dict[str, Any]:
     """Local state only: no Matrix or bot messages are sent to answer this."""
     checks = diagnose(context)

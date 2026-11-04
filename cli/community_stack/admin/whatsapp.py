@@ -61,12 +61,18 @@ def register_whatsapp(
             config = load_config(config_path) if Path(config_path).is_file() else {}
         except ConfigError:
             config = {}
-        bridge, error = None, None
+        bridge, error, rooms = None, None, []
         if agent.available():
             try:
                 bridge = await run_in_threadpool(
                     agent.call, "bridge.whatsapp.status", session["username"]
                 )
+                if bridge.get("command_chat_created"):
+                    rooms = (
+                        await run_in_threadpool(
+                            agent.call, "bridge.whatsapp.rooms", session["username"]
+                        )
+                    )["rooms"]
             except (AgentUnavailable, AgentRefused) as exc:
                 error = str(exc)
         return render(
@@ -77,6 +83,7 @@ def register_whatsapp(
                 agent_available=agent.available(),
                 bridge=bridge,
                 bridge_error=error,
+                rooms=rooms,
                 bridge_enabled=publisher.whatsapp_bridge_enabled,
                 matrix_connected=publisher.matrix_auth is not None,
                 channel_connected="whatsapp" in storage.list_connections(),

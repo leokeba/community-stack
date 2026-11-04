@@ -2,6 +2,7 @@
 
 import base64
 import json
+from urllib.parse import unquote
 
 import pytest
 from community_stack import docker
@@ -13,6 +14,7 @@ from community_stack.agent.server import AgentService
 SERVER = "community.test"
 BOT = f"@whatsappbot:{SERVER}"
 ROOM = "!dm:community.test"
+PORTAL = "!portal:community.test"
 PNG = b"\x89PNG\r\n\x1a\nfake-qr"
 
 
@@ -31,6 +33,10 @@ class FakeMatrix:
         if path == "/_matrix/client/v3/createRoom":
             self.rooms_created += 1
             return 200, {"room_id": ROOM}
+        if path == "/_matrix/client/v3/joined_rooms":
+            return 200, {"joined_rooms": [ROOM, PORTAL]}
+        if path.endswith("/state/m.room.name"):
+            return (200, {"name": "Neighbours"}) if PORTAL in unquote(path) else (404, {})
         if path.endswith("/joined_members"):
             return 200, {"joined": {BOT: {}, f"@community-stack-admin:{SERVER}": {}}}
         if "/send/m.room.message/" in path:
@@ -298,3 +304,22 @@ def test_the_whatsapp_page_has_no_inline_styles_for_the_strict_policy():
     html = Path("cli/community_stack/admin/templates/whatsapp.html").read_text(encoding="utf-8")
     assert "style=" not in html
     assert 'class="inline"' in html
+
+
+def test_portal_rooms_list_bridged_chats_but_not_the_command_chat(project):
+    root, _ = project
+    context = AgentContext(root)
+    bridges.ensure_direct_room(context)  # creates the command chat and records it
+    # Make the bot a member of the portal room, as the bridge does for a bridged chat.
+    rooms = bridges.portal_rooms(context)
+    assert rooms == [{"room_id": PORTAL, "name": "Neighbours", "members": 2}]
+
+
+def test_the_agent_lists_bridged_rooms_for_an_admin(project):
+    root, _ = project
+    bridges.ensure_direct_room(AgentContext(root))
+    reply = AgentService(AgentContext(root)).handle(
+        {"op": "bridge.whatsapp.rooms", "actor": "olga", "params": {}}
+    )
+    assert reply["ok"] is True
+    assert reply["result"]["rooms"][0]["room_id"] == PORTAL
