@@ -195,7 +195,8 @@ def run_command(context, command: str) -> dict[str, Any]:
         raise BridgeError("That command is not available from the console.")
     bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
     room_id = ensure_direct_room(context)
-    event_id = _send(context, room_id, command)
+    # The bridge only reads commands that start with its prefix; bare words are ignored.
+    event_id = _send(context, room_id, f"{WHATSAPP.command_prefix} {command}")
     replies = _collect_replies(context, room_id, event_id, bot)
     return {
         "command": command,

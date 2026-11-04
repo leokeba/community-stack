@@ -30,9 +30,11 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - proxy_net
-      - matrix_internal
-      - bridge_net
+      proxy_net:
+      matrix_internal:
+      bridge_net:
+        aliases:
+          - matrix-synapse
     healthcheck:
       test: ["CMD-SHELL", "curl -fSs http://localhost:8008/health || exit 1"]
       interval: 15s

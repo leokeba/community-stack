@@ -6,7 +6,9 @@ services:
     volumes:
       - ../../data/whatsapp_bridge:/data
     networks:
-      - bridge_net
+      bridge_net:
+        aliases:
+          - whatsapp-bridge
     healthcheck:
       test: ["CMD-SHELL", "test -s /data/config.yaml && test -s /data/registration.yaml && kill -0 1"]
       interval: 30s

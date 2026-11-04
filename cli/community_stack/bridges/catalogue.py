@@ -22,6 +22,7 @@ class BridgeSpec:
     appservice_id: str = ""
     bot_localpart: str = ""
     registration_file: str = ""
+    command_prefix: str = ""  # bot commands must start with this, e.g. "!whatsapp"
     login: str = ""  # how accounts are linked: "qr", "phone code", "api credentials", ...
     limitations: tuple[str, ...] = field(default_factory=tuple)
 
@@ -36,6 +37,7 @@ WHATSAPP = BridgeSpec(
     container="community_whatsapp_bridge",
     appservice_id="whatsapp",
     bot_localpart="whatsappbot",
+    command_prefix="!whatsapp",
     registration_file="whatsapp.yaml",
     login="QR code scanned in WhatsApp Linked devices",
     limitations=(

@@ -38,7 +38,7 @@ class FakeMatrix:
             self._add(
                 f"@community-stack-admin:{SERVER}", {"msgtype": "m.text", "body": body["body"]}
             )
-            if body["body"] == "login qr" and self.bot_answers:
+            if body["body"] == "!whatsapp login qr" and self.bot_answers:
                 self._add(
                     BOT, {"msgtype": "m.image", "body": "qr.png", "url": f"mxc://{SERVER}/qr1"}
                 )
@@ -135,7 +135,7 @@ def test_the_agent_runs_an_allowlisted_command_for_an_admin(project):
         {"op": "bridge.whatsapp.command", "actor": "olga", "params": {"command": "help"}}
     )
     assert reply["ok"] is True
-    assert reply["result"]["replies"][0]["text"] == "help for help"
+    assert reply["result"]["replies"][0]["text"] == "help for !whatsapp help"
 
 
 def test_a_silent_bot_is_reported_not_treated_as_success(project, monkeypatch):
@@ -213,3 +213,27 @@ def test_a_registration_written_after_synapse_started_is_flagged(project, monkey
     assert checks["synapse_registered"]["ok"] is True
     assert checks["synapse_restarted"]["ok"] is False
     assert "Restart Matrix" in checks["synapse_restarted"]["fix"]
+
+
+def test_bridge_and_synapse_reach_each_other_by_dns_safe_names():
+    # Underscores are not valid in hostnames: Synapse rejects them outright (InvalidCodepoint)
+    # and Docker's resolver fails them, so the bridge must use its hyphenated alias.
+    from pathlib import Path
+
+    import yaml
+
+    bridge = yaml.safe_load(
+        Path("services/whatsapp_bridge/docker-compose.yml").read_text(encoding="utf-8")
+    )
+    synapse = yaml.safe_load(Path("services/matrix/docker-compose.yml").read_text(encoding="utf-8"))
+    template = yaml.safe_load(
+        Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
+    )
+    bridge_alias = bridge["services"]["whatsapp_bridge"]["networks"]["bridge_net"]["aliases"]
+    synapse_alias = synapse["services"]["synapse"]["networks"]["bridge_net"]["aliases"]
+    assert bridge_alias == ["whatsapp-bridge"]
+    assert synapse_alias == ["matrix-synapse"]
+    assert template["appservice"]["address"] == "http://whatsapp-bridge:29318"
+    assert template["homeserver"]["address"] == "http://matrix-synapse:8008"
+    for host in (bridge_alias[0], synapse_alias[0]):
+        assert "_" not in host

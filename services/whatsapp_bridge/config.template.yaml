@@ -6,12 +6,12 @@ network:
   displayname_template: "{{or .FullName .PushName}} (WA)"
 
 homeserver:
-  address: http://community_synapse:8008
+  address: http://matrix-synapse:8008
   domain: ${MATRIX_DOMAIN}
   software: standard
 
 appservice:
-  address: http://community_whatsapp_bridge:29318
+  address: http://whatsapp-bridge:29318
   hostname: 0.0.0.0
   port: 29318
   id: whatsapp
