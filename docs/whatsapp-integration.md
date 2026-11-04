@@ -78,7 +78,11 @@ The admin console sends only three bot commands: `help`, `list-logins` and
   chat once and retries.
 - `login qr` returns a QR code image to the console.
 
-## Not yet verified
+## Verified on a live server
 
-The end-to-end path is not complete until a real phone links, a group is bridged, messages
-flow both ways, and a backup and restore has been tested.
+- Linking a phone from the console, the login-state check, and room discovery.
+- Two-way delivery in a test group, with shared relay set for the bridged room.
+- Backup and restore: a scratch restore kept the bridge's identity and database intact.
+
+Still outside this test: bridging a large group, and behaviour when the linked phone
+has been offline for a long time.
