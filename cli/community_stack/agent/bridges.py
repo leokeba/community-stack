@@ -38,6 +38,7 @@ COMMANDS: dict[str, str] = {
 }
 COMMAND_PATTERN = re.compile("|".join(re.escape(command) for command in COMMANDS))
 NOT_MANAGEMENT_ROOM = "not your management room"
+COMMAND_CHAT_NAME = "WhatsApp bridge commands"
 REPLY_TIMEOUT_SECONDS = 25.0
 REPLY_QUIET_SECONDS = 4.0
 POLL_SECONDS = 2.0
@@ -116,7 +117,7 @@ def ensure_direct_room(context) -> str:
             "is_direct": True,
             "preset": "trusted_private_chat",
             "invite": [bot],
-            "name": "WhatsApp bridge commands",
+            "name": COMMAND_CHAT_NAME,
         },
     )
     if status != 200:
@@ -350,6 +351,11 @@ def portal_rooms(context) -> list[dict[str, Any]]:
     rooms = []
     for room_id in joined.get("joined_rooms", []):
         if room_id == command_room:
+            continue
+        status, name_state = _matrix(
+            context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
+        )
+        if status == 200 and name_state.get("name") == COMMAND_CHAT_NAME:
             continue
         members = _joined(context, room_id) or set()
         if bot not in members:
