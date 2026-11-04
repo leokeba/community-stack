@@ -1,39 +1,76 @@
-# WhatsApp announcements
+# WhatsApp bridge
 
 The optional WhatsApp integration uses the upstream
-[`mautrix-whatsapp`](https://github.com/mautrix/whatsapp) bridge. It is unofficial,
+[`mautrix-whatsapp`](https://github.com/mautrix/whatsapp) bridge, pinned to
+`dock.mau.dev/mautrix/whatsapp:v26.10` (upstream tag `v0.2610.0`). It is unofficial,
 uses a linked-device session, and may stop working or put the linked phone number
 at risk. WhatsApp must remain an auxiliary destination; the Matrix server and
 public announcement feed do not depend on it.
 
 ## Set it up in the admin console
 
-1. On **Services**, enable **WhatsApp bridge** and review the warning. The server
-   generates private appservice credentials, creates the bridge configuration,
-   registers the appservice with Synapse, and starts the bridge.
-2. On **Channels**, connect a dedicated **Matrix announcements** account. This
-   account is used to post announcements into the WhatsApp portal room.
-3. Open **WhatsApp setup** from Channels. In Element, start a direct chat with
-   `@whatsappbot:<your-matrix-domain>` and send `login qr`. Scan the QR code using
-   WhatsApp **Linked devices** on the phone you want to link.
-4. Use the bridge bot's help in Element to bridge the intended WhatsApp group.
-   Invite the Matrix announcements account to the resulting portal room.
-5. On Channels, save the portal room's Matrix room ID (starts with `!`) as the
-   WhatsApp destination and test the connection.
+Everything below is done from the admin console. You never edit bridge files or run
+containers by hand.
 
-Published announcements are posted to that Matrix portal room and forwarded by
-mautrix-whatsapp. The connection test verifies that the Matrix account can access
-the portal room; it cannot confirm that the WhatsApp phone is still linked.
+1. **Services**: turn on **WhatsApp bridge** and review the warning. The server
+   creates the bridge's private credentials, its configuration and its Matrix
+   registration, then starts the bridge.
+2. **Channels**: connect a dedicated **Matrix announcements** account. It is used to
+   post into the bridged WhatsApp group.
+3. **WhatsApp bridge** page, step 1: press **Start QR linking**. The console asks the
+   bridge bot for a QR code and shows it. On your phone: WhatsApp &rarr; Settings
+   &rarr; Linked devices &rarr; Link a device, then scan the code. Codes expire quickly.
+4. Step 2: press **Check linked accounts**. It should list the linked account. Registered
+   and running is not the same as linked, so check this before going on.
+5. Step 2: press **Show bridge commands** to read the bot's own help. Use the bot's
+   instructions to bridge the intended WhatsApp group into a Matrix room, and invite
+   the announcements account to that room.
+6. **Channels**: save the room ID (starts with `!`) as the WhatsApp destination and
+   press **Test connection**. It checks that the announcements account can reach the
+   room; it cannot confirm the phone is still linked.
 
-## Privacy and operations
+The admin console sends only three bot commands: `help`, `list-logins` and
+`login qr`. Other commands, such as logout, are not available from the console.
 
-Mautrix bridging is **bidirectional**: messages in the bridged WhatsApp group may
-also appear in Matrix. The announcements connector only sends canonical
-announcements, but that does not make the bridge itself one-way. Tell group
-members before bridging, and never bridge private coordination or administrator
-rooms.
+## Two operating models
 
-To stop the bridge, turn it off on the Services page. To unlink the phone, also
-remove the bridge's linked device in WhatsApp **Settings → Linked devices**.
-Bridge data and credentials are kept when the service is stopped so it can be
-started again without pairing the phone again.
+- **Shared relay (what this page sets up):** the linked session belongs to the
+  stack's own admin account (`@community-stack-admin`). It relays the group for the
+  community. The phone is a community-owned device, so it must stay charged and online.
+- **Personal puppeting (not offered here):** a person links their own WhatsApp and
+  reaches their chats through their own Matrix account. Do not mix the two in one
+  session.
+
+## What this does not guarantee
+
+- A bridge does not transfer ownership of the WhatsApp account, its group, its
+  members or its history to the community. The group still depends on WhatsApp and
+  on the linked phone.
+- Linked devices disconnect if the phone is offline for more than about two weeks;
+  the bridge warns after 12 days without data from the phone. WhatsApp may restrict
+  accounts it considers suspicious.
+- The bridge reads messages in bridged rooms. Its operator, which is the server
+  operator, can read the plaintext. Community Stack does not claim end-to-end
+  encryption across WhatsApp.
+- Bridging is **bidirectional**: messages in the WhatsApp group also appear in Matrix.
+  Tell group members before bridging, and never bridge private coordination rooms.
+
+## Privacy, storage and operations
+
+- Bridge data lives in `data/whatsapp_bridge/` (database, configuration, registration,
+  and the linked session). Its credentials are in `.env`. These are included in
+  encrypted backups.
+- The console keeps the command chat's room ID in `data/agent/bridges/whatsapp.json`.
+  QR images are returned to the administrator who asked for them and are not logged.
+- To stop the bridge, turn it off on the Services page. Its data and linked session
+  are kept so it can start again without pairing. To unlink the phone for good, also
+  remove the linked device in WhatsApp under **Settings &rarr; Linked devices**.
+- Upgrading: change the pinned version in `services/whatsapp_bridge/docker-compose.yml`
+  and check the release notes first. The config template follows the v26 schema.
+
+## Not yet verified
+
+The console flow has been tested against a fake Synapse and a fake bot only. It has not
+yet been run end to end with a live Synapse, a live bridge, and a real WhatsApp account
+and group. That test (QR pairing, group bridging, messages in both directions, and a
+backup and restore) is still required before this is called complete.

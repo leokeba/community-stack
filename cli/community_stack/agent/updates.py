@@ -36,7 +36,10 @@ def release_notes(image: str) -> str | None:
     if repository.endswith("signal-cli-rest-api"):
         return f"https://github.com/bbernhard/signal-cli-rest-api/releases/tag/{tag}"
     if repository.endswith("mautrix/whatsapp"):
-        return f"https://github.com/mautrix/whatsapp/releases/tag/v{version}"
+        # Upstream names date-based releases "v26.10" but tags them "v0.2610.0".
+        match = re.fullmatch(r"(\d{2})\.(\d{2})", version)
+        tag_name = f"v0.{match.group(1)}{match.group(2)}.0" if match else f"v{version}"
+        return f"https://github.com/mautrix/whatsapp/releases/tag/{tag_name}"
     return None
 
 

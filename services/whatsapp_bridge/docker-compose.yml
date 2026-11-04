@@ -1,6 +1,6 @@
 services:
   whatsapp_bridge:
-    image: dock.mau.dev/mautrix/whatsapp:v0.11.2
+    image: dock.mau.dev/mautrix/whatsapp:v26.10
     container_name: community_whatsapp_bridge
     restart: unless-stopped
     volumes:

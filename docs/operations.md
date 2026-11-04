@@ -422,7 +422,7 @@ We pin all container images to explicit upstream releases:
 | Homeserver | [matrixdotorg/synapse](https://github.com/element-hq/synapse) | `v1.119.0` | Matrix Security Announcements |
 | Database | [docker-library/postgres](https://github.com/docker-library/postgres) | `16-alpine` | PostgreSQL Release Notes |
 | Web Client | [element-hq/element-web](https://github.com/element-hq/element-web) | `v1.11.70` | Element Web GitHub Releases |
-| WhatsApp Bridge | [mautrix/whatsapp](https://github.com/mautrix/whatsapp) | `v0.11.2` | mautrix-whatsapp Releases |
+| WhatsApp Bridge | [mautrix/whatsapp](https://github.com/mautrix/whatsapp) | `v26.10` (tag `v0.2610.0`) | mautrix-whatsapp Releases |
 
 ---
 

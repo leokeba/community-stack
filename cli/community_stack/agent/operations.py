@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import backups, health, matrix_admin, updates, vikunja_users
+from community_stack.agent import backups, bridges, health, matrix_admin, updates, vikunja_users
 from community_stack.agent import community as community_profile
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
@@ -237,6 +237,24 @@ def config_apply(context: AgentContext, params: dict[str, Any]) -> dict[str, Any
         raise OperationError(str(exc)) from exc
 
 
+def _bridge_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except bridges.BridgeError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
+
+
+def whatsapp_command(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    return bridges.run_command(context, params["command"])
+
+
+def whatsapp_status(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    return bridges.status(context)
+
+
 CATALOG: dict[str, Operation] = {
     op.name: op
     for op in (
@@ -372,6 +390,21 @@ CATALOG: dict[str, Operation] = {
                 ),
             ),
             summary="Create a Vikunja account and return its temporary password once.",
+        ),
+        Operation(
+            "bridge.whatsapp.status",
+            READ,
+            "system",
+            _bridge_call(whatsapp_status),
+            summary="Whether the WhatsApp bridge is enabled, registered and running.",
+        ),
+        Operation(
+            "bridge.whatsapp.command",
+            CHANGE,
+            "system",
+            _bridge_call(whatsapp_command),
+            params=(Param("command", bridges.COMMAND_PATTERN, required=True),),
+            summary="Send a WhatsApp bridge bot command, such as login qr, and show its replies.",
         ),
         Operation(
             "config.get",

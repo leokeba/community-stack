@@ -728,7 +728,8 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
     wa_page = client.get("/admin/whatsapp")
     assert "login qr" in wa_page.text
     assert "Linked devices" in wa_page.text
-    assert "@whatsappbot:community.test" in wa_page.text
+    assert "Start QR linking" in wa_page.text
+    assert "Check linked accounts" in wa_page.text
 
     saved_wa = client.post(
         "/admin/channels/whatsapp/save",

@@ -1,34 +1,44 @@
-# mautrix-whatsapp bridge configuration template
+# mautrix-whatsapp (bridgev2, v26.x series) configuration template
 # Documentation: https://docs.mau.fi/bridges/go/whatsapp/
+# Rendered once by community-stack; afterwards the bridge's own config.yaml is authoritative.
+
+network:
+  displayname_template: "{{or .FullName .PushName}} (WA)"
 
 homeserver:
   address: http://community_synapse:8008
   domain: ${MATRIX_DOMAIN}
+  software: standard
 
 appservice:
   address: http://community_whatsapp_bridge:29318
   hostname: 0.0.0.0
   port: 29318
-  database:
-    type: sqlite3-fk-wal
-    uri: file:/data/mautrix-whatsapp.db?_txlock=immediate
   id: whatsapp
-  bot_username: whatsappbot
-  bot_displayname: WhatsApp Bridge Bot
+  bot:
+    username: whatsappbot
+    displayname: WhatsApp Bridge Bot
   as_token: ${WHATSAPP_AS_TOKEN}
   hs_token: ${WHATSAPP_HS_TOKEN}
+  username_template: whatsapp_{{.}}
+
+database:
+  type: sqlite3-fk-wal
+  uri: file:/data/mautrix-whatsapp.db?_txlock=immediate
 
 bridge:
-  username_template: whatsapp_{{.}}
-  displayname_template: "{{or .FullName .PushName}} (WA)"
   personal_filtering_spaces: false
-  delivery_receipts: false
-  federate_rooms: false
-  encryption:
-    allow: true
-    default: false
-    require: false
   permissions:
     "*": "relay"
     "${MATRIX_DOMAIN}": "user"
-    "@admin:${MATRIX_DOMAIN}": "admin"
+    "@community-stack-admin:${MATRIX_DOMAIN}": "admin"
+
+encryption:
+  allow: true
+  default: false
+  require: false
+
+provisioning:
+  # Only the bridge's own management endpoints use this; the Community Stack
+  # admin console talks to the bot through Matrix, not this API.
+  allow_matrix_auth: false

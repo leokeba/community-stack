@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -17,7 +16,6 @@ from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.http import UnsafeURLError
 from community_stack.announcements.adapters.signal import SIGNAL_API, signal_send
 from community_stack.announcements.connectors import CONNECTORS, build_connector, merge_values
-from community_stack.config import ConfigError, load_config
 
 PIXELFED_OAUTH_STATE_COOKIE = "community_pixelfed_oauth_state"
 PIXELFED_OAUTH_CALLBACK_PATH = "/admin/channels/pixelfed/callback"
@@ -411,23 +409,4 @@ def register_channels(
             request,
             f"/admin/channels#channel-{kind}",
             flash(f"{connector.label} disconnected. Its saved credentials were deleted."),
-        )
-
-    @app.get("/admin/whatsapp")
-    async def whatsapp_setup(request: Request) -> Response:
-        session = require(request, "settings")
-        try:
-            config = load_config(config_path) if Path(config_path).is_file() else {}
-        except ConfigError:
-            config = {}
-        return render(
-            request,
-            "whatsapp.html",
-            page(
-                session,
-                bridge_enabled=publisher.whatsapp_bridge_enabled,
-                matrix_connected=publisher.matrix_auth is not None,
-                channel_connected="whatsapp" in storage.list_connections(),
-                matrix_domain=config.get("domain", {}).get("matrix", "your Matrix server"),
-            ),
         )

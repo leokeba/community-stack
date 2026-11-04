@@ -374,7 +374,11 @@ class BackupEngine:
             if data_dir.is_dir():
                 # Each SQLite database is copied through the backup API, so a write in progress
                 # cannot produce a corrupt copy. Live files are then left out of the archive.
-                live_databases = ("announcements/announcements.db", "announcements/subscribers.db")
+                live_databases = (
+                    "announcements/announcements.db",
+                    "announcements/subscribers.db",
+                    "whatsapp_bridge/mautrix-whatsapp.db",
+                )
                 snapshots: list[tuple[Path, str]] = []
                 for relative in live_databases:
                     source_db = data_dir / relative

@@ -1,37 +1,71 @@
 {% extends "base.html" %}
-{% block title %}WhatsApp setup{% endblock %}
+{% block title %}WhatsApp bridge{% endblock %}
 {% block content %}
-<h1>WhatsApp setup</h1>
-<p>Connect an optional, unofficial WhatsApp bridge to send published announcements into a WhatsApp group.</p>
+<h1>WhatsApp bridge</h1>
+<p>Connect an optional, unofficial WhatsApp bridge. Everything below runs from this page: the server talks to the bridge bot for you.</p>
+{% if bridge_error %}<p class="error" role="alert">{{ bridge_error }}</p>{% endif %}
 
 <section class="panel">
-  <h2>Before you start</h2>
+  <h2>Status</h2>
+  {% if not agent_available %}
+  <p>The system agent is not running, so bridge status and linking are unavailable. See docs/operations.md, "Control agent".</p>
+  {% elif bridge %}
   <ul>
-    <li>Bridge enabled: <strong>{{ "Yes" if bridge_enabled else "No" }}</strong>{% if not bridge_enabled %} — enable WhatsApp on the <a href="/admin/services">Services page</a>. The server creates its private appservice credentials and registers the bridge with Matrix.{% endif %}</li>
+    <li>Bridge enabled: <strong>{{ "Yes" if bridge.enabled else "No" }}</strong>{% if not bridge.enabled %} — <a href="/admin/services">turn it on under Services</a>. The server creates its credentials and registers it with Matrix.{% endif %}</li>
+    <li>Registered with Matrix: <strong>{{ "Yes" if bridge.registered_with_synapse else "No" }}</strong></li>
+    <li>Container: <strong>{{ bridge.container_state }}</strong>{% if bridge.container_status %} ({{ bridge.container_status }}){% endif %}</li>
+    <li>Command chat with the bridge bot: <strong>{{ "Created" if bridge.command_chat_created else "Not yet" }}</strong></li>
     <li>Matrix announcements account connected: <strong>{{ "Yes" if matrix_connected else "No" }}</strong>{% if not matrix_connected %} — connect one on the <a href="/admin/channels">Channels page</a>.{% endif %}</li>
-    <li>WhatsApp destination saved: <strong>{{ "Yes" if channel_connected else "No" }}</strong></li>
+    <li>WhatsApp announcement destination saved: <strong>{{ "Yes" if channel_connected else "No" }}</strong></li>
   </ul>
+  <p class="muted">Registered and running does not mean a WhatsApp account is linked. Use <strong>Check linked accounts</strong> to see that.</p>
+  {% endif %}
 </section>
 
 <section class="panel">
-  <h2>Link WhatsApp</h2>
-  <ol>
-    <li>Sign in to <a href="/app/" rel="noopener noreferrer">Element</a> using an account on <code>{{ matrix_domain }}</code>.</li>
-    <li>Open a direct chat with <code>@whatsappbot:{{ matrix_domain }}</code>. If Element asks, start a chat with that user.</li>
-    <li>Send <code>login qr</code> to the bridge bot.</li>
-    <li>On your phone, open WhatsApp &rarr; Linked devices &rarr; Link a device, then scan the QR code shown in Element.</li>
-  </ol>
-  <p class="muted">The bridge stores a linked-device session on this server. Keep the server private and unlink the device from WhatsApp if you disable or retire the bridge.</p>
+  <h2>1. Link a WhatsApp account</h2>
+  <p>Press <strong>Start QR linking</strong>, then on your phone open WhatsApp &rarr; Settings &rarr; Linked devices &rarr; Link a device and scan the code shown here. The code expires quickly; start again if it does.</p>
+  <form method="post" action="/admin/whatsapp/command">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="login qr">
+    <p><button type="submit"{% if not agent_available %} disabled{% endif %}>Start QR linking</button></p>
+  </form>
+  <p class="muted">The linked session belongs to the stack's own admin account on Matrix, not to a person. Keep the server private, and unlink the device in WhatsApp if you retire the bridge.</p>
 </section>
 
 <section class="panel">
-  <h2>Choose the announcement group</h2>
-  <ol>
-    <li>In Element, use the bridge bot's help to bridge the intended WhatsApp group to a Matrix portal room.</li>
-    <li>Make the announcements account a member of that portal room. Keep encryption off: this connector cannot send encrypted Matrix events.</li>
-    <li>On the <a href="/admin/channels">Channels page</a>, open WhatsApp announcements and save the portal room's Matrix room ID (it begins with <code>!</code>).</li>
-    <li>Use <strong>Test connection</strong>. It checks that the announcements account can access the portal room; it cannot confirm the phone is still linked.</li>
-  </ol>
-  <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group may also appear in Matrix. Use a group intended for public announcements, and tell its members before bridging it. Publishing to this channel sends only canonical announcements, but does not make the bridge itself one-way.</p>
+  <h2>2. Check and find groups</h2>
+  <form method="post" action="/admin/whatsapp/command" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="list-logins">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Check linked accounts</button>
+  </form>
+  <form method="post" action="/admin/whatsapp/command" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="help">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>
+  </form>
+  <p>To bridge a WhatsApp group into a Matrix room, follow the bot's own instructions from <em>Show bridge commands</em> in the command chat. Then save the room on the <a href="/admin/channels">Channels page</a>, with the announcements account as a member.</p>
+  <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group also appear in Matrix. Only bridge a group intended for this purpose, and tell its members first. Bridged messages are readable by the server operator, so do not claim end-to-end encryption across WhatsApp.</p>
 </section>
+
+{% if replies %}
+<section class="panel" id="bridge-replies">
+  <h2>Bridge bot reply</h2>
+  {% if replies.replies %}
+    {% for reply in replies.replies %}
+      {% if reply.kind == "image" and reply.image %}
+        <p>{{ reply.text }}</p>
+        <img src="{{ reply.image }}" alt="WhatsApp linking QR code" width="280" height="280">
+      {% elif reply.kind == "image" %}
+        <p class="muted">The bot sent an image, but it could not be shown here. Check the bridge logs.</p>
+      {% else %}
+        <pre>{{ reply.text }}</pre>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">{{ replies.note }}</p>
+  {% endif %}
+</section>
+{% endif %}
 {% endblock %}

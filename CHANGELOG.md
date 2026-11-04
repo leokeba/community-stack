@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- WhatsApp bridge pinned to `mautrix-whatsapp` v26.10 (upstream tag `v0.2610.0`). The configuration template follows the v26 schema.
+- The WhatsApp setup page runs from the admin console: start QR linking, check linked accounts and show the bot's commands.
+
 ### Security
 - Facebook, Instagram and Threads requests send the access token in the `Authorization` header instead of the URL query string or form body.
 - Delivery errors are redacted before they are stored, so tokens echoed by an adapter or a `Bearer` header are not kept in the announcement history.
 
 ### Added
+- `bridge.whatsapp.status` and `bridge.whatsapp.command` control-agent operations. The bot only accepts `help`, `list-logins` and `login qr` from the console.
 - **Communication resilience, phase CR1 (contact page):**
   - Optional `community:` configuration block: name, description, canonical URL, logo, contact, emergency instructions, social accounts and independent channel switches. Schema-validated; older configurations still work.
   - Public `/connect` page, generated as static HTML: no JavaScript, printable, with channels that work listed and unavailable ones hidden.

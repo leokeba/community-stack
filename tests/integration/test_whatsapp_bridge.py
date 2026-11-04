@@ -19,7 +19,7 @@ def test_whatsapp_compose_configuration():
 
     assert "whatsapp_bridge" in data.get("services", {})
     wa_service = data["services"]["whatsapp_bridge"]
-    assert wa_service.get("image") == "dock.mau.dev/mautrix/whatsapp:v0.11.2"
+    assert wa_service.get("image") == "dock.mau.dev/mautrix/whatsapp:v26.10"
     assert "bridge_net" in wa_service["networks"]
     assert "ports" not in wa_service
     assert data["networks"]["bridge_net"]["external"] is True

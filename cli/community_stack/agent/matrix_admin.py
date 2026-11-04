@@ -8,6 +8,7 @@ root-only file next to the agent's audit log.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -60,6 +61,43 @@ def synapse_request(method: str, path: str, body: Any = None, token: str | None 
         raise MatrixAdminError("Matrix is not running, so accounts cannot be managed now.")
     reply = json.loads(result.stdout.strip().splitlines()[-1])
     return reply["status"], reply["body"]
+
+
+# Runs inside the Synapse container: one authenticated GET, returning the body base64-encoded.
+_DOWNLOAD_SCRIPT = """
+import base64, json, sys, urllib.error, urllib.request
+spec = json.load(sys.stdin)
+request = urllib.request.Request("http://localhost:8008" + spec["path"],
+                                 headers={"Authorization": "Bearer " + spec["token"]})
+try:
+    with urllib.request.urlopen(request, timeout=20) as response:
+        status, raw = response.status, response.read(spec["max_bytes"] + 1)
+        content_type = response.headers.get("Content-Type", "")
+except urllib.error.HTTPError as exc:
+    status, raw, content_type = exc.code, b"", ""
+if len(raw) > spec["max_bytes"]:
+    status, raw = 413, b""
+print(json.dumps({"status": status, "content_type": content_type,
+                  "body": base64.b64encode(raw).decode()}))
+"""
+
+DOWNLOAD_LIMIT_BYTES = 2 * 1024 * 1024
+
+
+def synapse_download(path: str, token: str) -> tuple[int, str, bytes]:
+    """GET a Synapse media path with the given token. Returns (status, content type, bytes)."""
+    result = subprocess.run(
+        ["docker", "exec", "-i", SYNAPSE_CONTAINER, "python", "-c", _DOWNLOAD_SCRIPT],
+        input=json.dumps({"path": path, "token": token, "max_bytes": DOWNLOAD_LIMIT_BYTES}),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise MatrixAdminError("Matrix is not running, so the file cannot be fetched now.")
+    reply = json.loads(result.stdout.strip().splitlines()[-1])
+    return reply["status"], reply["content_type"], base64.b64decode(reply["body"])
 
 
 def _homeserver(context) -> dict:
