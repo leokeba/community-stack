@@ -36,6 +36,7 @@ COMMANDS: dict[str, str] = {
     "login qr": "Start linking a WhatsApp device; the bot replies with a QR code.",
 }
 COMMAND_PATTERN = re.compile("|".join(re.escape(command) for command in COMMANDS))
+NOT_MANAGEMENT_ROOM = "not your management room"
 REPLY_TIMEOUT_SECONDS = 25.0
 REPLY_QUIET_SECONDS = 4.0
 POLL_SECONDS = 2.0
@@ -76,6 +77,10 @@ def _load_room(context) -> str | None:
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8")).get("room_id")
+
+
+def _forget_room(context) -> None:
+    _state_path(context).unlink(missing_ok=True)
 
 
 def _save_room(context, room_id: str) -> None:
@@ -195,9 +200,15 @@ def run_command(context, command: str) -> dict[str, Any]:
         raise BridgeError("That command is not available from the console.")
     bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
     room_id = ensure_direct_room(context)
-    # The bridge only reads commands that start with its prefix; bare words are ignored.
-    event_id = _send(context, room_id, f"{WHATSAPP.command_prefix} {command}")
+    event_id = _send(context, room_id, command)
     replies = _collect_replies(context, room_id, event_id, bot)
+    if replies and NOT_MANAGEMENT_ROOM in replies[0]["text"]:
+        # The bridge keeps its own record of the management room; if it was reset, the
+        # cached chat is stale. Open a fresh chat once, which the bridge marks as management.
+        _forget_room(context)
+        room_id = ensure_direct_room(context)
+        event_id = _send(context, room_id, command)
+        replies = _collect_replies(context, room_id, event_id, bot)
     return {
         "command": command,
         "replies": replies,

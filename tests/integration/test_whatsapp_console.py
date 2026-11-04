@@ -38,7 +38,7 @@ class FakeMatrix:
             self._add(
                 f"@community-stack-admin:{SERVER}", {"msgtype": "m.text", "body": body["body"]}
             )
-            if body["body"] == "!whatsapp login qr" and self.bot_answers:
+            if body["body"] == "login qr" and self.bot_answers:
                 self._add(
                     BOT, {"msgtype": "m.image", "body": "qr.png", "url": f"mxc://{SERVER}/qr1"}
                 )
@@ -135,7 +135,7 @@ def test_the_agent_runs_an_allowlisted_command_for_an_admin(project):
         {"op": "bridge.whatsapp.command", "actor": "olga", "params": {"command": "help"}}
     )
     assert reply["ok"] is True
-    assert reply["result"]["replies"][0]["text"] == "help for !whatsapp help"
+    assert reply["result"]["replies"][0]["text"] == "help for help"
 
 
 def test_a_silent_bot_is_reported_not_treated_as_success(project, monkeypatch):
@@ -237,3 +237,31 @@ def test_bridge_and_synapse_reach_each_other_by_dns_safe_names():
     assert template["homeserver"]["address"] == "http://matrix-synapse:8008"
     for host in (bridge_alias[0], synapse_alias[0]):
         assert "_" not in host
+
+
+def test_a_stale_management_room_is_replaced_once_and_the_command_retried(project, monkeypatch):
+    root, _ = project
+    context = AgentContext(root)
+    rooms = iter(["!stale:community.test", "!fresh:community.test"])
+    sent = []
+    replies = iter(
+        [
+            [
+                {
+                    "kind": "text",
+                    "text": "This is not your management room: send help.",
+                    "image": None,
+                }
+            ],
+            [{"kind": "text", "text": "Available logins: none.", "image": None}],
+        ]
+    )
+    monkeypatch.setattr(bridges, "ensure_direct_room", lambda ctx: next(rooms))
+    monkeypatch.setattr(bridges, "_send", lambda ctx, room, text: sent.append((room, text)) or "$e")
+    monkeypatch.setattr(bridges, "_collect_replies", lambda *args: next(replies))
+    result = bridges.run_command(context, "list-logins")
+    assert sent == [
+        ("!stale:community.test", "list-logins"),
+        ("!fresh:community.test", "list-logins"),
+    ]
+    assert result["replies"][0]["text"] == "Available logins: none."
