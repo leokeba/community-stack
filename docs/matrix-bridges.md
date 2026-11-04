@@ -129,3 +129,22 @@ or deployed yet.
 1. Signal: go ahead with a test Signal account and phone?
 2. Discord: wait for the bridgev2 release, or accept a bot-token setup on the legacy bridge?
 3. Meta: start with Messenger only, and accept the experimental account risk?
+
+## Bridges built
+
+The generic bridge path is in place: the catalogue declares each bridge; provisioning,
+settings, install, updates, health and console operations are driven from that declaration.
+
+| Bridge | Image | Console page | Status |
+|---|---|---|---|
+| WhatsApp | mautrix-whatsapp v26.10 | /admin/whatsapp | Verified on a live server (linking, rooms, relay, two-way delivery). |
+| Signal | mautrix-signal v26.10 | /admin/bridges/signal | Built and provisioned in tests. The login flow and first-run settings are not yet verified on a live account. |
+| Facebook Messenger | mautrix-meta v26.10 | /admin/bridges/messenger | Built and provisioned in tests. Experimental. The login options are read from the bot. Not verified on a live account. |
+
+Each bridge is off by default and is switched on from the Services page. Signal and
+Messenger use the generic login flow: "Ask the bot for login options" shows what the
+bot offers, and "Start linking" takes the option name from that list.
+
+Discord stays deferred: the bridgev2 release with shared relay logins is not out yet, and
+the current bridge needs a bot token on the legacy architecture. Instagram needs its own
+bridge, which is not validated.

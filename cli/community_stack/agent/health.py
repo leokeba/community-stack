@@ -15,6 +15,7 @@ import yaml
 
 from community_stack import docker
 from community_stack.backup import BackupError
+from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.redact import redact_text
 from community_stack.secrets import parse_env_file
 
@@ -26,7 +27,7 @@ LOG_SERVICES = (
     "element",
     "announcements",
     "signal",
-    "whatsapp_bridge",
+    *BRIDGE_SERVICES,
 )
 LOG_LINES = ("50", "200", "500")
 MAX_LOG_BYTES = 200_000

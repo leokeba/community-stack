@@ -1,9 +1,10 @@
-"""Operate the WhatsApp bridge through its Matrix bot, for the admin console.
+"""Operate the mautrix bridges through their Matrix bots, for the admin console.
 
 The bridge's own bot is the only control surface used here: the agent joins a private
-direct chat with `@whatsappbot:<server>` as the stack's admin account, sends one
-allowlisted command, and returns the bot's replies. The linked-device QR code is
-fetched from Synapse and returned once to the administrator; it is never logged.
+direct chat with the bot as the stack's admin account, sends one allowlisted command, and
+returns the bot's replies. Linking QR codes are fetched from Synapse and returned once to
+the administrator; they are never logged. Every function takes the bridge it works on,
+and defaults to WhatsApp so existing callers keep their behaviour.
 """
 
 from __future__ import annotations
@@ -24,27 +25,21 @@ import yaml
 
 from community_stack import docker
 from community_stack.agent import matrix_admin
-from community_stack.bridges.catalogue import WHATSAPP
+from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
 
-BOT_LOCALPART = WHATSAPP.bot_localpart
-CONTAINER_NAME = WHATSAPP.container
-REGISTRATION_NAME = WHATSAPP.registration_file
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
-COMMANDS: dict[str, str] = {
-    "cancel": "Cancel a linking attempt that is waiting for a scan.",
-    "help": "Show the bridge's commands.",
-    "list-logins": "Show which WhatsApp accounts are linked.",
-    "login qr": "Start linking a WhatsApp device; the bot replies with a QR code.",
-}
+COMMANDS: dict[str, str] = dict(WHATSAPP.commands)
 COMMAND_PATTERN = re.compile("|".join(re.escape(command) for command in COMMANDS))
+# A login flow named by the bot, for bridges whose flows are not fixed in the catalogue.
+LOGIN_FLOW_PATTERN = re.compile(rf"{LOGIN_COMMAND} [a-z][a-z0-9-]{{0,31}}")
 NOT_MANAGEMENT_ROOM = "not your management room"
-COMMAND_CHAT_NAME = "WhatsApp bridge commands"
 REPLY_TIMEOUT_SECONDS = 25.0
 REPLY_QUIET_SECONDS = 4.0
 POLL_SECONDS = 2.0
 JOIN_TIMEOUT_SECONDS = 20.0
 MAX_TEXT_CHARS = 4000
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+NOT_LINKED_MARKERS = ("not logged in", "no user logins", "no logins")
 # Replaceable in tests.
 _sleep: Callable[[float], None] = time.sleep
 
@@ -53,8 +48,25 @@ class BridgeError(Exception):
     """A bridge action the agent refused or could not finish; shown to people."""
 
 
-def _state_path(context) -> Path:
-    return context.project_dir / "data" / "agent" / "bridges" / "whatsapp.json"
+def is_allowed_command(spec: BridgeSpec, command: str) -> bool:
+    """Exact commands from the catalogue, plus a named login flow where flows are not fixed."""
+    if command in spec.commands:
+        return True
+    prefix = f"{LOGIN_COMMAND} "
+    if not command.startswith(prefix):
+        return False
+    flow = command.removeprefix(prefix)
+    if spec.login_flows:
+        return flow in spec.login_flows
+    return bool(LOGIN_FLOW_PATTERN.fullmatch(command))
+
+
+def command_chat_name(spec: BridgeSpec) -> str:
+    return f"{spec.name} bridge commands"
+
+
+def _state_path(context, spec: BridgeSpec = WHATSAPP) -> Path:
+    return context.project_dir / "data" / "agent" / "bridges" / f"{spec.key}.json"
 
 
 def _server_name(context) -> str:
@@ -74,19 +86,19 @@ def _matrix(context, method: str, path: str, body: Any = None) -> tuple[int, Any
         raise BridgeError(str(exc)) from exc
 
 
-def _load_room(context) -> str | None:
-    path = _state_path(context)
+def _load_room(context, spec: BridgeSpec = WHATSAPP) -> str | None:
+    path = _state_path(context, spec)
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8")).get("room_id")
 
 
-def _forget_room(context) -> None:
-    _state_path(context).unlink(missing_ok=True)
+def _forget_room(context, spec: BridgeSpec = WHATSAPP) -> None:
+    _state_path(context, spec).unlink(missing_ok=True)
 
 
-def _save_room(context, room_id: str) -> None:
-    path = _state_path(context)
+def _save_room(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> None:
+    path = _state_path(context, spec)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.write_text(json.dumps({"room_id": room_id}), encoding="utf-8")
     path.chmod(0o600)
@@ -101,10 +113,17 @@ def _joined(context, room_id: str) -> set[str] | None:
     return set(reply.get("joined", {}))
 
 
-def ensure_direct_room(context) -> str:
+def _room_name(context, room_id: str) -> str:
+    status, state = _matrix(
+        context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
+    )
+    return (state.get("name") or "") if status == 200 else ""
+
+
+def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
     """The admin's direct chat with the bridge bot, created once and then reused."""
-    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
-    room_id = _load_room(context)
+    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    room_id = _load_room(context, spec)
     if room_id:
         joined = _joined(context, room_id)
         if joined is not None and bot in joined:
@@ -117,20 +136,20 @@ def ensure_direct_room(context) -> str:
             "is_direct": True,
             "preset": "trusted_private_chat",
             "invite": [bot],
-            "name": COMMAND_CHAT_NAME,
+            "name": command_chat_name(spec),
         },
     )
     if status != 200:
-        raise BridgeError("Synapse refused to open a chat with the WhatsApp bridge bot.")
+        raise BridgeError(f"Synapse refused to open a chat with the {spec.name} bridge bot.")
     room_id = created["room_id"]
-    _save_room(context, room_id)
+    _save_room(context, room_id, spec)
     deadline = time.monotonic() + JOIN_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if bot in (_joined(context, room_id) or set()):
             return room_id
         _sleep(POLL_SECONDS)
     raise BridgeError(
-        "The WhatsApp bridge bot did not join the chat. Check that the bridge is running."
+        f"The {spec.name} bridge bot did not join the chat. Check that the bridge is running."
     )
 
 
@@ -156,18 +175,20 @@ def _fetch_image(context, mxc: str) -> str | None:
     return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
 
 
-def _reply_view(context, event: dict) -> dict[str, Any]:
+def _reply_view(context, event: dict, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     content = event.get("content", {})
     if content.get("msgtype") == "m.image":
         return {
             "kind": "image",
-            "text": "Scan this code in WhatsApp: Settings, Linked devices, Link a device.",
+            "text": f"Scan this code in {spec.name}, under linked devices.",
             "image": _fetch_image(context, content.get("url", "")),
         }
     return {"kind": "text", "text": str(content.get("body", ""))[:MAX_TEXT_CHARS], "image": None}
 
 
-def _collect_replies(context, room_id: str, after_event: str, bot: str) -> list[dict[str, Any]]:
+def _collect_replies(
+    context, room_id: str, after_event: str, bot: str, spec: BridgeSpec = WHATSAPP
+) -> list[dict[str, Any]]:
     """Wait for the bot's answers to one command: until it goes quiet, or time runs out."""
     deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
     seen: list[dict] = []
@@ -193,24 +214,24 @@ def _collect_replies(context, room_id: str, after_event: str, bot: str) -> list[
             break
         _sleep(POLL_SECONDS)
     # Messages arrive newest-first; present them in the order the bot sent them.
-    return [_reply_view(context, event) for event in reversed(seen)]
+    return [_reply_view(context, event, spec) for event in reversed(seen)]
 
 
-def run_command(context, command: str) -> dict[str, Any]:
+def run_command(context, command: str, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     """Send one allowlisted command to the bridge bot and return its replies."""
-    if command not in COMMANDS:
+    if not is_allowed_command(spec, command):
         raise BridgeError("That command is not available from the console.")
-    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
-    room_id = ensure_direct_room(context)
+    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    room_id = ensure_direct_room(context, spec)
     event_id = _send(context, room_id, command)
-    replies = _collect_replies(context, room_id, event_id, bot)
+    replies = _collect_replies(context, room_id, event_id, bot, spec)
     if replies and NOT_MANAGEMENT_ROOM in replies[0]["text"]:
-        # The bridge keeps its own record of the management room; if it was reset, the
-        # cached chat is stale. Open a fresh chat once, which the bridge marks as management.
-        _forget_room(context)
-        room_id = ensure_direct_room(context)
+        # The bridge keeps its own record of the management room; if it was reset, the cached
+        # chat is stale. Open a fresh chat once, which the bridge marks as its management room.
+        _forget_room(context, spec)
+        room_id = ensure_direct_room(context, spec)
         event_id = _send(context, room_id, command)
-        replies = _collect_replies(context, room_id, event_id, bot)
+        replies = _collect_replies(context, room_id, event_id, bot, spec)
     return {
         "command": command,
         "replies": replies,
@@ -242,7 +263,7 @@ def _synapse_started_at() -> datetime | None:
         return None
 
 
-def diagnose(context) -> list[dict[str, Any]]:
+def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     """Each check says what it found and, when it fails, what to do about it."""
     config_path = context.config_path
     config = (
@@ -250,11 +271,11 @@ def diagnose(context) -> list[dict[str, Any]]:
         if config_path.is_file()
         else {}
     )
-    enabled = bool(config.get("services", {}).get(WHATSAPP.service, {}).get("enabled", False))
-    data_dir = context.project_dir / "data" / WHATSAPP.service
+    enabled = bool(config.get("services", {}).get(spec.service, {}).get("enabled", False))
+    data_dir = context.project_dir / "data" / spec.service
     homeserver = context.project_dir / "data" / "matrix" / "homeserver.yaml"
-    registration = context.project_dir / "data" / "matrix" / "appservices" / REGISTRATION_NAME
-    registration_entry = f"/data/appservices/{REGISTRATION_NAME}"
+    registration = context.project_dir / "data" / "matrix" / "appservices" / spec.registration_file
+    registration_entry = f"/data/appservices/{spec.registration_file}"
     checks: list[dict[str, Any]] = []
 
     def add(check_id: str, ok: bool, message: str, fix: str = "") -> None:
@@ -263,8 +284,8 @@ def diagnose(context) -> list[dict[str, Any]]:
     add(
         "enabled",
         enabled,
-        "Bridge is enabled." if enabled else "Bridge is turned off.",
-        "Turn WhatsApp on under Services.",
+        f"{spec.name} bridge is enabled." if enabled else f"{spec.name} bridge is turned off.",
+        f"Turn {spec.name} on under Services.",
     )
     add(
         "matrix",
@@ -272,21 +293,19 @@ def diagnose(context) -> list[dict[str, Any]]:
         "Matrix is set up." if homeserver.is_file() else "Matrix has not been set up.",
         "Set up Matrix on the Services page before the bridge.",
     )
+    has_config = (data_dir / "config.yaml").is_file()
     add(
         "bridge_config",
-        (data_dir / "config.yaml").is_file(),
-        "Bridge configuration exists."
-        if (data_dir / "config.yaml").is_file()
-        else "Bridge configuration is missing.",
-        "Turn WhatsApp off and on again to regenerate it.",
+        has_config,
+        "Bridge configuration exists." if has_config else "Bridge configuration is missing.",
+        f"Turn {spec.name} off and on again to regenerate it.",
     )
+    has_registration = (data_dir / "registration.yaml").is_file()
     add(
         "bridge_registration",
-        (data_dir / "registration.yaml").is_file(),
-        "Bridge registration exists."
-        if (data_dir / "registration.yaml").is_file()
-        else "Bridge registration is missing.",
-        "Turn WhatsApp off and on again to regenerate it.",
+        has_registration,
+        "Bridge registration exists." if has_registration else "Bridge registration is missing.",
+        f"Turn {spec.name} off and on again to regenerate it.",
     )
 
     listed = False
@@ -306,7 +325,7 @@ def diagnose(context) -> list[dict[str, Any]]:
         "Synapse lists the bridge registration."
         if listed and registration.is_file()
         else "Synapse does not list the bridge registration.",
-        "Turn WhatsApp off and on again so Synapse is given its registration.",
+        f"Turn {spec.name} off and on again so Synapse is given its registration.",
     )
 
     started = (
@@ -328,7 +347,7 @@ def diagnose(context) -> list[dict[str, Any]]:
     )
 
     containers = docker.list_community_containers() if docker.is_docker_available() else []
-    container = next((c for c in containers if c.get("name") == CONTAINER_NAME), None)
+    container = next((c for c in containers if c.get("name") == spec.container), None)
     running = bool(container) and container.get("state") == "running"
     add(
         "container",
@@ -336,46 +355,37 @@ def diagnose(context) -> list[dict[str, Any]]:
         f"Bridge container is {container.get('state')}."
         if container
         else "Bridge container is not running.",
-        "Start the bridge on the Services page.",
+        f"Start {spec.name} on the Services page.",
     )
     return checks
 
 
-def portal_rooms(context) -> list[dict[str, Any]]:
-    """Rooms the bridge created for WhatsApp chats: rooms the bot is in, minus the command chat."""
-    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
+def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
+    """Rooms the bridge created for chats: rooms the bot is in, minus its command chat."""
+    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
     status, joined = _matrix(context, "GET", "/_matrix/client/v3/joined_rooms")
     if status != 200:
         raise BridgeError("Synapse did not list the rooms for the admin account.")
-    command_room = _load_room(context)
+    command_room = _load_room(context, spec)
     rooms = []
     for room_id in joined.get("joined_rooms", []):
         if room_id == command_room:
             continue
-        status, name_state = _matrix(
-            context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
-        )
-        if status == 200 and name_state.get("name") == COMMAND_CHAT_NAME:
-            continue
         members = _joined(context, room_id) or set()
         if bot not in members:
             continue
-        status, state = _matrix(
-            context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
-        )
-        name = state.get("name") if status == 200 else ""
+        name = _room_name(context, room_id)
+        if name == command_chat_name(spec):
+            continue
         rooms.append(
             {"room_id": room_id, "name": name or "(unnamed room)", "members": len(members)}
         )
     return sorted(rooms, key=lambda room: room["name"].lower())
 
 
-NOT_LINKED_MARKERS = ("not logged in", "no user logins", "no logins")
-
-
-def login_state(context) -> dict[str, Any]:
-    """Whether a WhatsApp account is linked, judged from the bot's own answer to list-logins."""
-    result = run_command(context, "list-logins")
+def login_state(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
+    """Whether an account is linked, judged from the bot's own answer to list-logins."""
+    result = run_command(context, "list-logins", spec)
     texts = [reply["text"] for reply in result["replies"] if reply["kind"] == "text"]
     if not texts:
         return {"known": False, "linked": False, "detail": result["note"]}
@@ -384,13 +394,13 @@ def login_state(context) -> dict[str, Any]:
     return {"known": True, "linked": linked, "detail": detail[:MAX_TEXT_CHARS]}
 
 
-def set_room_relay(context, room_id: str) -> dict[str, Any]:
+def set_room_relay(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     """Make the linked service account relay for one bridged room: only rooms the bridge made."""
-    if room_id not in {room["room_id"] for room in portal_rooms(context)}:
-        raise BridgeError("That room is not a bridged WhatsApp room.")
-    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
+    if room_id not in {room["room_id"] for room in portal_rooms(context, spec)}:
+        raise BridgeError(f"That room is not a bridged {spec.name} room.")
+    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
     event_id = _send(context, room_id, "set-relay")
-    replies = _collect_replies(context, room_id, event_id, bot)
+    replies = _collect_replies(context, room_id, event_id, bot, spec)
     return {
         "room_id": room_id,
         "replies": replies,
@@ -400,9 +410,9 @@ def set_room_relay(context, room_id: str) -> dict[str, Any]:
     }
 
 
-def status(context) -> dict[str, Any]:
+def status(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     """Local state only: no Matrix or bot messages are sent to answer this."""
-    checks = diagnose(context)
+    checks = diagnose(context, spec)
     by_id = {check["id"]: check for check in checks}
     container = by_id["container"]
     return {
@@ -410,8 +420,8 @@ def status(context) -> dict[str, Any]:
         "registered_with_synapse": by_id["synapse_registered"]["ok"],
         "container_state": "running" if container["ok"] else "not running",
         "container_status": "",
-        "command_chat_created": _load_room(context) is not None,
-        "commands": dict(COMMANDS),
+        "command_chat_created": _load_room(context, spec) is not None,
+        "commands": dict(spec.commands),
         "checks": checks,
         "healthy": all(check["ok"] for check in checks),
     }

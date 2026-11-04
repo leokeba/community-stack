@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from community_stack import docker
+from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.config import ConfigError, load_config
 from community_stack.provision import ProvisionError, prepare_service
 from community_stack.validator import run_checks
@@ -108,8 +109,9 @@ def run_install(
     if services_cfg.get("signal", {}).get("enabled", False):
         services_to_deploy.append("signal")
 
-    if services_cfg.get("whatsapp_bridge", {}).get("enabled", False):
-        services_to_deploy.append("whatsapp_bridge")
+    for bridge_service in BRIDGE_SERVICES:
+        if services_cfg.get(bridge_service, {}).get("enabled", False):
+            services_to_deploy.append(bridge_service)
 
     for optional_service in ("vikunja", "facilmap"):
         if services_cfg.get(optional_service, {}).get("enabled", False):
@@ -147,7 +149,7 @@ def run_install(
             print(f"[ERROR] Deployment of service '{svc}' failed (exit code {res.returncode}).")
             return 1
         print(f"  [SUCCESS] {svc} deployed successfully.")
-        if svc == "whatsapp_bridge" and prepared:
+        if svc in BRIDGE_SERVICES and prepared:
             restarted = docker.run_compose(
                 services_root / "matrix",
                 ["restart", "synapse"],
@@ -155,7 +157,7 @@ def run_install(
                 capture_output=True,
             )
             if restarted.returncode != 0:
-                print("[ERROR] Synapse could not reload the WhatsApp appservice registration.")
+                print(f"[ERROR] Synapse could not reload the {svc} appservice registration.")
                 return 1
 
     if any(route_changes.values()):

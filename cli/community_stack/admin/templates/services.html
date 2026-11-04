@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Services and settings</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<p class="muted">Bridges to other chat apps are switched on here, then set up on their own pages: <a href="/admin/whatsapp">WhatsApp</a>, <a href="/admin/bridges/signal">Signal</a>, <a href="/admin/bridges/messenger">Facebook Messenger</a>.</p>
 {% if not agent_available %}
 <div class="panel">
   <h2>The system agent is not running</h2>

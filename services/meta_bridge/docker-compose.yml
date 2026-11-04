@@ -1,0 +1,21 @@
+services:
+  meta_bridge:
+    image: dock.mau.dev/mautrix/meta:v26.10
+    container_name: community_meta_bridge
+    restart: unless-stopped
+    volumes:
+      - ../../data/meta_bridge:/data
+    networks:
+      bridge_net:
+        aliases:
+          - meta-bridge
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /data/config.yaml && test -s /data/registration.yaml && kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  bridge_net:
+    external: true

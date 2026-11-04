@@ -18,8 +18,8 @@ appservice:
   bot:
     username: whatsappbot
     displayname: WhatsApp Bridge Bot
-  as_token: ${WHATSAPP_AS_TOKEN}
-  hs_token: ${WHATSAPP_HS_TOKEN}
+  as_token: ${AS_TOKEN}
+  hs_token: ${HS_TOKEN}
   username_template: whatsapp_{{.}}
 
 database:

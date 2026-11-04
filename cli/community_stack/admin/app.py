@@ -25,6 +25,7 @@ from community_stack.admin.activitypub import register_activitypub
 from community_stack.admin.announcements import register_announcements
 from community_stack.admin.auth import register_auth
 from community_stack.admin.backups import register_backups
+from community_stack.admin.bridges import register_bridges
 from community_stack.admin.channels import register_channels
 from community_stack.admin.common import (
     CONSOLE_CSP,
@@ -682,6 +683,16 @@ def create_app(
     )
 
     register_matrix_users(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        page=page,
+        render=render,
+        require=require,
+    )
+
+    register_bridges(
         app,
         agent=agent,
         audit=audit,

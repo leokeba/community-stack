@@ -1,0 +1,21 @@
+services:
+  signal_bridge:
+    image: dock.mau.dev/mautrix/signal:v26.10
+    container_name: community_signal_bridge
+    restart: unless-stopped
+    volumes:
+      - ../../data/signal_bridge:/data
+    networks:
+      bridge_net:
+        aliases:
+          - signal-bridge
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /data/config.yaml && test -s /data/registration.yaml && kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  bridge_net:
+    external: true

@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ spec.name }} bridge{% endblock %}
+{% block content %}
+<h1>{{ spec.name }} bridge</h1>
+<p>{{ spec.name }} is an optional bridge, run by the upstream mautrix project. Everything below runs from this page: the server talks to the bridge bot for you.</p>
+{% if spec.experimental %}<p class="notice">Experimental. {{ spec.limitations[0] }}</p>{% endif %}
+{% if bridge_error %}<p class="error" role="alert">{{ bridge_error }}</p>{% endif %}
+
+<section class="panel">
+  <h2>Status</h2>
+  {% if not agent_available %}
+  <p>The system agent is not running, so bridge status and linking are unavailable. See docs/operations.md, "Control agent".</p>
+  {% elif bridge %}
+  <ul>
+    <li>Bridge enabled: <strong>{{ "Yes" if bridge.enabled else "No" }}</strong>{% if not bridge.enabled %} — <a href="/admin/services">turn it on under Services</a>.{% endif %}</li>
+    <li>Registered with Matrix: <strong>{{ "Yes" if bridge.registered_with_synapse else "No" }}</strong></li>
+    <li>Container: <strong>{{ bridge.container_state }}</strong></li>
+  </ul>
+  {% if bridge.checks %}
+  <table>
+    <thead><tr><th>Check</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for check in bridge.checks %}
+    <tr>
+      <td>{{ check.message }}{% if check.fix %}<br><span class="muted">{{ check.fix }}</span>{% endif %}</td>
+      <td>{{ badge("ok", "OK", "success") if check.ok else badge("fail", "Needs attention", "error") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>1. Link an account</h2>
+  <p>{{ spec.login }}.</p>
+  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="login">
+    <button type="submit"{% if not agent_available %} disabled{% endif %}>Ask the bot for login options</button>
+  </form>
+  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="login">
+    <label for="flow-{{ spec.key }}">Login option</label>
+    <input id="flow-{{ spec.key }}" name="flow" type="text" maxlength="32" pattern="[a-z][a-z0-9-]*" placeholder="as listed by the bot" required>
+    <button type="submit"{% if not agent_available %} disabled{% endif %}>Start linking</button>
+  </form>
+  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="cancel">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Cancel linking</button>
+  </form>
+  <p class="muted">The linked session belongs to the stack's own admin account on Matrix, not to a person.</p>
+</section>
+
+<section class="panel">
+  <h2>2. Check and find chats</h2>
+  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="list-logins">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Check linked accounts</button>
+  </form>
+  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="help">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>
+  </form>
+  <ul>
+    {% for limitation in spec.limitations %}<li class="muted">{{ limitation }}</li>{% endfor %}
+  </ul>
+</section>
+
+<section class="panel" id="bridged-rooms">
+  <h2>Bridged rooms</h2>
+  {% if rooms %}
+  <table>
+    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th></tr></thead>
+    <tbody>
+    {% for room in rooms %}
+    <tr>
+      <td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td>
+      <td>
+        <form method="post" action="/admin/bridges/{{ spec.key }}/room-relay" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Let the linked account relay here</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No bridged rooms yet. A room appears after the bridge receives a message from a chat it is allowed to bridge.</p>
+  {% endif %}
+</section>
+
+{% if replies %}
+<section class="panel" id="bridge-replies">
+  <h2>Bridge bot reply</h2>
+  {% if replies.replies %}
+    {% for reply in replies.replies %}
+      {% if reply.kind == "image" and reply.image %}
+        <p>{{ reply.text }}</p>
+        <img src="{{ reply.image }}" alt="{{ spec.name }} linking code" width="280" height="280">
+      {% elif reply.kind == "image" %}
+        <p class="muted">The bot sent an image, but it could not be shown here. Check the bridge logs.</p>
+      {% else %}
+        <pre>{{ reply.text }}</pre>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="muted">{{ replies.note }}</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -262,7 +262,7 @@ def test_a_stale_management_room_is_replaced_once_and_the_command_retried(projec
             [{"kind": "text", "text": "Available logins: none.", "image": None}],
         ]
     )
-    monkeypatch.setattr(bridges, "ensure_direct_room", lambda ctx: next(rooms))
+    monkeypatch.setattr(bridges, "ensure_direct_room", lambda ctx, spec=None: next(rooms))
     monkeypatch.setattr(bridges, "_send", lambda ctx, room, text: sent.append((room, text)) or "$e")
     monkeypatch.setattr(bridges, "_collect_replies", lambda *args: next(replies))
     result = bridges.run_command(context, "list-logins")
@@ -355,7 +355,7 @@ def test_login_state_reads_the_bots_answer(project, monkeypatch):
     monkeypatch.setattr(
         bridges,
         "run_command",
-        lambda ctx, command: {
+        lambda ctx, command, spec=None: {
             "command": command,
             "replies": [{"kind": "text", "text": fake_text["text"], "image": None}],
             "note": "",
@@ -367,7 +367,7 @@ def test_login_state_reads_the_bots_answer(project, monkeypatch):
     monkeypatch.setattr(
         bridges,
         "run_command",
-        lambda ctx, command: {"command": command, "replies": [], "note": "silent"},
+        lambda ctx, command, spec=None: {"command": command, "replies": [], "note": "silent"},
     )
     assert bridges.login_state(context)["known"] is False
 

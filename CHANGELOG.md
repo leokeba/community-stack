@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Signal bridge (`mautrix-signal` v26.10) and Facebook Messenger bridge (`mautrix-meta` v26.10), both off by default. Switched on from the Services page, set up on /admin/bridges/<name>, and provisioned through the same generic path as WhatsApp.
+- Generic bridge operations (`bridge.<name>.status | command | rooms | login_state | room_relay`), generated from the catalogue.
+
 ### Changed
 - WhatsApp bridge pinned to `mautrix-whatsapp` v26.10 (upstream tag `v0.2610.0`). The configuration template follows the v26 schema.
 - The WhatsApp setup page runs from the admin console: start QR linking, check linked accounts and show the bot's commands.

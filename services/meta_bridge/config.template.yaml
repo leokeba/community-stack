@@ -1,0 +1,51 @@
+# mautrix-meta (bridgev2, v26.x series) configuration template
+# Documentation: https://docs.mau.fi/bridges/go/meta/
+# Rendered once by community-stack; afterwards the bridge's own config.yaml is authoritative.
+# The network-specific settings are left to the bridge's defaults until they are verified live.
+
+homeserver:
+  address: http://matrix-synapse:8008
+  domain: ${MATRIX_DOMAIN}
+  software: standard
+
+appservice:
+  address: http://meta-bridge:29318
+  hostname: 0.0.0.0
+  port: 29318
+  id: meta
+  bot:
+    username: metabot
+    displayname: Facebook Messenger Bridge Bot
+  as_token: ${AS_TOKEN}
+  hs_token: ${HS_TOKEN}
+  username_template: meta_{{.}}
+
+database:
+  type: sqlite3-fk-wal
+  uri: file:/data/mautrix-meta.db?_txlock=immediate
+
+bridge:
+  personal_filtering_spaces: false
+  # Do not create a room and Matrix accounts for every contact or chat on the linked account.
+  # Only chats listed under portal_create_filter are bridged automatically.
+  history_sync:
+    max_initial_conversations: 0
+  portal_create_filter:
+    mode: allow
+    list: []
+  # Shared relay: the admin login relays messages from Matrix users who are not logged in.
+  relay:
+    enabled: true
+    admin_only: true
+  permissions:
+    "*": "relay"
+    "${MATRIX_DOMAIN}": "user"
+    "@community-stack-admin:${MATRIX_DOMAIN}": "admin"
+
+encryption:
+  allow: true
+  default: false
+  require: false
+
+provisioning:
+  allow_matrix_auth: false

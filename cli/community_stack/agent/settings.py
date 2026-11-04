@@ -16,6 +16,7 @@ import yaml
 
 from community_stack import docker
 from community_stack.backup import BackupError
+from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.config import validate_config
 from community_stack.config_edit import (
     ensure_facilmap_config,
@@ -148,6 +149,26 @@ SETTINGS: dict[str, Setting] = {
             "bool",
             False,
             service="whatsapp_bridge",
+            dangerous=True,
+        ),
+        Setting(
+            "services.signal_bridge.enabled",
+            "Signal bridge (experimental)",
+            "Starts mautrix-signal and registers it with Matrix. It links a Signal account to "
+            "this server and is bidirectional; Signal may restrict accounts it considers automated.",
+            "bool",
+            False,
+            service="signal_bridge",
+            dangerous=True,
+        ),
+        Setting(
+            "services.meta_bridge.enabled",
+            "Facebook Messenger bridge (experimental)",
+            "Starts mautrix-meta and registers it with Matrix for Messenger. It signs an account "
+            "in to this server and is bidirectional; Meta may restrict automated accounts.",
+            "bool",
+            False,
+            service="meta_bridge",
             dangerous=True,
         ),
         Setting(
@@ -414,7 +435,9 @@ def set_service(context, service: str, running: bool) -> None:
     if running:
         if not docker.ensure_network("proxy_net"):
             raise SettingsError("Docker could not create the proxy network.")
-        if service in ("matrix", "whatsapp_bridge") and not docker.ensure_network("bridge_net"):
+        if (service == "matrix" or service in BRIDGE_SERVICES) and not docker.ensure_network(
+            "bridge_net"
+        ):
             raise SettingsError("Docker could not create the isolated Matrix appservice network.")
     if running or service in ("vikunja", "facilmap"):
         try:
@@ -449,7 +472,7 @@ def set_service(context, service: str, running: bool) -> None:
                 raise SettingsError(f"Could not reload Caddy's {service} route.") from exc
             if result.returncode != 0:
                 raise SettingsError(f"Caddy could not reload the {service} route.")
-    if service == "whatsapp_bridge" and running:
+    if service in BRIDGE_SERVICES and running:
         result = docker.run_compose(
             context.services_dir / "matrix",
             ["restart", "synapse"],
@@ -457,7 +480,7 @@ def set_service(context, service: str, running: bool) -> None:
             capture_output=True,
         )
         if result.returncode != 0:
-            raise SettingsError("Synapse could not reload the WhatsApp appservice registration.")
+            raise SettingsError(f"Synapse could not reload the {service} appservice registration.")
         wait_for(context, "matrix", True)
 
 

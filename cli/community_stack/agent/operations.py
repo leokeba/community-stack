@@ -17,6 +17,7 @@ from community_stack.agent import backups, bridges, health, matrix_admin, update
 from community_stack.agent import community as community_profile
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
+from community_stack.bridges.catalogue import LOGIN_COMMAND, BridgeSpec, supported
 from community_stack.collaborative_apps import COLLABORATIVE_APPS
 from community_stack.config import ConfigError, load_config
 
@@ -247,24 +248,75 @@ def _bridge_call(handler):
     return run
 
 
-def whatsapp_command(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-    return bridges.run_command(context, params["command"])
+def _bridge_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except bridges.BridgeError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
 
 
-def whatsapp_status(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-    return bridges.status(context)
+def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
+    """The console's operations for one bridge; every name is the bridge key, then the action."""
+    key = spec.key
+    command_pattern = re.compile(
+        "|".join(
+            [re.escape(command) for command in spec.commands]
+            + ([bridges.LOGIN_FLOW_PATTERN.pattern] if not spec.login_flows else [])
+            + [re.escape(f"{LOGIN_COMMAND} {flow}") for flow in spec.login_flows]
+        )
+    )
+    room_pattern = re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}")
+    return (
+        Operation(
+            f"bridge.{key}.status",
+            READ,
+            "system",
+            _bridge_call(lambda context, params: bridges.status(context, spec)),
+            summary=f"Whether the {spec.name} bridge is enabled, registered and running.",
+        ),
+        Operation(
+            f"bridge.{key}.command",
+            CHANGE,
+            "system",
+            _bridge_call(
+                lambda context, params: bridges.run_command(context, params["command"], spec)
+            ),
+            params=(Param("command", command_pattern, required=True),),
+            summary=f"Send a {spec.name} bridge bot command and show its replies.",
+        ),
+        Operation(
+            f"bridge.{key}.rooms",
+            READ,
+            "system",
+            _bridge_call(lambda context, params: {"rooms": bridges.portal_rooms(context, spec)}),
+            summary=f"List the Matrix rooms the {spec.name} bridge created for chats.",
+        ),
+        Operation(
+            f"bridge.{key}.login_state",
+            CHANGE,
+            "system",
+            _bridge_call(lambda context, params: bridges.login_state(context, spec)),
+            summary=f"Ask the {spec.name} bridge whether an account is linked.",
+        ),
+        Operation(
+            f"bridge.{key}.room_relay",
+            CHANGE,
+            "system",
+            _bridge_call(
+                lambda context, params: bridges.set_room_relay(context, params["room_id"], spec)
+            ),
+            params=(Param("room_id", room_pattern, required=True),),
+            summary=f"Let the linked account relay messages into one bridged {spec.name} room.",
+        ),
+    )
 
 
-def whatsapp_rooms(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-    return {"rooms": bridges.portal_rooms(context)}
-
-
-def whatsapp_login_state(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-    return bridges.login_state(context)
-
-
-def whatsapp_room_relay(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-    return bridges.set_room_relay(context, params["room_id"])
+BRIDGE_OPERATIONS: tuple[Operation, ...] = tuple(
+    op for spec in supported() for op in _bridge_operations(spec)
+)
 
 
 CATALOG: dict[str, Operation] = {
@@ -404,49 +456,6 @@ CATALOG: dict[str, Operation] = {
             summary="Create a Vikunja account and return its temporary password once.",
         ),
         Operation(
-            "bridge.whatsapp.status",
-            READ,
-            "system",
-            _bridge_call(whatsapp_status),
-            summary="Whether the WhatsApp bridge is enabled, registered and running.",
-        ),
-        Operation(
-            "bridge.whatsapp.rooms",
-            READ,
-            "system",
-            _bridge_call(whatsapp_rooms),
-            summary="List the Matrix rooms the WhatsApp bridge created for chats.",
-        ),
-        Operation(
-            "bridge.whatsapp.login_state",
-            CHANGE,
-            "system",
-            _bridge_call(whatsapp_login_state),
-            summary="Ask the bridge whether a WhatsApp account is linked.",
-        ),
-        Operation(
-            "bridge.whatsapp.room_relay",
-            CHANGE,
-            "system",
-            _bridge_call(whatsapp_room_relay),
-            params=(
-                Param(
-                    "room_id",
-                    re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}"),
-                    required=True,
-                ),
-            ),
-            summary="Let the linked account relay messages into one bridged WhatsApp room.",
-        ),
-        Operation(
-            "bridge.whatsapp.command",
-            CHANGE,
-            "system",
-            _bridge_call(whatsapp_command),
-            params=(Param("command", bridges.COMMAND_PATTERN, required=True),),
-            summary="Send a WhatsApp bridge bot command, such as login qr, and show its replies.",
-        ),
-        Operation(
             "config.get",
             READ,
             "system",
@@ -486,5 +495,6 @@ CATALOG: dict[str, Operation] = {
             params=(Param("snapshot_id", SNAPSHOT_ID),),
             summary="Restore a snapshot into a scratch directory, check it, and delete it.",
         ),
+        *BRIDGE_OPERATIONS,
     )
 }

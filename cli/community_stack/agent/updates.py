@@ -12,8 +12,9 @@ import yaml
 from community_stack import docker
 from community_stack.agent import settings as service_control
 from community_stack.backup import BackupError
+from community_stack.bridges.catalogue import BRIDGE_SERVICES
 
-UPDATABLE = ("proxy", "landing", "matrix", "element", "signal", "whatsapp_bridge")
+UPDATABLE = ("proxy", "landing", "matrix", "element", "signal", *BRIDGE_SERVICES)
 
 
 class UpdateError(Exception):
@@ -35,11 +36,12 @@ def release_notes(image: str) -> str | None:
         return f"https://www.postgresql.org/docs/release/{version}/"
     if repository.endswith("signal-cli-rest-api"):
         return f"https://github.com/bbernhard/signal-cli-rest-api/releases/tag/{tag}"
-    if repository.endswith("mautrix/whatsapp"):
+    if re.search(r"mautrix/(whatsapp|signal|meta|telegram|discord)$", repository):
         # Upstream names date-based releases "v26.10" but tags them "v0.2610.0".
         match = re.fullmatch(r"(\d{2})\.(\d{2})", version)
         tag_name = f"v0.{match.group(1)}{match.group(2)}.0" if match else f"v{version}"
-        return f"https://github.com/mautrix/whatsapp/releases/tag/{tag_name}"
+        project = repository.rsplit("/", 1)[-1]
+        return f"https://github.com/mautrix/{project}/releases/tag/{tag_name}"
     return None
 
 
