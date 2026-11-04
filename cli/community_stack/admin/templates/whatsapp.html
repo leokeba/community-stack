@@ -43,17 +43,22 @@
     <input type="hidden" name="command" value="login qr">
     <p><button type="submit"{% if not agent_available %} disabled{% endif %}>Start QR linking</button></p>
   </form>
+  <form method="post" action="/admin/whatsapp/command" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="command" value="cancel">
+    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Cancel linking</button>
+  </form>
   <p class="muted">The linked session belongs to the stack's own admin account on Matrix, not to a person. Keep the server private, and unlink the device in WhatsApp if you retire the bridge.</p>
 </section>
 
 <section class="panel">
   <h2>2. Check and find groups</h2>
-  <form method="post" action="/admin/whatsapp/command" style="display:inline">
+  <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="command" value="list-logins">
     <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Check linked accounts</button>
   </form>
-  <form method="post" action="/admin/whatsapp/command" style="display:inline">
+  <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="command" value="help">
     <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>

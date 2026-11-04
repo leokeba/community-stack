@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,26 @@ from starlette.concurrency import run_in_threadpool
 from community_stack.admin.common import flash
 from community_stack.agent.client import AgentRefused, AgentUnavailable
 from community_stack.config import ConfigError, load_config
+
+QR_TTL_SECONDS = 180
+QR_LIMIT = 8
+_qr_images: dict[str, tuple[float, str, bytes]] = {}
+
+
+def _stash_qr(data_url: str) -> str | None:
+    """Keep a linking QR image in memory for a few minutes; it is never written to disk."""
+    header, _, payload = data_url.partition(",")
+    media_type = header.removeprefix("data:").removesuffix(";base64")
+    if not header.endswith(";base64") or not media_type.startswith("image/"):
+        return None
+    now = time.monotonic()
+    for key in [key for key, (expires, _, _) in _qr_images.items() if expires < now]:
+        del _qr_images[key]
+    while len(_qr_images) >= QR_LIMIT:
+        del _qr_images[next(iter(_qr_images))]
+    image_id = secrets.token_urlsafe(16)
+    _qr_images[image_id] = (now + QR_TTL_SECONDS, media_type, base64.b64decode(payload))
+    return image_id
 
 
 def register_whatsapp(
@@ -64,6 +87,18 @@ def register_whatsapp(
             status_code=status_code,
         )
 
+    @app.get("/admin/whatsapp/qr/{image_id}")
+    async def whatsapp_qr(request: Request, image_id: str) -> Response:
+        require(request, "settings")
+        entry = _qr_images.get(image_id)
+        if entry is None or entry[0] < time.monotonic():
+            return Response(status_code=404)
+        return Response(
+            content=entry[2],
+            media_type=entry[1],
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/admin/whatsapp")
     async def whatsapp_setup(request: Request) -> Response:
         return await whatsapp_page(request, require(request, "settings"))
@@ -88,6 +123,10 @@ def register_whatsapp(
             )
         # Replies can contain a linking QR code: they are shown to this administrator only,
         # and only the command name is written to the activity log.
+        for reply in result.get("replies", []):
+            if reply.get("image"):
+                image_id = _stash_qr(reply["image"])
+                reply["image"] = f"/admin/whatsapp/qr/{image_id}" if image_id else None
         audit(request, session["username"], "bridge.whatsapp.command", command, outcome="succeeded")
         return await whatsapp_page(
             request,

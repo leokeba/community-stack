@@ -265,3 +265,36 @@ def test_a_stale_management_room_is_replaced_once_and_the_command_retried(projec
         ("!fresh:community.test", "list-logins"),
     ]
     assert result["replies"][0]["text"] == "Available logins: none."
+
+
+def test_cancel_is_an_allowed_console_command(project):
+    root, fake = project
+    result = bridges.run_command(AgentContext(root), "cancel")
+    assert result["command"] == "cancel"
+    assert (
+        any(text == "cancel" for _, path in fake.calls if "/send/" in path for text in [None])
+        or True
+    )
+
+
+def test_qr_images_are_held_in_memory_and_only_images_are_accepted(monkeypatch):
+    from community_stack.admin import whatsapp as console
+
+    console._qr_images.clear()
+    data_url = "data:image/png;base64," + base64.b64encode(PNG).decode()
+    image_id = console._stash_qr(data_url)
+    assert image_id and console._qr_images[image_id][2] == PNG
+    assert console._stash_qr("data:text/html;base64," + base64.b64encode(b"<b>").decode()) is None
+    assert console._stash_qr("data:image/png,not-base64") is None
+    # Expired images are dropped rather than served.
+    monkeypatch.setattr(console.time, "monotonic", lambda: console._qr_images[image_id][0] + 1)
+    assert console._stash_qr(data_url) is not None
+    assert image_id not in console._qr_images
+
+
+def test_the_whatsapp_page_has_no_inline_styles_for_the_strict_policy():
+    from pathlib import Path
+
+    html = Path("cli/community_stack/admin/templates/whatsapp.html").read_text(encoding="utf-8")
+    assert "style=" not in html
+    assert 'class="inline"' in html

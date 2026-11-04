@@ -31,6 +31,7 @@ CONTAINER_NAME = WHATSAPP.container
 REGISTRATION_NAME = WHATSAPP.registration_file
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
 COMMANDS: dict[str, str] = {
+    "cancel": "Cancel a linking attempt that is waiting for a scan.",
     "help": "Show the bridge's commands.",
     "list-logins": "Show which WhatsApp accounts are linked.",
     "login qr": "Start linking a WhatsApp device; the bot replies with a QR code.",
