@@ -68,9 +68,17 @@ The admin console sends only three bot commands: `help`, `list-logins` and
 - Upgrading: change the pinned version in `services/whatsapp_bridge/docker-compose.yml`
   and check the release notes first. The config template follows the v26 schema.
 
+## Verified on the live server
+
+- The bridge (mautrix-whatsapp v26.10) talks to Synapse and receives appservice traffic. Its
+  appservice and homeserver addresses use DNS-safe aliases (`whatsapp-bridge`,
+  `matrix-synapse`); underscored container names are rejected.
+- The command chat is marked as the management room; commands are sent bare (`help`,
+  `login qr`, `list-logins`). If the bridge resets its records, the console opens a new
+  chat once and retries.
+- `login qr` returns a QR code image to the console.
+
 ## Not yet verified
 
-The console flow has been tested against a fake Synapse and a fake bot only. It has not
-yet been run end to end with a live Synapse, a live bridge, and a real WhatsApp account
-and group. That test (QR pairing, group bridging, messages in both directions, and a
-backup and restore) is still required before this is called complete.
+The end-to-end path is not complete until a real phone links, a group is bridged, messages
+flow both ways, and a backup and restore has been tested.
