@@ -292,9 +292,10 @@ def test_cli_stub_commands(tmp_path, capsys, monkeypatch):
     assert main(["announce", "retry"]) == 1
     assert "none are safely retryable" in capsys.readouterr().out
 
-    # bridge status & list-rooms
+    # bridge status (informational) and doctor (fails while prerequisites are missing)
     assert main(["bridge", "status"]) == 0
-    assert main(["bridge", "list-rooms"]) == 0
+    assert main(["bridge", "doctor"]) == 1
+    assert main(["bridge", "rooms"]) == 1
 
     # bridge disable without confirm fails
     assert main(["bridge", "disable"]) == 1

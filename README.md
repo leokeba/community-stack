@@ -120,7 +120,7 @@ Broadcast & Channels:
   announce      Draft, preview, publish, list, update, retract, and track announcements
   subscribers   Manage opt-in email and SMS lists: export, erase, test-send, instant opt-out
   connect       Show the stable /connect contact page, QR codes and identity package
-  bridge        Inspect WhatsApp bridge health or trigger the emergency killswitch
+  bridge        Status, doctor, rooms and logs for the WhatsApp bridge; emergency killswitch
   archive       Export and verify zero-dependency offline HTML archives
 ```
 

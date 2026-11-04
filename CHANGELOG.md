@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Delivery errors are redacted before they are stored, so tokens echoed by an adapter or a `Bearer` header are not kept in the announcement history.
 
 ### Added
+- Bridge CLI: `bridge status` and `bridge doctor` report the same checks as the console; `bridge rooms` lists bridged rooms; `bridge logs` tails the container. `list-rooms` is replaced by `rooms`.
+- Console: a login check for the WhatsApp account, and per-room relay for bridged rooms.
+- `docs/matrix-bridges.md`: the Bridge Manager guide (architecture, models, privacy, operations).
 - `bridge.whatsapp.status` and `bridge.whatsapp.command` control-agent operations. The bot only accepts `help`, `list-logins` and `login qr` from the console.
 - **Communication resilience, phase CR1 (contact page):**
   - Optional `community:` configuration block: name, description, canonical URL, logo, contact, emergency instructions, social accounts and independent channel switches. Schema-validated; older configurations still work.
