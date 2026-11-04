@@ -22,6 +22,7 @@ class BridgeSpec:
     appservice_id: str = ""
     bot_localpart: str = ""
     registration_file: str = ""
+    image: str = ""  # pinned image for planned bridges; supported bridges read their compose file
     login: str = ""  # how accounts are linked: "qr", "phone code", "api credentials", ...
     limitations: tuple[str, ...] = field(default_factory=tuple)
 
@@ -52,7 +53,10 @@ CATALOG: dict[str, BridgeSpec] = {
         name="Telegram",
         status="planned",
         upstream="https://github.com/mautrix/telegram",
-        docs="https://docs.mau.fi/bridges/python/telegram/",
+        docs="https://docs.mau.fi/bridges/go/telegram/",
+        # Rewritten on bridgev2 (Go) in v26.04; fresh installs use the current v26.x release.
+        # dock.mau.dev/mautrix/telegram:v26.10 exists in the registry; login flow still to verify.
+        image="dock.mau.dev/mautrix/telegram:v26.10",
     ),
     "signal": BridgeSpec(
         key="signal",

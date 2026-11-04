@@ -23,7 +23,8 @@ bridges.
 | Platform | Bridge | Status |
 |---|---|---|
 | WhatsApp | mautrix-whatsapp v26.10 | Supported. Linking, room discovery and shared relay are in the admin console. Linking is verified on a live server; two-way delivery in a test group is still to be confirmed. |
-| Telegram, Signal, Discord, Instagram/Messenger | — | Planned. Not installable yet. |
+| Telegram | mautrix-telegram v26.10 (Go, bridgev2) | Planned. Image confirmed in the registry. Needs your Telegram API credentials and a verified login flow before it is built. |
+| Signal, Discord, Instagram/Messenger | — | Planned. Not installable yet. |
 
 The catalogue lives in `cli/community_stack/bridges/catalogue.py`. Images are pinned;
 `latest` is never used.
