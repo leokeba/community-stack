@@ -13,8 +13,16 @@ from typing import Any
 import yaml
 
 from community_stack import docker
-from community_stack.agent import backups, bridges, health, matrix_admin, updates, vikunja_users
+from community_stack.agent import (
+    backups,
+    bridges,
+    health,
+    matrix_admin,
+    updates,
+    vikunja_users,
+)
 from community_stack.agent import community as community_profile
+from community_stack.agent import safemode as safemode_ops
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.bridges.catalogue import LOGIN_COMMAND, BridgeSpec, supported
@@ -200,6 +208,16 @@ def _matrix_call(handler):
         try:
             return handler(context, params)
         except matrix_admin.MatrixAdminError as exc:
+            raise OperationError(str(exc)) from exc
+
+    return run
+
+
+def _safemode_call(handler):
+    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return handler(context, params)
+        except safemode_ops.SafeModeOperationError as exc:
             raise OperationError(str(exc)) from exc
 
     return run
@@ -439,6 +457,71 @@ CATALOG: dict[str, Operation] = {
             _matrix_call(matrix_admin.deactivate_user),
             params=(Param("user_id", matrix_admin.USER_ID, required=True),),
             summary="Deactivate a Matrix account.",
+        ),
+        Operation(
+            "safemode.overview",
+            READ,
+            "system",
+            _safemode_call(safemode_ops.overview),
+            summary="Show Safe Mode's bot state, protected rooms and aggregate account states.",
+        ),
+        Operation(
+            "safemode.status",
+            READ,
+            "system",
+            _safemode_call(safemode_ops.status),
+            params=(Param("user_id", safemode_ops.USER_ID, required=True),),
+            summary="Show one account's Safe Mode state, without room names.",
+        ),
+        Operation(
+            "safemode.doctor",
+            READ,
+            "system",
+            _safemode_call(safemode_ops.doctor),
+            summary="Check every protected room against the compatibility rules.",
+        ),
+        Operation(
+            "safemode.enroll",
+            CHANGE,
+            "system",
+            _safemode_call(safemode_ops.enroll),
+            params=(Param("user_id", safemode_ops.USER_ID, required=True),),
+            summary="Enroll a Matrix account in Safe Mode.",
+        ),
+        Operation(
+            "safemode.recovery_code",
+            CHANGE,
+            "system",
+            _safemode_call(safemode_ops.recovery_code),
+            params=(Param("user_id", safemode_ops.USER_ID, required=True),),
+            summary="Issue a one-time Safe Mode recovery code, shown once.",
+        ),
+        Operation(
+            "safemode.protect",
+            CHANGE,
+            "system",
+            _safemode_call(safemode_ops.protect),
+            params=(
+                Param("room_id", safemode_ops.ROOM_ID, required=True),
+                Param("name", safemode_ops.ROOM_NAME, required=True),
+            ),
+            summary="Protect a Matrix room if it is compatible.",
+        ),
+        Operation(
+            "safemode.unprotect",
+            CHANGE,
+            "system",
+            _safemode_call(safemode_ops.unprotect),
+            params=(Param("room_id", safemode_ops.ROOM_ID, required=True),),
+            summary="Stop protecting a Matrix room.",
+        ),
+        Operation(
+            "safemode.restore",
+            DANGEROUS,
+            "system",
+            _safemode_call(safemode_ops.restore),
+            params=(Param("user_id", safemode_ops.USER_ID, required=True),),
+            summary="Restore an account's Safe Mode access without its recovery code.",
         ),
         Operation(
             "vikunja.users.create",

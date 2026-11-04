@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Safe Mode{% endblock %}
+{% block content %}
+<h1>Safe Mode</h1>
+<p>Members can turn off their own access to protected rooms from a direct chat with the Safe Mode bot. This page manages which rooms are protected and which accounts are enrolled. It never shows who is in a room, and it does not erase anything already on a member's device.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if not agent_available %}
+<div class="panel"><p>Safe Mode is managed through the system agent, which is not running. See docs/operations.md, "Control agent".</p></div>
+{% elif overview %}
+  {% if not overview.set_up %}
+  <div class="panel"><p>Safe Mode is not set up yet. Enable <code>services.safemode</code> in the configuration, then run install. Rooms cannot be protected until then.</p></div>
+  {% else %}
+  <div class="panel">
+    <p>Bot: <strong>{{ overview.bot_status }}</strong>. Enrolled accounts: <strong>{{ overview.enrolled_count }}</strong>.
+    {% if overview.states %}
+      Accounts currently changed:
+      {% for state, count in overview.states.items() %}{{ state_labels.get(state, state) }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}.
+    {% else %}No account is currently suspended.{% endif %}
+    </p>
+    {% if not overview.enabled %}<p class="warning">Safe Mode is switched off in the configuration. Members cannot use the bot yet.</p>{% endif %}
+  </div>
+
+  <h2>Protected rooms</h2>
+  <table>
+    <thead><tr><th>Room</th><th>Room ID</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for room in overview.rooms %}
+    <tr>
+      <td>{{ room.name }}</td>
+      <td><code>{{ room.room_id }}</code></td>
+      <td>
+        <form method="post" action="/admin/safe-mode/unprotect" data-confirm="Stop protecting {{ room.name }}? Existing suspensions are not reversed." data-confirm-label="Stop protecting">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <button type="submit" class="secondary">Stop protecting</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3">No protected rooms yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p>Create the room through the service account, invite the people who need it, and then protect it here. The room must be end-to-end encrypted, invite-only and set to <code>joined</code> history. A room created by a person is refused.</p>
+  <form class="card" method="post" action="/admin/safe-mode/protect">
+    <h2>Protect a room</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="sm-room">Room ID</label>
+    <input id="sm-room" name="room_id" type="text" maxlength="260" placeholder="!roomid:example.org" required>
+    <label for="sm-name">Name for administrators</label>
+    <input id="sm-name" name="name" type="text" maxlength="100" required>
+    <p><button type="submit">Protect room</button></p>
+  </form>
+  <form class="card" method="post" action="/admin/safe-mode/doctor">
+    <h2>Check protected rooms</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p>Reads each protected room now and reports anything that would stop Safe Mode from working.</p>
+    <p><button type="submit" class="secondary">Run check</button></p>
+  </form>
+
+  <h2>Accounts</h2>
+  <form class="card" method="post" action="/admin/safe-mode/enroll">
+    <h2>Enrol an account</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="sm-enroll">Matrix user ID</label>
+    <input id="sm-enroll" name="user_id" type="text" maxlength="330" placeholder="@member:example.org" required>
+    <p><button type="submit">Enrol</button></p>
+  </form>
+  <form class="card" method="post" action="/admin/safe-mode/recovery-code">
+    <h2>Issue a recovery code</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p>The code is shown once. It is needed to turn Safe Mode off. Issuing a new code replaces the previous one.</p>
+    <label for="sm-code-user">Matrix user ID</label>
+    <input id="sm-code-user" name="user_id" type="text" maxlength="330" required>
+    <p><button type="submit">Issue code</button></p>
+  </form>
+  <form class="card" method="post" action="/admin/safe-mode/status">
+    <h2>Check one account</h2>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="sm-status-user">Matrix user ID</label>
+    <input id="sm-status-user" name="user_id" type="text" maxlength="330" required>
+    <p><button type="submit" class="secondary">Show state</button></p>
+  </form>
+  <details class="card">
+    <summary>Restore an account without its recovery code</summary>
+    <p>Use this only when the member cannot use their code and you have confirmed who they are. It is recorded in the activity log.</p>
+    <form method="post" action="/admin/safe-mode/restore" data-confirm="Restore this account without its recovery code?" data-confirm-label="Restore account">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="sm-restore-user">Matrix user ID</label>
+      <input id="sm-restore-user" name="user_id" type="text" maxlength="330" required>
+      <label><input type="checkbox" name="confirm" value="yes" required> I have verified this person and want to restore access now</label>
+      <label for="sm-restore-pw">Your password</label>
+      <input id="sm-restore-pw" name="password" type="password" autocomplete="current-password" required>
+      <p><button type="submit" class="danger">Restore access</button></p>
+    </form>
+  </details>
+  {% endif %}
+{% endif %}
+{% endblock %}

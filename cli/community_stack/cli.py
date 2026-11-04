@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 
 from community_stack import __version__
+from community_stack.commands.access_cmd import run_access
 from community_stack.commands.announce_cmd import run_announce
 from community_stack.commands.archive_cmd import run_archive
 from community_stack.commands.backup_cmd import run_backup, run_backup_verify
@@ -286,6 +287,39 @@ def create_parser() -> argparse.ArgumentParser:
     )
     p_b_disable.add_argument("--confirm", action="store_true", help="Explicit confirmation")
 
+    # access (Safe Mode)
+    p_access = subparsers.add_parser(
+        "access", help="Safe Mode: protected rooms, enrolled accounts and recovery codes"
+    )
+    p_access.add_argument("--dir", default=".", help="Project directory (default: current)")
+    access_subs = p_access.add_subparsers(dest="access_action", help="Access actions")
+
+    access_subs.add_parser("rooms", help="List protected rooms")
+    p_a_protect = access_subs.add_parser(
+        "protect", help="Protect a room if it is compatible (runs in the Safe Mode container)"
+    )
+    p_a_protect.add_argument("room_id")
+    p_a_protect.add_argument("--name", required=True, help="Human-readable room name")
+    p_a_unprotect = access_subs.add_parser("unprotect", help="Stop protecting a room")
+    p_a_unprotect.add_argument("room_id")
+    p_a_enroll = access_subs.add_parser("enroll", help="Enroll an account in Safe Mode")
+    p_a_enroll.add_argument("user_id")
+    p_a_code = access_subs.add_parser(
+        "recovery-code", help="Issue a one-time recovery code (shown once)"
+    )
+    p_a_code.add_argument("user_id")
+    p_a_status = access_subs.add_parser("status", help="Show one account's Safe Mode state")
+    p_a_status.add_argument("user_id")
+    p_a_restore = access_subs.add_parser(
+        "restore", help="Administrative restore, without the member's recovery code"
+    )
+    p_a_restore.add_argument("user_id")
+    p_a_restore.add_argument("--confirm", action="store_true", help="Explicit confirmation")
+    access_subs.add_parser("doctor", help="Check every protected room against the rules")
+    access_subs.add_parser("bot", help="Show whether the Safe Mode bot container is running")
+    p_a_logs = access_subs.add_parser("logs", help="Show the Safe Mode bot's recent logs")
+    p_a_logs.add_argument("--lines", type=int, default=200)
+
     # subscribers
     p_subs = subparsers.add_parser(
         "subscribers", help="Manage opt-in email and SMS broadcast subscriptions"
@@ -560,6 +594,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_agent(args)
     elif args.command == "bridge":
         return run_bridge(args=args)
+    elif args.command == "access":
+        return run_access(args=args)
     elif args.command == "subscribers":
         return run_subscribers(args=args)
     elif args.command == "archive":

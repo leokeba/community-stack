@@ -537,6 +537,12 @@ def prepare_service(
         return prepare_vikunja(project_dir, config, env_path)
     if service == "facilmap":
         return prepare_facilmap(project_dir, config, env_path)
+    if service == "safemode":
+        from community_stack.safemode.provision import prepare_safemode
+
+        return prepare_safemode(
+            project_dir, config, env_path, services_dir or project_dir / "services"
+        )
     for spec in BRIDGE_SPECS:
         if service == spec.service:
             return prepare_bridge(

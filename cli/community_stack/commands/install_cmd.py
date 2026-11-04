@@ -117,6 +117,10 @@ def run_install(
         if services_cfg.get(optional_service, {}).get("enabled", False):
             services_to_deploy.append(optional_service)
 
+    # Safe Mode bot: an appservice on bridge_net, so it can reach Synapse without a public port
+    if services_cfg.get("safemode", {}).get("enabled", False):
+        services_to_deploy.append("safemode")
+
     print(f"\n[2/4] Deploying enabled services: {', '.join(services_to_deploy)}")
 
     for svc in services_to_deploy:

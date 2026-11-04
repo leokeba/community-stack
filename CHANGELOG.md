@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Safe Mode (off by default): members message the Safe Mode bot in a direct chat (`!safe on`, `!safe status`, `!safe off <recovery code>`, `!safe help`) to suspend their access to protected rooms across all devices, and restore it with a one-time recovery code. Works from any ordinary Matrix client. `community-stack access` manages protected rooms, enrolment and recovery codes. See `docs/safe-mode.md` for what it does and does not protect.
 - Signal bridge (`mautrix-signal` v26.10) and Facebook Messenger bridge (`mautrix-meta` v26.10), both off by default. Switched on from the Services page, set up on /admin/bridges/<name>, and provisioned through the same generic path as WhatsApp.
 - Generic bridge operations (`bridge.<name>.status | command | rooms | login_state | room_relay`), generated from the catalogue.
 

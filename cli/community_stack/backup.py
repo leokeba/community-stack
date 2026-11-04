@@ -378,6 +378,7 @@ class BackupEngine:
                     "announcements/announcements.db",
                     "announcements/subscribers.db",
                     "whatsapp_bridge/mautrix-whatsapp.db",
+                    "safemode/safemode.db",
                 )
                 snapshots: list[tuple[Path, str]] = []
                 for relative in live_databases:

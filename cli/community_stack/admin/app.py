@@ -46,6 +46,7 @@ from community_stack.admin.continuity import register_continuity
 from community_stack.admin.dashboard import register_dashboard
 from community_stack.admin.matrix_users import register_matrix_users
 from community_stack.admin.mirroring import register_mirroring
+from community_stack.admin.safemode import register_safemode
 from community_stack.admin.services import register_services
 from community_stack.admin.settings import register_settings
 from community_stack.admin.store import PERMISSIONS, SESSION_TTL, AdminStore, can, tokens_match
@@ -683,6 +684,16 @@ def create_app(
     )
 
     register_matrix_users(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        page=page,
+        render=render,
+        require=require,
+    )
+
+    register_safemode(
         app,
         agent=agent,
         audit=audit,
