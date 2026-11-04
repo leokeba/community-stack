@@ -323,3 +323,13 @@ def test_the_agent_lists_bridged_rooms_for_an_admin(project):
     )
     assert reply["ok"] is True
     assert reply["result"]["rooms"][0]["room_id"] == PORTAL
+
+
+def test_the_template_enables_shared_relay_for_admins_only():
+    import yaml
+    from pathlib import Path
+
+    template = yaml.safe_load(
+        Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
+    )
+    assert template["bridge"]["relay"] == {"enabled": True, "admin_only": True}

@@ -28,6 +28,10 @@ database:
 
 bridge:
   personal_filtering_spaces: false
+  # Shared relay: the admin login relays messages from Matrix users who are not logged in.
+  relay:
+    enabled: true
+    admin_only: true
   permissions:
     "*": "relay"
     "${MATRIX_DOMAIN}": "user"
