@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 class BridgeSpec:
     key: str
     name: str
-    status: str  # "supported" or "planned"
+    status: str  # "supported", "planned" (validated, not built) or "deferred" (blocked)
     upstream: str
     docs: str
     service: str = ""  # compose service directory under services/
@@ -64,20 +64,32 @@ CATALOG: dict[str, BridgeSpec] = {
         status="planned",
         upstream="https://github.com/mautrix/signal",
         docs="https://docs.mau.fi/bridges/go/signal/",
+        # Validated: bridgev2 (Go); v26.10 image is in the registry. Not the same as services/signal,
+        # which runs signal-cli-rest-api for announcements. A bridge would need its own service name.
+        image="dock.mau.dev/mautrix/signal:v26.10",
+        login="QR code linked as a secondary device (to verify on the bridge bot)",
     ),
     "discord": BridgeSpec(
         key="discord",
         name="Discord",
-        status="planned",
+        status="deferred",
         upstream="https://github.com/mautrix/discord",
         docs="https://docs.mau.fi/bridges/go/discord/",
+        # Validated: the current release (v0.7.7) is the legacy architecture. Shared relay logins
+        # for bridgev2 are not released yet. User-token logins are refused by design.
+        image="dock.mau.dev/mautrix/discord:v0.7.7",
+        login="bot token (legacy bridge only); needs a decision before it is built",
     ),
     "meta": BridgeSpec(
         key="meta",
-        name="Instagram and Messenger",
+        name="Facebook Messenger (Instagram via a separate bridge)",
         status="planned",
         upstream="https://github.com/mautrix/meta",
         docs="https://docs.mau.fi/bridges/go/meta/",
+        # Validated: mautrix-meta v26.10 is in the registry and handles Messenger only.
+        # Instagram moved to mautrix-instagram (July 2026), which is not validated yet.
+        image="dock.mau.dev/mautrix/meta:v26.10",
+        login="account login; experimental and subject to account restrictions",
     ),
 }
 

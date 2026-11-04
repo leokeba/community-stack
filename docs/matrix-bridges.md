@@ -24,7 +24,10 @@ bridges.
 |---|---|---|
 | WhatsApp | mautrix-whatsapp v26.10 | Supported. Linking, room discovery and shared relay are in the admin console. Verified on a live server: linking, login-state check, room discovery, relay, and two-way delivery in a test group. |
 | Telegram | mautrix-telegram v26.10 (Go, bridgev2) | Planned. Image confirmed in the registry. Needs your Telegram API credentials and a verified login flow before it is built. |
-| Signal, Discord, Instagram/Messenger | — | Planned. Not installable yet. |
+| Signal | mautrix-signal v26.10 (Go, bridgev2) | Planned. Image confirmed in the registry. The login flow needs a live test with a Signal account. |
+| Discord | mautrix-discord v0.7.7 (legacy) | Deferred. Shared relay for bridgev2 is not released yet, and the current bridge needs a bot token. Decision needed. |
+| Facebook Messenger | mautrix-meta v26.10 | Planned, experimental. Account restrictions apply. |
+| Instagram | mautrix-instagram (separate bridge) | Not validated. Moved out of mautrix-meta in v26.08. |
 
 The catalogue lives in `cli/community_stack/bridges/catalogue.py`. Images are pinned;
 `latest` is never used.
@@ -102,3 +105,27 @@ rely on one (`community-stack restore`, with the restore drill on the Backups pa
   (`portal_create_filter`). The console does not edit that list yet.
 - Ghost accounts (Matrix users for platform contacts) are created by the bridge for
   members of bridged chats only.
+
+## Validation for phases 3 and 4
+
+Checked on the upstream release notes, changelogs and the registry. Nothing here is built
+or deployed yet.
+
+- **Signal (phase 3):** mautrix-signal v26.10 is maintained on bridgev2. The image is in
+  the registry. It needs the same approach as WhatsApp: a QR login from the admin console,
+  then a live test with a Signal account. The name `services/signal` is already used by the
+  announcements service, so the bridge would need its own service name.
+- **Discord (phase 3):** the current release is the legacy architecture. The shared-relay
+  login for bridgev2 is not released, and the upstream issue tracking it is still open.
+  Community Stack will not use user-token logins. The only option today is a bot-token login
+  on the legacy bridge. This needs a decision before it is built.
+- **Meta (phase 4):** mautrix-meta v26.10 covers Facebook Messenger, including encrypted
+  backfill and blocking. Instagram moved to a separate mautrix-instagram bridge in July 2026,
+  and the old Instagram path no longer works. Instagram is not validated. Both are
+  experimental and carry account risk.
+
+## Decisions needed before building
+
+1. Signal: go ahead with a test Signal account and phone?
+2. Discord: wait for the bridgev2 release, or accept a bot-token setup on the legacy bridge?
+3. Meta: start with Messenger only, and accept the experimental account risk?
