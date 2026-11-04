@@ -370,6 +370,36 @@ def portal_rooms(context) -> list[dict[str, Any]]:
     return sorted(rooms, key=lambda room: room["name"].lower())
 
 
+NOT_LINKED_MARKERS = ("not logged in", "no user logins", "no logins")
+
+
+def login_state(context) -> dict[str, Any]:
+    """Whether a WhatsApp account is linked, judged from the bot's own answer to list-logins."""
+    result = run_command(context, "list-logins")
+    texts = [reply["text"] for reply in result["replies"] if reply["kind"] == "text"]
+    if not texts:
+        return {"known": False, "linked": False, "detail": result["note"]}
+    detail = " ".join(texts)
+    linked = not any(marker in detail.lower() for marker in NOT_LINKED_MARKERS)
+    return {"known": True, "linked": linked, "detail": detail[:MAX_TEXT_CHARS]}
+
+
+def set_room_relay(context, room_id: str) -> dict[str, Any]:
+    """Make the linked service account relay for one bridged room: only rooms the bridge made."""
+    if room_id not in {room["room_id"] for room in portal_rooms(context)}:
+        raise BridgeError("That room is not a bridged WhatsApp room.")
+    bot = f"@{BOT_LOCALPART}:{_server_name(context)}"
+    event_id = _send(context, room_id, "set-relay")
+    replies = _collect_replies(context, room_id, event_id, bot)
+    return {
+        "room_id": room_id,
+        "replies": replies,
+        "note": ""
+        if replies
+        else "The bridge bot did not answer. Check that the bridge is running, then try again.",
+    }
+
+
 def status(context) -> dict[str, Any]:
     """Local state only: no Matrix or bot messages are sent to answer this."""
     checks = diagnose(context)

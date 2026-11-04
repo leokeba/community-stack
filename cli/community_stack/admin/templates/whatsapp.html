@@ -72,10 +72,19 @@
   {% if rooms %}
   <p>These Matrix rooms were created by the bridge for WhatsApp chats. Copy a room ID into the WhatsApp destination on the <a href="/admin/channels">Channels page</a>, and invite the announcements account to it.</p>
   <table>
-    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th></tr></thead>
+    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th></tr></thead>
     <tbody>
     {% for room in rooms %}
-    <tr><td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td></tr>
+    <tr>
+      <td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td>
+      <td>
+        <form method="post" action="/admin/whatsapp/room-relay" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Let the linked account relay here</button>
+        </form>
+      </td>
+    </tr>
     {% endfor %}
     </tbody>
   </table>

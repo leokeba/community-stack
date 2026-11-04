@@ -259,6 +259,14 @@ def whatsapp_rooms(context: AgentContext, params: dict[str, Any]) -> dict[str, A
     return {"rooms": bridges.portal_rooms(context)}
 
 
+def whatsapp_login_state(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    return bridges.login_state(context)
+
+
+def whatsapp_room_relay(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    return bridges.set_room_relay(context, params["room_id"])
+
+
 CATALOG: dict[str, Operation] = {
     op.name: op
     for op in (
@@ -408,6 +416,27 @@ CATALOG: dict[str, Operation] = {
             "system",
             _bridge_call(whatsapp_rooms),
             summary="List the Matrix rooms the WhatsApp bridge created for chats.",
+        ),
+        Operation(
+            "bridge.whatsapp.login_state",
+            CHANGE,
+            "system",
+            _bridge_call(whatsapp_login_state),
+            summary="Ask the bridge whether a WhatsApp account is linked.",
+        ),
+        Operation(
+            "bridge.whatsapp.room_relay",
+            CHANGE,
+            "system",
+            _bridge_call(whatsapp_room_relay),
+            params=(
+                Param(
+                    "room_id",
+                    re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}"),
+                    required=True,
+                ),
+            ),
+            summary="Let the linked account relay messages into one bridged WhatsApp room.",
         ),
         Operation(
             "bridge.whatsapp.command",

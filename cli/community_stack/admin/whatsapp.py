@@ -110,6 +110,35 @@ def register_whatsapp(
     async def whatsapp_setup(request: Request) -> Response:
         return await whatsapp_page(request, require(request, "settings"))
 
+    @app.post("/admin/whatsapp/room-relay")
+    async def whatsapp_room_relay(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        room_id = form.get("room_id", "")
+        try:
+            result = await run_in_threadpool(
+                agent.call, "bridge.whatsapp.room_relay", session["username"], {"room_id": room_id}
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.room_relay",
+                room_id,
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request, session, flash(f"WhatsApp relay: {exc}", "error"), status_code=400
+            )
+        audit(
+            request, session["username"], "bridge.whatsapp.room_relay", room_id, outcome="succeeded"
+        )
+        return await whatsapp_page(
+            request,
+            session,
+            flash("WhatsApp relay: the bridge answered."),
+            replies={"command": "set-relay", **result},
+        )
+
     @app.post("/admin/whatsapp/command")
     async def whatsapp_command(request: Request) -> Response:
         session, form = await checked_form(request, "system")

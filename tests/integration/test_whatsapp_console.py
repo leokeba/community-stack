@@ -346,3 +346,41 @@ def test_the_template_bridges_no_chats_until_they_are_listed():
     )
     assert template["bridge"]["history_sync"]["max_initial_conversations"] == 0
     assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
+
+
+def test_login_state_reads_the_bots_answer(project, monkeypatch):
+    root, _ = project
+    context = AgentContext(root)
+    fake_text = {"text": "You're not logged in"}
+    monkeypatch.setattr(
+        bridges,
+        "run_command",
+        lambda ctx, command: {
+            "command": command,
+            "replies": [{"kind": "text", "text": fake_text["text"], "image": None}],
+            "note": "",
+        },
+    )
+    assert bridges.login_state(context)["linked"] is False
+    fake_text["text"] = "Logins:\n* +33 6 88 77 18 07 (connected)"
+    assert bridges.login_state(context)["linked"] is True
+    monkeypatch.setattr(
+        bridges,
+        "run_command",
+        lambda ctx, command: {"command": command, "replies": [], "note": "silent"},
+    )
+    assert bridges.login_state(context)["known"] is False
+
+
+def test_room_relay_only_for_bridged_rooms(project):
+    root, _ = project
+    context = AgentContext(root)
+    bridges.ensure_direct_room(context)
+    with pytest.raises(bridges.BridgeError, match="not a bridged"):
+        bridges.set_room_relay(context, "!unknown:community.test")
+    result = bridges.set_room_relay(context, PORTAL)
+    assert result["room_id"] == PORTAL
+    reply = AgentService(context).handle(
+        {"op": "bridge.whatsapp.room_relay", "actor": "olga", "params": {"room_id": "not a room"}}
+    )
+    assert reply["ok"] is False
