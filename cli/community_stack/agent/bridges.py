@@ -12,8 +12,10 @@ import base64
 import json
 import re
 import secrets
+import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -22,10 +24,11 @@ import yaml
 
 from community_stack import docker
 from community_stack.agent import matrix_admin
+from community_stack.bridges.catalogue import WHATSAPP
 
-BOT_LOCALPART = "whatsappbot"
-CONTAINER_NAME = "community_whatsapp_bridge"
-REGISTRATION_NAME = "whatsapp.yaml"
+BOT_LOCALPART = WHATSAPP.bot_localpart
+CONTAINER_NAME = WHATSAPP.container
+REGISTRATION_NAME = WHATSAPP.registration_file
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
 COMMANDS: dict[str, str] = {
     "help": "Show the bridge's commands.",
@@ -203,23 +206,139 @@ def run_command(context, command: str) -> dict[str, Any]:
     }
 
 
-def status(context) -> dict[str, Any]:
-    """Local state only: no Matrix or bot messages are sent to answer this."""
+def _synapse_started_at() -> datetime | None:
+    """When the Synapse container last started, or None if Docker cannot say."""
+    result = subprocess.run(
+        ["docker", "inspect", "-f", "{{.State.StartedAt}}", "community_synapse"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    if result.returncode != 0:
+        return None
+    # Docker reports nanoseconds; Python parses microseconds.
+    raw = result.stdout.strip().removesuffix("Z")
+    head, _, fraction = raw.partition(".")
+    try:
+        return datetime.fromisoformat(
+            f"{head}.{fraction[:6]}+00:00" if fraction else f"{head}+00:00"
+        )
+    except ValueError:
+        return None
+
+
+def diagnose(context) -> list[dict[str, Any]]:
+    """Each check says what it found and, when it fails, what to do about it."""
     config_path = context.config_path
     config = (
-        yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        (yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
         if config_path.is_file()
         else {}
     )
-    enabled = bool(config.get("services", {}).get("whatsapp_bridge", {}).get("enabled", False))
+    enabled = bool(config.get("services", {}).get(WHATSAPP.service, {}).get("enabled", False))
+    data_dir = context.project_dir / "data" / WHATSAPP.service
+    homeserver = context.project_dir / "data" / "matrix" / "homeserver.yaml"
     registration = context.project_dir / "data" / "matrix" / "appservices" / REGISTRATION_NAME
+    registration_entry = f"/data/appservices/{REGISTRATION_NAME}"
+    checks: list[dict[str, Any]] = []
+
+    def add(check_id: str, ok: bool, message: str, fix: str = "") -> None:
+        checks.append({"id": check_id, "ok": ok, "message": message, "fix": "" if ok else fix})
+
+    add(
+        "enabled",
+        enabled,
+        "Bridge is enabled." if enabled else "Bridge is turned off.",
+        "Turn WhatsApp on under Services.",
+    )
+    add(
+        "matrix",
+        homeserver.is_file(),
+        "Matrix is set up." if homeserver.is_file() else "Matrix has not been set up.",
+        "Set up Matrix on the Services page before the bridge.",
+    )
+    add(
+        "bridge_config",
+        (data_dir / "config.yaml").is_file(),
+        "Bridge configuration exists."
+        if (data_dir / "config.yaml").is_file()
+        else "Bridge configuration is missing.",
+        "Turn WhatsApp off and on again to regenerate it.",
+    )
+    add(
+        "bridge_registration",
+        (data_dir / "registration.yaml").is_file(),
+        "Bridge registration exists."
+        if (data_dir / "registration.yaml").is_file()
+        else "Bridge registration is missing.",
+        "Turn WhatsApp off and on again to regenerate it.",
+    )
+
+    listed = False
+    if homeserver.is_file():
+        try:
+            listed = registration_entry in (
+                (yaml.safe_load(homeserver.read_text(encoding="utf-8")) or {}).get(
+                    "app_service_config_files"
+                )
+                or []
+            )
+        except yaml.YAMLError:
+            listed = False
+    add(
+        "synapse_registered",
+        listed and registration.is_file(),
+        "Synapse lists the bridge registration."
+        if listed and registration.is_file()
+        else "Synapse does not list the bridge registration.",
+        "Turn WhatsApp off and on again so Synapse is given its registration.",
+    )
+
+    started = (
+        _synapse_started_at() if docker.is_docker_available() and registration.is_file() else None
+    )
+    registration_time = (
+        datetime.fromtimestamp(registration.stat().st_mtime, tz=timezone.utc)
+        if registration.is_file()
+        else None
+    )
+    stale = started is not None and registration_time is not None and registration_time > started
+    add(
+        "synapse_restarted",
+        not stale,
+        "Synapse started after the bridge registration was last written."
+        if not stale
+        else "Synapse started before the bridge registration was written.",
+        "Restart Matrix so it reads the bridge registration.",
+    )
+
     containers = docker.list_community_containers() if docker.is_docker_available() else []
     container = next((c for c in containers if c.get("name") == CONTAINER_NAME), None)
+    running = bool(container) and container.get("state") == "running"
+    add(
+        "container",
+        running,
+        f"Bridge container is {container.get('state')}."
+        if container
+        else "Bridge container is not running.",
+        "Start the bridge on the Services page.",
+    )
+    return checks
+
+
+def status(context) -> dict[str, Any]:
+    """Local state only: no Matrix or bot messages are sent to answer this."""
+    checks = diagnose(context)
+    by_id = {check["id"]: check for check in checks}
+    container = by_id["container"]
     return {
-        "enabled": enabled,
-        "registered_with_synapse": registration.is_file(),
-        "container_state": container.get("state") if container else "not running",
-        "container_status": container.get("status", "") if container else "",
+        "enabled": by_id["enabled"]["ok"],
+        "registered_with_synapse": by_id["synapse_registered"]["ok"],
+        "container_state": "running" if container["ok"] else "not running",
+        "container_status": "",
         "command_chat_created": _load_room(context) is not None,
         "commands": dict(COMMANDS),
+        "checks": checks,
+        "healthy": all(check["ok"] for check in checks),
     }

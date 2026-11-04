@@ -175,3 +175,41 @@ def test_compose_pins_a_dated_release_not_latest():
     image = compose["services"]["whatsapp_bridge"]["image"]
     assert image == "dock.mau.dev/mautrix/whatsapp:v26.10"
     assert "latest" not in image
+
+
+def test_diagnostics_name_what_is_missing_and_how_to_fix_it(project):
+    root, _ = project
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["enabled"]["ok"] is True
+    assert checks["bridge_config"]["ok"] is False
+    assert "Turn WhatsApp off and on" in checks["bridge_config"]["fix"]
+    assert checks["synapse_registered"]["ok"] is False
+    assert checks["container"]["ok"] is False
+    assert bridges.status(AgentContext(root))["healthy"] is False
+
+
+def test_a_registration_written_after_synapse_started_is_flagged(project, monkeypatch):
+    root, _ = project
+    from datetime import datetime, timezone
+
+    data = root / "data" / "whatsapp_bridge"
+    data.mkdir(parents=True)
+    (data / "config.yaml").write_text("homeserver: {}\n", encoding="utf-8")
+    (data / "registration.yaml").write_text("id: whatsapp\n", encoding="utf-8")
+    appservices = root / "data" / "matrix" / "appservices"
+    appservices.mkdir()
+    (appservices / "whatsapp.yaml").write_text("id: whatsapp\n", encoding="utf-8")
+    homeserver = root / "data" / "matrix" / "homeserver.yaml"
+    homeserver.write_text(
+        homeserver.read_text() + "app_service_config_files:\n  - /data/appservices/whatsapp.yaml\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(docker, "list_community_containers", list)
+    monkeypatch.setattr(
+        bridges, "_synapse_started_at", lambda: datetime(2000, 1, 1, tzinfo=timezone.utc)
+    )
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["synapse_registered"]["ok"] is True
+    assert checks["synapse_restarted"]["ok"] is False
+    assert "Restart Matrix" in checks["synapse_restarted"]["fix"]
