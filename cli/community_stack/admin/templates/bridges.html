@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Bridges{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <h1>Bridges</h1>
+    <p class="muted">Bridges link chats on other apps to Matrix rooms, in both directions. Turn a bridge on under <a href="/admin/services">Services and updates</a>, then link its account and choose rooms on its page.</p>
+  </div>
+</div>
+{% if bridge_error %}<p class="error" role="alert">{{ bridge_error }}</p>{% endif %}
+{% if not agent_available %}
+<p class="notice">The system agent is not running, so bridge status is unavailable. See docs/operations.md, "Control agent".</p>
+{% endif %}
+<section class="card card-flush">
+  {% for row in rows if row.spec.status == "supported" %}
+  {% set status = row.status %}
+  <div class="attn">
+    {% if not status %}<span class="dot" aria-hidden="true"></span>
+    {% elif not status.enabled %}<span class="dot" aria-hidden="true"></span>
+    {% elif status.healthy %}<span class="dot dot-ok" aria-hidden="true"></span>
+    {% else %}<span class="dot dot-problem" aria-hidden="true"></span>{% endif %}
+    <div class="attn-body">
+      <p><a href="/admin/bridges/{{ row.spec.key }}"><strong>{{ row.spec.name }}</strong></a>{% if row.spec.experimental %} {{ badge("experimental", "Experimental", "warning") }}{% endif %}</p>
+      <p class="muted">
+        {% if not status %}Status unavailable.
+        {% elif not status.enabled %}Turned off.
+        {% elif status.healthy %}Running.
+        {% else %}{{ status.checks|rejectattr("ok")|list|length }} check(s) need attention.{% endif %}
+        {{ row.spec.login }}.
+      </p>
+    </div>
+    <a class="button-link secondary small" href="/admin/bridges/{{ row.spec.key }}">Open</a>
+  </div>
+  {% endfor %}
+</section>
+<h2>Not available yet</h2>
+<ul>
+  {% for row in rows if row.spec.status != "supported" %}
+  <li><strong>{{ row.spec.name }}</strong> <span class="muted">({{ "planned" if row.spec.status == "planned" else "on hold" }}){% if row.spec.limitations %}: {{ row.spec.limitations[0] }}{% elif row.spec.login %}: {{ row.spec.login }}{% endif %}</span></li>
+  {% endfor %}
+</ul>
+{% endblock %}

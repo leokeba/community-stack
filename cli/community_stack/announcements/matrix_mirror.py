@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.models import AnnouncementStatus, ModelValidationError
+from community_stack.matrix_ids import ROOM_ID
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,8 @@ class MatrixMirror:
         """Join a room (ID or alias) and start mirroring it."""
         if mode not in ("publish", "review"):
             raise ValueError("Choose to publish directly or to create drafts for review.")
-        if not room.startswith(("!", "#")) or ":" not in room or len(room) > 255:
+        is_alias = room.startswith("#") and ":" in room
+        if not (is_alias or ROOM_ID.fullmatch(room)) or len(room) > 255:
             raise ValueError("Enter a room address like #news:matrix.ourtown.org.")
         if room == self.matrix.room_id:
             raise ValueError("That is the announcements room itself; it cannot be mirrored.")

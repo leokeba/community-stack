@@ -27,9 +27,10 @@ from community_stack.announcements.adapters.social import (
     MastodonAdapter,
     PixelfedAdapter,
 )
+from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
+from community_stack.matrix_ids import ROOM_ID
 from community_stack.subscriptions.email_transport import MailgunTransport, SmtpTransport
 from community_stack.subscriptions.manager import SubscriberManager
-from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
 
 TOKEN = re.compile(r"^[^\s]{8,512}$")
 
@@ -136,7 +137,7 @@ def _validate_matrix_room(values: dict[str, str]) -> dict[str, str]:
     if homeserver_url != "http://community_synapse:8008":
         http.assert_public_https(homeserver_url)
     room_id = values.get("room_id", "").strip()
-    if not re.fullmatch(r"![^: ]+:[^: ]+", room_id):
+    if not ROOM_ID.fullmatch(room_id):
         raise ValueError("Enter the room ID beginning with !, not its #alias.")
     return {
         "homeserver_url": homeserver_url,
@@ -147,8 +148,8 @@ def _validate_matrix_room(values: dict[str, str]) -> dict[str, str]:
 
 def _validate_whatsapp(values: dict[str, str]) -> dict[str, str]:
     room_id = values.get("room_id", "").strip()
-    if not re.fullmatch(r"![^: ]+:[^: ]+", room_id):
-        raise ValueError("Enter the Matrix room ID of the WhatsApp portal, beginning with !.")
+    if not ROOM_ID.fullmatch(room_id):
+        raise ValueError("Enter the Matrix room ID of the WhatsApp room, beginning with !.")
     return {"room_id": room_id}
 
 
@@ -495,15 +496,13 @@ CONNECTORS: dict[str, ConnectorType] = {
             kind="whatsapp",
             label="WhatsApp announcements",
             steps=(
-                "Enable the WhatsApp bridge on the Services page and complete its safety confirmation.",
-                "Open the WhatsApp bridge bot in Element and send `login qr`; scan it from WhatsApp > Linked devices.",
-                "On the WhatsApp Bridge page, add only a group intended for public announcements. The selected group is joined and its invite link is redacted after processing.",
-                "Enter that portal room's Matrix room ID below. Only announcements published to this channel are sent there.",
+                "Turn the WhatsApp bridge on under Services and updates.",
+                "On Chat → Bridges → WhatsApp, link the WhatsApp account and add a group intended for public announcements.",
+                "In that group's row, choose “Use for WhatsApp announcements”. It invites the announcements account and saves the room here.",
+                "Or enter the room's Matrix ID below. Only announcements published to this channel are sent there.",
             ),
             fields=(
-                ConnectorField(
-                    "room_id", "WhatsApp portal room ID", placeholder="!portal:example.org"
-                ),
+                ConnectorField("room_id", "WhatsApp room ID", placeholder="!room:example.org"),
             ),
             validate=_validate_whatsapp,
             build=lambda c: WhatsAppAnnouncementAdapter(
@@ -511,8 +510,8 @@ CONNECTORS: dict[str, ConnectorType] = {
                 room_id=c["room_id"],
                 access_token=c["access_token"],
             ),
-            caveat="Requires a linked mautrix-whatsapp account and a Matrix portal room. The connection test checks Matrix access, not WhatsApp account linkage.",
-            setup_page=("Open WhatsApp setup", "/admin/whatsapp"),
+            caveat="Requires a linked WhatsApp account and a Matrix room linked to the group. The connection test checks Matrix access, not WhatsApp account linkage.",
+            setup_page=("Open the WhatsApp bridge", "/admin/bridges/whatsapp"),
         ),
         ConnectorType(
             kind="discord",

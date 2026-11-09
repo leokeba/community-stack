@@ -116,7 +116,8 @@ def test_operations_exist_for_every_supported_bridge():
     from pathlib import Path
 
     template = Path("cli/community_stack/admin/templates/bridge.html").read_text(encoding="utf-8")
-    assert 'action="/admin/bridges/{{ spec.key }}/room-invite"' in template
+    assert '{% set base = "/admin/bridges/" ~ spec.key %}' in template
+    assert 'action="{{ base }}/room-invite"' in template
     assert "Open in Element" in template
 
 

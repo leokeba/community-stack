@@ -274,12 +274,19 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # bridge
-    p_bridge = subparsers.add_parser("bridge", help="Manage optional WhatsApp bridge integration")
+    p_bridge = subparsers.add_parser(
+        "bridge", help="Inspect or stop a chat bridge (WhatsApp, Signal, Messenger)"
+    )
+    p_bridge.add_argument(
+        "--bridge",
+        default="whatsapp",
+        help="Which bridge: whatsapp (default), signal or messenger",
+    )
     bridge_subs = p_bridge.add_subparsers(dest="bridge_action", help="Bridge actions")
 
     bridge_subs.add_parser("status", help="Show what is installed, running and registered")
     bridge_subs.add_parser("doctor", help="Check each prerequisite and say how to fix it")
-    bridge_subs.add_parser("rooms", help="List Matrix rooms the bridge created for WhatsApp chats")
+    bridge_subs.add_parser("rooms", help="List the Matrix rooms linked to the bridge's chats")
     p_b_logs = bridge_subs.add_parser("logs", help="Show the bridge container's recent logs")
     p_b_logs.add_argument("--lines", type=int, default=100, help="How many lines to show")
     p_b_disable = bridge_subs.add_parser(

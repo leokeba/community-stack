@@ -1,10 +1,23 @@
-"""Operate the mautrix bridges through their Matrix bots, for the admin console.
+"""Operate any mautrix bridgev2 bridge for the admin console: rooms, links and repairs.
 
-The bridge's own bot is the only control surface used here: the agent joins a private
-direct chat with the bot as the stack's admin account, sends one allowlisted command, and
-returns the bot's replies. Linking QR codes are fetched from Synapse and returned once to
-the administrator; they are never logged. Every function takes the bridge it works on,
-and defaults to WhatsApp so existing callers keep their behaviour.
+Everything here works the same for every bridge in the catalogue; what differs between
+bridges (database file, chat ID format, required settings) is data in the catalogue.
+Network-specific extras, such as joining a WhatsApp group from an invite link, live in
+their own modules and build on these functions.
+
+How the pieces fit:
+
+* The bridge's bot is the control surface. The agent talks to it as the stack's admin
+  account, which is also the account linked to the remote network. In the bot's
+  management room commands need no prefix; in any other room they need the bridge's
+  command prefix (``!wa``, ``!signal``...).
+* The bridge's own database is read (never written while the bridge runs) to learn which
+  remote chat is linked to which Matrix room. Links are changed only through bot commands:
+  ``bridge`` attaches a chat to an existing room, ``unbridge`` detaches it and keeps the
+  room for its Matrix members, ``delete-portal`` removes the room.
+* The chat allowlist in the bridge's config (``portal_create_filter``) only decides whether
+  the bridge may create a room by itself for an unlinked chat. Detaching a chat therefore
+  also removes it from the allowlist, or its next message would create a new room.
 """
 
 from __future__ import annotations
@@ -24,28 +37,31 @@ from urllib.parse import quote, urlencode
 
 import yaml
 
-from community_stack import docker, provision
+from community_stack import docker
 from community_stack.agent import matrix_admin
-from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
+from community_stack.bridges import config as bridge_config
+from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec, supported
 from community_stack.matrix_ids import ROOM_ID
 
-# Commands the console may send. Anything else, including logout, stays a CLI-only action.
-GROUP_ID_PATTERN = provision.WHATSAPP_GROUP_ID_PATTERN
-COMMANDS: dict[str, str] = dict(WHATSAPP.commands)
-COMMAND_PATTERN = re.compile("|".join(re.escape(command) for command in COMMANDS))
-# A login flow named by the bot, for bridges whose flows are not fixed in the catalogue.
-LOGIN_FLOW_PATTERN = re.compile(rf"{LOGIN_COMMAND} [a-z][a-z0-9-]{{0,31}}")
 NOT_MANAGEMENT_ROOM = "not your management room"
 REPLY_TIMEOUT_SECONDS = 25.0
 REPLY_QUIET_SECONDS = 4.0
 POLL_SECONDS = 2.0
 JOIN_TIMEOUT_SECONDS = 20.0
+PORTAL_TIMEOUT_SECONDS = 45.0
 MAX_TEXT_CHARS = 4000
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
 NOT_LINKED_MARKERS = ("not logged in", "no user logins", "no logins")
-INVITE_LINK_PATTERN = re.compile(
-    r"https://chat\.whatsapp\.com/[A-Za-z0-9_-]{10,80}(?:\?[A-Za-z0-9=&_-]+)?"
-)
+# A named login flow, for bridges whose flows are not fixed in the catalogue.
+LOGIN_FLOW_PATTERN = re.compile(rf"{LOGIN_COMMAND} [a-z][a-z0-9-]{{0,31}}")
+# Reply texts of the bridgev2 bot (mautrix-go bridgev2/commands).
+RELAY_SET = "will now be relayed through"
+RELAY_UNSET = "Stopped relaying"
+NO_RELAY = "doesn't have a relay set"
+# The power level the bridge bot gets in a room it manages: it sets the room's name, topic
+# and avatar and invites the remote chat's members.
+BOT_POWER = 100
+SPACE = "m.space"
 # Replaceable in tests.
 _sleep: Callable[[float], None] = time.sleep
 
@@ -54,25 +70,19 @@ class BridgeError(Exception):
     """A bridge action the agent refused or could not finish; shown to people."""
 
 
-def is_allowed_command(spec: BridgeSpec, command: str) -> bool:
-    """Exact commands from the catalogue, plus a named login flow where flows are not fixed."""
-    if command in spec.commands:
-        return True
-    prefix = f"{LOGIN_COMMAND} "
-    if not command.startswith(prefix):
-        return False
-    flow = command.removeprefix(prefix)
-    if spec.login_flows:
-        return flow in spec.login_flows
-    return bool(LOGIN_FLOW_PATTERN.fullmatch(command))
-
-
-def command_chat_name(spec: BridgeSpec) -> str:
-    return f"{spec.name} bridge commands"
+# --- Paths and plain Matrix calls ---------------------------------------------------------
 
 
 def _state_path(context, spec: BridgeSpec = WHATSAPP) -> Path:
     return context.project_dir / "data" / "agent" / "bridges" / f"{spec.key}.json"
+
+
+def _config_path(context, spec: BridgeSpec) -> Path:
+    return context.project_dir / "data" / spec.service / "config.yaml"
+
+
+def _database_path(context, spec: BridgeSpec) -> Path:
+    return context.project_dir / "data" / spec.service / spec.database_file
 
 
 def _server_name(context) -> str:
@@ -85,11 +95,38 @@ def _server_name(context) -> str:
     return server
 
 
+def _admin_id(context) -> str:
+    return f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
+
+
+def _bot_id(context, spec: BridgeSpec) -> str:
+    return f"@{spec.bot_localpart}:{_server_name(context)}"
+
+
 def _matrix(context, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+    """A request as the stack's admin account."""
     try:
         return matrix_admin._call(context, method, path, body)
     except matrix_admin.MatrixAdminError as exc:
         raise BridgeError(str(exc)) from exc
+
+
+def _room_path(room_id: str) -> str:
+    return quote(room_id, safe="")
+
+
+def _error(reply: Any, status: int) -> Any:
+    return reply.get("error", status) if isinstance(reply, dict) else status
+
+
+def _check_room_id(room_id: str) -> None:
+    if not ROOM_ID.fullmatch(room_id or ""):
+        raise BridgeError("That is not a valid Matrix room ID.")
+
+
+def _check_chat_id(spec: BridgeSpec, chat_id: str) -> None:
+    if not spec.chat_id_ok(chat_id or ""):
+        raise BridgeError(f"That {spec.name} {spec.chat_noun} ID is not valid.")
 
 
 def _load_room(context, spec: BridgeSpec = WHATSAPP) -> str | None:
@@ -112,18 +149,14 @@ def _save_room(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> None:
 
 def _joined(context, room_id: str) -> set[str] | None:
     status, reply = _matrix(
-        context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/joined_members"
+        context, "GET", f"/_matrix/client/v3/rooms/{_room_path(room_id)}/joined_members"
     )
     if status != 200:
         return None
     return set(reply.get("joined", {}))
 
 
-def _room_name(context, room_id: str) -> str:
-    status, state = _matrix(
-        context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
-    )
-    return (state.get("name") or "") if status == 200 else ""
+# --- Calls as the bridge bot (appservice) ---------------------------------------------------
 
 
 def _appservice_token(context, spec: BridgeSpec) -> tuple[str, str]:
@@ -136,7 +169,7 @@ def _appservice_token(context, spec: BridgeSpec) -> tuple[str, str]:
         raise BridgeError(f"The {spec.name} appservice registration is invalid.")
 
     token = registration.get("as_token")
-    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    bot = _bot_id(context, spec)
     namespaces_config = registration.get("namespaces", {})
     namespaces = namespaces_config.get("users", []) if isinstance(namespaces_config, dict) else []
     authorized = False
@@ -160,15 +193,9 @@ def _appservice_token(context, spec: BridgeSpec) -> tuple[str, str]:
     return token, bot
 
 
-def _appservice_request(
-    context,
-    method: str,
-    path: str,
-    body: Any,
-    token: str,
-    bot: str,
-    spec: BridgeSpec,
-) -> tuple[int, Any]:
+def _as_bot(context, spec: BridgeSpec, method: str, path: str, body: Any = None):
+    """A request as the bridge bot, using the bridge's own appservice token."""
+    token, bot = _appservice_token(context, spec)
     separator = "&" if "?" in path else "?"
     path = f"{path}{separator}{urlencode({'user_id': bot})}"
     try:
@@ -177,44 +204,86 @@ def _appservice_request(
         raise BridgeError(str(exc)) from exc
 
 
-def _room_state(
-    context, room_id: str, token: str, bot: str, spec: BridgeSpec
-) -> list[dict[str, Any]] | None:
-    status, state = _appservice_request(
-        context,
-        "GET",
-        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state",
-        None,
-        token,
-        bot,
-        spec,
-    )
-    if status == 404:
-        return None
-    if (
-        status != 200
-        or not isinstance(state, list)
-        or not all(isinstance(event, dict) for event in state)
-    ):
-        detail = state.get("error", status) if isinstance(state, dict) else status
-        raise BridgeError(f"Synapse could not inspect bridged room {room_id}: {detail}")
-    return state
+def _bot_rooms(context, spec: BridgeSpec) -> list[str]:
+    status, joined = _as_bot(context, spec, "GET", "/_matrix/client/v3/joined_rooms")
+    if status != 200:
+        raise BridgeError(
+            f"Synapse did not list rooms for the {spec.name} bot: {_error(joined, status)}"
+        )
+    rooms = joined.get("joined_rooms") if isinstance(joined, dict) else None
+    if not isinstance(rooms, list):
+        raise BridgeError(f"Synapse returned an invalid room list for the {spec.name} bot.")
+    return [room for room in rooms if isinstance(room, str) and ROOM_ID.fullmatch(room)]
 
 
 def _invite_as_bot(context, room_id: str, user_id: str, spec: BridgeSpec) -> None:
-    token, bot = _appservice_token(context, spec)
-    status, reply = _appservice_request(
+    status, reply = _as_bot(
         context,
-        "POST",
-        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/invite",
-        {"user_id": user_id},
-        token,
-        bot,
         spec,
+        "POST",
+        f"/_matrix/client/v3/rooms/{_room_path(room_id)}/invite",
+        {"user_id": user_id},
     )
     if status != 200:
-        detail = reply.get("error", status) if isinstance(reply, dict) else status
-        raise BridgeError(f"Synapse could not invite {user_id} to the room: {detail}")
+        raise BridgeError(
+            f"Synapse could not invite {user_id} to the room: {_error(reply, status)}"
+        )
+
+
+# --- Room state, membership and power --------------------------------------------------------
+
+
+def _room_state(context, room_id: str) -> list[dict[str, Any]] | None:
+    """A room's current state through the admin API, whoever is in it; None if unknown."""
+    status, reply = _matrix(context, "GET", f"/_synapse/admin/v1/rooms/{_room_path(room_id)}/state")
+    if status == 404:
+        return None
+    state = reply.get("state") if isinstance(reply, dict) else None
+    if status != 200 or not isinstance(state, list):
+        raise BridgeError(f"Synapse could not read room {room_id}: {_error(reply, status)}")
+    return [event for event in state if isinstance(event, dict)]
+
+
+def _state_content(state: list[dict], event_type: str, state_key: str = "") -> dict[str, Any]:
+    for event in state:
+        if event.get("type") == event_type and event.get("state_key", "") == state_key:
+            content = event.get("content")
+            return content if isinstance(content, dict) else {}
+    return {}
+
+
+def _memberships(state: list[dict]) -> dict[str, str]:
+    return {
+        event.get("state_key"): (event.get("content") or {}).get("membership")
+        for event in state
+        if event.get("type") == "m.room.member"
+    }
+
+
+def _room_name(state: list[dict]) -> str:
+    return str(_state_content(state, "m.room.name").get("name") or "")
+
+
+def _power_of(state: list[dict], user_id: str) -> float:
+    """A user's effective power level, including room version 12's unlimited creators."""
+    create = next((event for event in state if event.get("type") == "m.room.create"), {})
+    content = create.get("content") or {}
+    creators = {create.get("sender"), content.get("creator")} | set(
+        content.get("additional_creators") or []
+    )
+    if str(content.get("room_version", "1")) == "12" and user_id in creators:
+        return float("inf")
+    levels = _state_content(state, "m.room.power_levels")
+    if not levels:
+        return 100 if user_id in creators else 0
+    users = levels.get("users") if isinstance(levels.get("users"), dict) else {}
+    return float(users.get(user_id, levels.get("users_default", 0)))
+
+
+def _state_level(state: list[dict], event_type: str) -> int:
+    levels = _state_content(state, "m.room.power_levels")
+    events = levels.get("events") if isinstance(levels.get("events"), dict) else {}
+    return int(events.get(event_type, levels.get("state_default", 50 if levels else 0)))
 
 
 def _ensure_stack_admin_joined(
@@ -222,91 +291,146 @@ def _ensure_stack_admin_joined(
 ) -> tuple[str, str]:
     if membership in {"join", "ban"}:
         return membership, ""
-
-    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
     try:
         if membership != "invite":
-            _invite_as_bot(context, room_id, admin, spec)
+            _invite_as_bot(context, room_id, _admin_id(context), spec)
         status, reply = _matrix(
-            context,
-            "POST",
-            f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/join",
+            context, "POST", f"/_matrix/client/v3/rooms/{_room_path(room_id)}/join"
         )
         if status != 200:
-            detail = reply.get("error", status) if isinstance(reply, dict) else status
-            raise BridgeError(f"Synapse could not add the stack admin to the room: {detail}")
+            raise BridgeError(
+                f"Synapse could not add the stack admin to the room: {_error(reply, status)}"
+            )
         return "join", ""
     except BridgeError as exc:
         return membership or "not_joined", str(exc)
 
 
 def _join_portal_as_admin(context, room_id: str, spec: BridgeSpec) -> None:
-    """Put the stack admin in a portal before it posts a bot command there."""
-    token, bot = _appservice_token(context, spec)
-    state = _room_state(context, room_id, token, bot, spec)
+    """Put the stack admin in a portal (through the bridge bot) before it posts there."""
+    state = _room_state(context, room_id)
     if state is None:
         raise BridgeError("That bridged room no longer exists.")
-    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
-    membership = next(
-        (
-            event.get("content", {}).get("membership")
-            for event in state
-            if event.get("type") == "m.room.member" and event.get("state_key") == admin
-        ),
-        None,
-    )
+    membership = _memberships(state).get(_admin_id(context))
     membership, error = _ensure_stack_admin_joined(context, room_id, membership, spec)
     if membership != "join":
         raise BridgeError(error or "The stack admin is banned from that room.")
 
 
-def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
-    database = context.project_dir / "data" / spec.service / "mautrix-whatsapp.db"
-    if not database.is_file():
-        return {}
-    try:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-            records = db.execute(
-                "SELECT id, mxid FROM portal WHERE mxid IS NOT NULL AND id GLOB '[0-9]*@g.us'"
-            ).fetchall()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not read the WhatsApp bridge portal database.") from exc
-
-    config_path = context.project_dir / "data" / spec.service / "config.yaml"
-    if config_path.is_file():
-        try:
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            raise BridgeError("Could not read the WhatsApp bridge allowlist.") from exc
-    else:
-        config = {}
-    if not isinstance(config, dict):
-        raise BridgeError("The WhatsApp bridge configuration is invalid.")
-    bridge_config = config.get("bridge", {})
-    portal_filter = (
-        bridge_config.get("portal_create_filter", {}) if isinstance(bridge_config, dict) else {}
+def _force_join_admin(context, room_id: str) -> None:
+    """Join the stack admin to a room on this server, through Synapse's admin API."""
+    status, reply = _matrix(
+        context,
+        "POST",
+        f"/_synapse/admin/v1/join/{_room_path(room_id)}",
+        {"user_id": _admin_id(context)},
     )
-    allowed = portal_filter.get("list", []) if isinstance(portal_filter, dict) else []
-    if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
-        raise BridgeError("The WhatsApp bridge portal allowlist is invalid.")
-    allowed_groups = set(allowed) if portal_filter.get("mode") == "allow" else set()
+    if status != 200:
+        raise BridgeError(
+            f"The stack admin could not join that room. Invite {_admin_id(context)} to it "
+            f"from Element, then try again. ({_error(reply, status)})"
+        )
 
-    portal_access: dict[str, bool] = {}
-    for group_id, room_id in records:
-        if (
-            not isinstance(group_id, str)
-            or not GROUP_ID_PATTERN.fullmatch(group_id)
-            or not isinstance(room_id, str)
-            or not ROOM_ID.fullmatch(room_id)
-        ):
-            continue
-        portal_access[room_id] = group_id in allowed_groups
-    return portal_access
+
+def _grant_bot_power(context, room_id: str, spec: BridgeSpec) -> bool:
+    """Give the bridge bot the power it needs, as the stack admin.
+
+    Returns True if the stack admin first had to be made a room admin through Synapse's
+    admin API, because nobody had given it enough power in the room.
+    """
+    admin, bot = _admin_id(context), _bot_id(context, spec)
+    promoted = False
+    for attempt in range(2):
+        state = _room_state(context, room_id) or []
+        needed = max(_state_level(state, "m.bridge"), _state_level(state, "m.room.name"), 50)
+        if _power_of(state, bot) >= needed:
+            return promoted
+        admin_power = _power_of(state, admin)
+        target = BOT_POWER if admin_power >= BOT_POWER else int(admin_power)
+        if target >= needed and admin_power >= _state_level(state, "m.room.power_levels"):
+            levels = dict(_state_content(state, "m.room.power_levels"))
+            levels["users"] = {**(levels.get("users") or {}), bot: target}
+            status, reply = _matrix(
+                context,
+                "PUT",
+                f"/_matrix/client/v3/rooms/{_room_path(room_id)}/state/m.room.power_levels/",
+                levels,
+            )
+            if status != 200:
+                raise BridgeError(
+                    "The stack admin could not give the bridge bot power in that room: "
+                    f"{_error(reply, status)}"
+                )
+            return promoted
+        if attempt:
+            break
+        status, _ = _matrix(
+            context,
+            "POST",
+            f"/_synapse/admin/v1/rooms/{_room_path(room_id)}/make_room_admin",
+            {"user_id": admin},
+        )
+        promoted = status == 200
+        if not promoted:
+            break
+    raise BridgeError(
+        f"The stack admin does not have enough power in that room to let the {spec.name} bot "
+        f"manage it. In Element, give {admin} administrator rights in the room, then try again."
+    )
+
+
+def _invite_bot(context, room_id: str, spec: BridgeSpec) -> None:
+    """Invite the bridge bot as the stack admin and wait until it has joined."""
+    bot = _bot_id(context, spec)
+    membership = _memberships(_room_state(context, room_id) or []).get(bot)
+    if membership == "join":
+        return
+    if membership == "ban":
+        raise BridgeError(f"The {spec.name} bridge bot is banned from that room. Unban it first.")
+    if membership != "invite":
+        status, reply = _matrix(
+            context,
+            "POST",
+            f"/_matrix/client/v3/rooms/{_room_path(room_id)}/invite",
+            {"user_id": bot},
+        )
+        if status != 200:
+            raise BridgeError(
+                f"The stack admin could not invite the {spec.name} bot: {_error(reply, status)}"
+            )
+    deadline = time.monotonic() + JOIN_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if bot in (_joined(context, room_id) or set()):
+            return
+        _sleep(POLL_SECONDS)
+    raise BridgeError(
+        f"The {spec.name} bridge bot did not join the room. Check that the bridge is running."
+    )
+
+
+# --- The bot's management room ("command chat") ---------------------------------------------
+
+
+def is_allowed_command(spec: BridgeSpec, command: str) -> bool:
+    """Exact commands from the catalogue, plus a named login flow where flows are not fixed."""
+    if command in spec.commands:
+        return True
+    prefix = f"{LOGIN_COMMAND} "
+    if not command.startswith(prefix):
+        return False
+    flow = command.removeprefix(prefix)
+    if spec.login_flows:
+        return flow in spec.login_flows
+    return bool(LOGIN_FLOW_PATTERN.fullmatch(command))
+
+
+def command_chat_name(spec: BridgeSpec) -> str:
+    return f"{spec.name} bridge commands"
 
 
 def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
     """The admin's direct chat with the bridge bot, created once and then reused."""
-    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    bot = _bot_id(context, spec)
     room_id = _load_room(context, spec)
     if room_id:
         joined = _joined(context, room_id)
@@ -337,47 +461,29 @@ def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
     )
 
 
+def reset_command_chat(context, spec: BridgeSpec) -> dict[str, str]:
+    """Open a fresh command chat with the bot; the bot makes it its management room."""
+    _forget_room(context, spec)
+    return {"room_id": ensure_direct_room(context, spec)}
+
+
 def _send(context, room_id: str, text: str) -> str:
     txn = secrets.token_hex(8)
-    path = f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/send/m.room.message/{txn}"
+    path = f"/_matrix/client/v3/rooms/{_room_path(room_id)}/send/m.room.message/{txn}"
     status, reply = _matrix(context, "PUT", path, {"msgtype": "m.text", "body": text})
     if status != 200 or "event_id" not in reply:
         raise BridgeError("Synapse did not accept the command.")
     return reply["event_id"]
 
 
-def _command_prefix(context, spec: BridgeSpec) -> str:
-    """The prefix the bridge expects on commands sent in a portal room."""
-    config_path = context.project_dir / "data" / spec.service / "config.yaml"
-    try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        config = {}
-    bridge = config.get("bridge") if isinstance(config, dict) else None
-    prefix = bridge.get("command_prefix") if isinstance(bridge, dict) else None
-    if isinstance(prefix, str) and prefix.strip():
-        return prefix.strip()
-    if not spec.command_prefix:
-        raise BridgeError(f"The {spec.name} bridge has no known command prefix.")
-    return spec.command_prefix
-
-
-def _send_portal_command(context, room_id: str, command: str, spec: BridgeSpec) -> str:
-    """Post a bot command in a portal room; outside the management room it needs the prefix."""
-    return _send(context, room_id, f"{_command_prefix(context, spec)} {command}")
-
-
 def _redact_command_event(context, room_id: str, event_id: str) -> None:
     txn = secrets.token_hex(8)
-    path = (
-        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/redact/"
-        f"{quote(event_id, safe='')}/{txn}"
-    )
-    status, _ = _matrix(context, "PUT", path, {"reason": "Remove a WhatsApp invite link"})
+    path = f"/_matrix/client/v3/rooms/{_room_path(room_id)}/redact/{quote(event_id, safe='')}/{txn}"
+    status, _ = _matrix(context, "PUT", path, {"reason": "Remove an invite link"})
     if status != 200:
         raise BridgeError(
             "Synapse could not redact the invite link from the bridge chat. Revoke that "
-            "WhatsApp invite link before trying again."
+            "invite link before trying again."
         )
 
 
@@ -412,7 +518,7 @@ def _collect_replies(
     deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
     seen: list[dict] = []
     last_change = None
-    path = f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/messages?dir=b&limit=50"
+    path = f"/_matrix/client/v3/rooms/{_room_path(room_id)}/messages?dir=b&limit=50"
     while time.monotonic() < deadline:
         status, page = _matrix(context, "GET", path)
         if status == 200:
@@ -436,23 +542,14 @@ def _collect_replies(
     return [_reply_view(context, event, spec) for event in reversed(seen)]
 
 
-def run_command(
-    context, command: str, spec: BridgeSpec = WHATSAPP, redact_sensitive: bool = False
-) -> dict[str, Any]:
-    """Send one allowlisted command to the bridge bot and return its replies."""
-    sensitive_prefixes = (
-        "resolve-link https://chat.whatsapp.com/",
-        "join https://chat.whatsapp.com/",
-    )
-    sensitive_command = (
-        redact_sensitive
-        and spec.key == WHATSAPP.key
-        and command.startswith(sensitive_prefixes)
-        and bool(INVITE_LINK_PATTERN.fullmatch(command.partition(" ")[2]))
-    )
-    if not is_allowed_command(spec, command) and not sensitive_command:
-        raise BridgeError("That command is not available from the console.")
-    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+def _texts(replies: list[dict[str, Any]]) -> str:
+    return "\n".join(reply["text"] for reply in replies if reply["kind"] == "text")
+
+
+def _bot_command(context, command: str, spec: BridgeSpec, redact: bool = False) -> dict[str, Any]:
+    """Send any command in the management room. Callers decide what may be sent; with
+    ``redact`` the command message is redacted afterwards and not echoed back."""
+    bot = _bot_id(context, spec)
     room_id = ensure_direct_room(context, spec)
 
     def send_and_collect(current_room: str) -> list[dict[str, Any]]:
@@ -460,7 +557,7 @@ def run_command(
         try:
             return _collect_replies(context, current_room, event_id, bot, spec)
         finally:
-            if sensitive_command:
+            if redact:
                 _redact_command_event(context, current_room, event_id)
 
     replies = send_and_collect(room_id)
@@ -471,7 +568,7 @@ def run_command(
         room_id = ensure_direct_room(context, spec)
         replies = send_and_collect(room_id)
     return {
-        "command": command,
+        "command": command.split(" ", 1)[0] if redact else command,
         "replies": replies,
         "note": ""
         if replies
@@ -479,7 +576,255 @@ def run_command(
     }
 
 
-def _restart_bridge(context, spec: BridgeSpec) -> None:
+def run_command(context, command: str, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
+    """Send one allowlisted command to the bridge bot and return its replies."""
+    if not is_allowed_command(spec, command):
+        raise BridgeError("That command is not available from the console.")
+    return _bot_command(context, command, spec)
+
+
+def _portal_command(context, room_id: str, command: str, spec: BridgeSpec) -> list[dict[str, Any]]:
+    """Run a bot command inside a portal room, as the stack admin, and return the replies."""
+    _join_portal_as_admin(context, room_id, spec)
+    try:
+        prefix = bridge_config.command_prefix(_config_path(context, spec), spec)
+    except bridge_config.BridgeConfigError as exc:
+        raise BridgeError(str(exc)) from exc
+    event_id = _send(context, room_id, f"{prefix} {command}")
+    return _collect_replies(context, room_id, event_id, _bot_id(context, spec), spec)
+
+
+def login_state(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
+    """Whether an account is linked, judged from the bot's own answer to list-logins."""
+    result = run_command(context, "list-logins", spec)
+    texts = [reply["text"] for reply in result["replies"] if reply["kind"] == "text"]
+    if not texts:
+        return {"known": False, "linked": False, "detail": result["note"]}
+    detail = " ".join(texts)
+    linked = not any(marker in detail.lower() for marker in NOT_LINKED_MARKERS)
+    return {"known": True, "linked": linked, "detail": detail[:MAX_TEXT_CHARS]}
+
+
+# --- What the bridge knows: its portals -------------------------------------------------------
+
+
+def _portal_records(context, spec: BridgeSpec) -> list[dict[str, Any]]:
+    """Shared chats the bridge has recorded, read-only from its database."""
+    database = _database_path(context, spec)
+    if not spec.database_file or not database.is_file():
+        return []
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(portal)")}
+            relay = "relay_login_id" if "relay_login_id" in columns else "NULL"
+            rows = db.execute(
+                f"SELECT id, mxid, name, {relay} FROM portal WHERE receiver = '' ORDER BY id"
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise BridgeError(f"Could not read the {spec.name} bridge's chat records.") from exc
+    return [
+        {
+            "chat_id": chat_id,
+            "room_id": room_id if isinstance(room_id, str) and ROOM_ID.fullmatch(room_id) else None,
+            "name": name.strip() if isinstance(name, str) else "",
+            "relay": bool(relay_login),
+        }
+        for chat_id, room_id, name, relay_login in rows
+        if isinstance(chat_id, str) and spec.chat_id_ok(chat_id)
+    ]
+
+
+def _record(context, spec: BridgeSpec, chat_id: str) -> dict[str, Any] | None:
+    return next((r for r in _portal_records(context, spec) if r["chat_id"] == chat_id), None)
+
+
+def _record_for_room(context, spec: BridgeSpec, room_id: str) -> dict[str, Any] | None:
+    return next((r for r in _portal_records(context, spec) if r["room_id"] == room_id), None)
+
+
+def _wait_for_record(
+    context, spec: BridgeSpec, chat_id: str, check: Callable[[dict | None], bool]
+) -> dict[str, Any] | None:
+    deadline = time.monotonic() + PORTAL_TIMEOUT_SECONDS
+    while True:
+        record = _record(context, spec, chat_id)
+        if check(record) or time.monotonic() >= deadline:
+            return record
+        _sleep(POLL_SECONDS)
+
+
+def _allowed_chats(context, spec: BridgeSpec) -> list[str]:
+    try:
+        return bridge_config.allowed_chats(_config_path(context, spec))
+    except bridge_config.BridgeConfigError as exc:
+        raise BridgeError(str(exc)) from exc
+
+
+def _display_name(record: dict[str, Any] | None, spec: BridgeSpec) -> str:
+    if record and record.get("name"):
+        return record["name"]
+    return f"Unnamed {spec.chat_noun}"
+
+
+def _sort_key(item: dict[str, Any]) -> tuple[str, str]:
+    return item["name"].lower(), item.get("room_id") or item.get("chat_id") or ""
+
+
+def overview(context, spec: BridgeSpec) -> dict[str, Any]:
+    """Everything the bridge page shows: linked rooms, unlinked chats and what needs repair.
+
+    * rooms: Matrix rooms linked to a chat, with the bridge bot in them.
+    * chats: chats the bridge has seen that have no room. Allowlisted ones are waiting for
+      the bridge to create their room on their next message.
+    * broken: chats linked to a room the bot is not in, or that no longer exists.
+    * leftovers: rooms the bot is still in but that no chat is linked to.
+    """
+    records = _portal_records(context, spec)
+    allowed = set(_allowed_chats(context, spec))
+    bot_rooms = _bot_rooms(context, spec)
+    command_room = _load_room(context, spec)
+    admin, bot = _admin_id(context), _bot_id(context, spec)
+
+    rooms: list[dict[str, Any]] = []
+    broken: list[dict[str, Any]] = []
+    chats: list[dict[str, Any]] = []
+    linked = set()
+    for record in records:
+        room_id = record["room_id"]
+        if room_id is None:
+            chats.append(
+                {
+                    "chat_id": record["chat_id"],
+                    "name": _display_name(record, spec),
+                    "allowed": record["chat_id"] in allowed,
+                }
+            )
+            continue
+        linked.add(room_id)
+        state = _room_state(context, room_id)
+        if state is None or room_id not in bot_rooms:
+            broken.append(
+                {
+                    "chat_id": record["chat_id"],
+                    "name": _display_name(record, spec),
+                    "room_id": room_id,
+                    "problem": "The Matrix room no longer exists."
+                    if state is None
+                    else "The bridge bot is no longer in the Matrix room.",
+                }
+            )
+            continue
+        memberships = _memberships(state)
+        rooms.append(
+            {
+                "room_id": room_id,
+                "chat_id": record["chat_id"],
+                "name": _room_name(state) or _display_name(record, spec),
+                "chat_name": _display_name(record, spec),
+                "members": sum(value == "join" for value in memberships.values()),
+                "admin_joined": memberships.get(admin) == "join",
+                "relay": record["relay"],
+                "allowed": record["chat_id"] in allowed,
+                "encrypted": bool(_state_content(state, "m.room.encryption")),
+            }
+        )
+    known = {record["chat_id"] for record in records}
+    chats.extend(
+        {"chat_id": chat_id, "name": f"Unnamed {spec.chat_noun}", "allowed": True}
+        for chat_id in sorted(allowed - known)
+        if spec.chat_id_ok(chat_id)
+    )
+
+    leftovers = []
+    for room_id in bot_rooms:
+        if room_id in linked or room_id == command_room:
+            continue
+        state = _room_state(context, room_id) or []
+        name = _room_name(state)
+        memberships = _memberships(state)
+        if name == command_chat_name(spec) or memberships.get(bot) != "join":
+            continue
+        leftovers.append(
+            {
+                "room_id": room_id,
+                "name": name or "(unnamed room)",
+                "members": sum(value == "join" for value in memberships.values()),
+            }
+        )
+
+    return {
+        "rooms": sorted(rooms, key=_sort_key),
+        "chats": sorted(chats, key=lambda item: (not item["allowed"], *_sort_key(item))),
+        "broken": sorted(broken, key=_sort_key),
+        "leftovers": sorted(leftovers, key=_sort_key),
+    }
+
+
+def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
+    """Matrix rooms linked to a chat of this bridge (read-only)."""
+    return overview(context, spec)["rooms"]
+
+
+def _portal_room(context, spec: BridgeSpec, room_id: str) -> dict[str, Any]:
+    _check_room_id(room_id)
+    room = next((item for item in portal_rooms(context, spec) if item["room_id"] == room_id), None)
+    if room is None:
+        raise BridgeError(f"That room is not linked to a {spec.name} {spec.chat_noun}.")
+    return room
+
+
+def matrix_rooms(context, spec: BridgeSpec) -> list[dict[str, Any]]:
+    """Rooms on this server a chat could be attached to: not spaces, not already bridged."""
+    status, reply = _matrix(context, "GET", "/_synapse/admin/v1/rooms?limit=500&order_by=name")
+    rooms = reply.get("rooms") if isinstance(reply, dict) else None
+    if status != 200 or not isinstance(rooms, list):
+        raise BridgeError(f"Synapse could not list its rooms: {_error(reply, status)}")
+    excluded = set()
+    for other in supported():
+        excluded.update(r["room_id"] for r in _portal_records(context, other) if r["room_id"])
+        command_room = _load_room(context, other)
+        if command_room:
+            excluded.add(command_room)
+    command_names = {command_chat_name(other) for other in supported()}
+    candidates = []
+    for room in rooms:
+        room_id = room.get("room_id")
+        if not isinstance(room_id, str) or not ROOM_ID.fullmatch(room_id) or room_id in excluded:
+            continue
+        if room.get("room_type") == SPACE or room.get("name") in command_names:
+            continue
+        candidates.append(
+            {
+                "room_id": room_id,
+                "name": room.get("name") or room.get("canonical_alias") or "(unnamed room)",
+                "members": int(room.get("joined_members") or 0),
+                "encrypted": bool(room.get("encryption")),
+            }
+        )
+    return sorted(candidates, key=lambda room: (room["name"].lower(), room["room_id"]))
+
+
+# --- Changing links ----------------------------------------------------------------------------
+
+
+def _container_state(spec: BridgeSpec) -> str | None:
+    if not docker.is_docker_available():
+        return None
+    container = next(
+        (item for item in docker.list_community_containers() if item.get("name") == spec.container),
+        None,
+    )
+    return container.get("state") if container else "missing"
+
+
+def _require_running(spec: BridgeSpec) -> None:
+    if _container_state(spec) != "running":
+        raise BridgeError(f"Start the {spec.name} bridge first, under Services and updates.")
+
+
+def restart_bridge(context, spec: BridgeSpec) -> dict[str, bool]:
+    if not docker.is_docker_available():
+        raise BridgeError("Docker is unavailable, so the bridge cannot be restarted.")
     result = docker.run_compose(
         context.services_dir / spec.service,
         ["restart", spec.service],
@@ -488,8 +833,7 @@ def _restart_bridge(context, spec: BridgeSpec) -> None:
     )
     if result.returncode != 0:
         raise BridgeError(
-            f"The {spec.name} configuration was updated, but the bridge could not restart. "
-            "Stop it from the Services page until the issue is resolved."
+            f"The {spec.name} bridge could not restart. Check its logs under Health and logs."
         )
     from community_stack.agent import settings
 
@@ -497,87 +841,322 @@ def _restart_bridge(context, spec: BridgeSpec) -> None:
         settings.wait_for(context, spec.service, True)
     except settings.SettingsError as exc:
         raise BridgeError(
-            f"The {spec.name} bridge did not become healthy after its configuration changed. "
-            "Stop it from the Services page until the issue is resolved."
+            f"The {spec.name} bridge did not become healthy after restarting. "
+            "Check its logs under Health and logs."
         ) from exc
+    return {"restarted": True}
 
 
-def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
-    """Resolve and allow one group, then join it without retaining its invite link."""
-    invite_link = invite_link.strip()
-    if not INVITE_LINK_PATTERN.fullmatch(invite_link):
-        raise BridgeError("Enter a valid WhatsApp group invite link.")
-    if not docker.is_docker_available():
-        raise BridgeError("Docker is unavailable; start the WhatsApp bridge from Services first.")
-    container = next(
-        (
-            item
-            for item in docker.list_community_containers()
-            if item.get("name") == WHATSAPP.container
-        ),
-        None,
-    )
-    if not container or container.get("state") != "running":
-        raise BridgeError("Start the WhatsApp bridge from the Services page first.")
-
-    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+def _set_allowed(context, spec: BridgeSpec, chat_id: str, allowed: bool) -> bool:
+    """Change the allowlist and reload a running bridge, which reads it at start-up."""
+    _check_chat_id(spec, chat_id)
+    path = _config_path(context, spec)
     try:
-        privacy_changed = provision.ensure_whatsapp_privacy_config(config_path)
-    except provision.ProvisionError as exc:
+        if allowed:
+            changed = bridge_config.allow_chat(path, spec, chat_id)
+        else:
+            changed = bridge_config.disallow_chat(path, spec, chat_id)
+    except bridge_config.BridgeConfigError as exc:
         raise BridgeError(str(exc)) from exc
-    if privacy_changed:
-        _restart_bridge(context, WHATSAPP)
+    if changed and _container_state(spec) == "running":
+        restart_bridge(context, spec)
+    return changed
 
-    resolved = run_command(context, f"resolve-link {invite_link}", redact_sensitive=True)
-    resolved_text = "\n".join(
-        reply["text"] for reply in resolved["replies"] if reply["kind"] == "text"
-    )
-    match = re.search(
-        rf"That invite link points at (.+?) \(`?({GROUP_ID_PATTERN.pattern})`?\)", resolved_text
-    )
-    if not match:
-        raise BridgeError("The bridge could not resolve that WhatsApp group invite link.")
-    group_name, group_id = match.groups()
 
+def allow_chat(context, spec: BridgeSpec, chat_id: str) -> dict[str, bool]:
+    """Let the bridge create a room for this chat by itself, on the chat's next message."""
+    return {"changed": _set_allowed(context, spec, chat_id, True)}
+
+
+def disallow_chat(context, spec: BridgeSpec, chat_id: str) -> dict[str, bool]:
+    """Stop the bridge creating a room for this chat. Existing links are not touched."""
+    return {"changed": _set_allowed(context, spec, chat_id, False)}
+
+
+def set_room_relay(
+    context, room_id: str, spec: BridgeSpec = WHATSAPP, enabled: bool = True
+) -> dict[str, Any]:
+    """Relay messages from Matrix people without their own login through the linked account."""
+    _portal_room(context, spec, room_id)
+    replies = _portal_command(context, room_id, "set-relay" if enabled else "unset-relay", spec)
+    text = _texts(replies)
+    ok = (RELAY_SET in text) if enabled else (RELAY_UNSET in text or NO_RELAY in text)
+    return {
+        "room_id": room_id,
+        "ok": ok,
+        "replies": replies,
+        "note": ""
+        if replies
+        else "The bridge bot did not answer. Check that the bridge is running, then try again.",
+    }
+
+
+def _turn_on_relay(context, room_id: str, spec: BridgeSpec) -> bool:
     try:
-        allowlist_changed = provision.allow_whatsapp_group(config_path, group_id)
-    except provision.ProvisionError as exc:
-        raise BridgeError(str(exc)) from exc
-    if allowlist_changed:
-        _restart_bridge(context, WHATSAPP)
+        return set_room_relay(context, room_id, spec)["ok"]
+    except BridgeError:
+        return False
 
-    joined = run_command(context, f"join {invite_link}", redact_sensitive=True)
-    joined_text = "\n".join(reply["text"] for reply in joined["replies"] if reply["kind"] == "text")
-    if f"Successfully joined group `{group_id}`" not in joined_text:
+
+def sync_room(context, spec: BridgeSpec, room_id: str) -> dict[str, Any]:
+    """Ask the bridge to refresh a room's name, picture and members from the chat."""
+    _portal_room(context, spec, room_id)
+    replies = _portal_command(context, room_id, "sync-portal", spec)
+    return {"room_id": room_id, "replies": replies}
+
+
+def invite_portal_user(
+    context, room_id: str, user_id: str, spec: BridgeSpec = WHATSAPP
+) -> dict[str, str]:
+    """Invite a Matrix account to a bridged room, through the bridge bot."""
+    if not matrix_admin.USER_ID.fullmatch(user_id):
+        raise BridgeError("Enter a valid Matrix user ID, such as @alice:example.org.")
+    _portal_room(context, spec, room_id)
+    _invite_as_bot(context, room_id, user_id, spec)
+    return {"room_id": room_id, "user_id": user_id}
+
+
+def _unbridge(context, spec: BridgeSpec, room_id: str, chat_id: str) -> list[dict[str, Any]]:
+    """Detach a chat from its room and wait until the bridge has forgotten the link."""
+    if room_id in _bot_rooms(context, spec):
+        replies = _portal_command(context, room_id, "unbridge", spec)
+    else:
+        # The bot cannot read commands in a room it left or that is gone; run the command
+        # for that room from the management room instead (bridge admins only).
+        replies = _bot_command(context, f"doin {room_id} unbridge", spec)["replies"]
+    record = _wait_for_record(
+        context, spec, chat_id, lambda current: current is None or current["room_id"] != room_id
+    )
+    if record is not None and record["room_id"] == room_id:
+        detail = _texts(replies)
         raise BridgeError(
-            f"{group_name} is allowlisted, but the bridge did not confirm joining it. "
-            "Check the bridge status and retry."
+            f"The {spec.name} bridge did not detach the room."
+            + (f" It answered: {detail[:300]}" if detail else "")
         )
-    return {"group_id": group_id, "name": group_name}
+    return replies
 
 
-def disallow_whatsapp_group(context, group_id: str) -> dict[str, bool]:
-    """Revoke one group's permission and reload the running bridge if needed."""
-    if not GROUP_ID_PATTERN.fullmatch(group_id):
-        raise BridgeError("The WhatsApp group ID is invalid.")
-    if not docker.is_docker_available():
-        raise BridgeError("Docker is unavailable; cannot safely apply the group permission change.")
-    container = next(
-        (
-            item
-            for item in docker.list_community_containers()
-            if item.get("name") == WHATSAPP.container
-        ),
-        None,
+def attach_room(
+    context, spec: BridgeSpec, chat_id: str, room_id: str, move: bool = False
+) -> dict[str, Any]:
+    """Link a chat to an existing Matrix room instead of letting the bridge create one."""
+    _check_chat_id(spec, chat_id)
+    _check_room_id(room_id)
+    _require_running(spec)
+    if room_id == _load_room(context, spec):
+        raise BridgeError("That is the bridge's command chat; choose another room.")
+    record = _record(context, spec, chat_id)
+    if record is None:
+        raise BridgeError(
+            f"The {spec.name} bridge has not seen that {spec.chat_noun} yet. Send a message in "
+            f"it from {spec.name}, then try again."
+        )
+    if record["room_id"] == room_id:
+        return {
+            "room_id": room_id,
+            "chat_id": chat_id,
+            "relay": record["relay"],
+            "admin_promoted": False,
+            "moved_from": "",
+            "replies": [],
+        }
+    if _record_for_room(context, spec, room_id) is not None:
+        raise BridgeError(f"That room is already linked to another {spec.name} {spec.chat_noun}.")
+    if record["room_id"] and not move:
+        raise BridgeError(
+            f"That {spec.chat_noun} is already linked to another room. Choose “Move” to link "
+            "it here instead; its current room is kept for its Matrix members."
+        )
+    state = _room_state(context, room_id)
+    if state is None:
+        raise BridgeError("That Matrix room does not exist on this server.")
+    if _state_content(state, "m.room.create").get("type") == SPACE:
+        raise BridgeError("That is a space, not a room.")
+
+    if _memberships(state).get(_admin_id(context)) != "join":
+        _force_join_admin(context, room_id)
+    _invite_bot(context, room_id, spec)
+    promoted = _grant_bot_power(context, room_id, spec)
+
+    if record["room_id"]:
+        _unbridge(context, spec, record["room_id"], chat_id)
+
+    replies = _portal_command(context, room_id, f"bridge {chat_id}", spec)
+    linked = _wait_for_record(
+        context, spec, chat_id, lambda current: bool(current) and current["room_id"] == room_id
     )
-    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    if not linked or linked["room_id"] != room_id:
+        detail = _texts(replies)
+        raise BridgeError(
+            f"The {spec.name} bridge did not link the room."
+            + (f" It answered: {detail[:300]}" if detail else " It did not answer.")
+        )
+    return {
+        "room_id": room_id,
+        "chat_id": chat_id,
+        "relay": _turn_on_relay(context, room_id, spec),
+        "admin_promoted": promoted,
+        "moved_from": record["room_id"] or "",
+        "replies": replies,
+    }
+
+
+def create_room(context, spec: BridgeSpec, chat_id: str) -> dict[str, Any]:
+    """Have the bridge create a new Matrix room for a chat it has seen, now."""
+    _check_chat_id(spec, chat_id)
+    _require_running(spec)
+    record = _record(context, spec, chat_id)
+    if record is None:
+        raise BridgeError(
+            f"The {spec.name} bridge has not seen that {spec.chat_noun} yet. "
+            "Send a message in it first."
+        )
+    if record["room_id"]:
+        raise BridgeError(f"That {spec.chat_noun} already has a room.")
+    _set_allowed(context, spec, chat_id, True)
+    result = _bot_command(context, f"create-portal {chat_id}", spec)
+    created = _wait_for_record(
+        context, spec, chat_id, lambda current: bool(current and current["room_id"])
+    )
+    if not created or not created["room_id"]:
+        detail = _texts(result["replies"])
+        raise BridgeError(
+            f"The {spec.name} bridge did not create the room yet. The {spec.chat_noun} is "
+            "allowed, so its room appears with its next message."
+            + (f" The bot answered: {detail[:300]}" if detail else "")
+        )
+    return {
+        "room_id": created["room_id"],
+        "chat_id": chat_id,
+        "relay": _turn_on_relay(context, created["room_id"], spec),
+        "replies": result["replies"],
+    }
+
+
+def detach_room(context, spec: BridgeSpec, room_id: str, confirmation: str) -> dict[str, Any]:
+    """Unlink a room from its chat.
+
+    The room stays for its Matrix members; the chat's remote members and the bot leave it.
+    The chat is removed from the allowlist so that the bridge does not create a new room.
+    """
+    if confirmation != "yes":
+        raise BridgeError("Confirm that you want to unlink this room.")
+    _require_running(spec)
+    room = _portal_room(context, spec, room_id)
+    replies = _unbridge(context, spec, room_id, room["chat_id"])
+    _set_allowed(context, spec, room["chat_id"], False)
+    return {"room_id": room_id, "chat_id": room["chat_id"], "replies": replies}
+
+
+def repair_link(context, spec: BridgeSpec, chat_id: str, confirmation: str) -> dict[str, Any]:
+    """Forget a link to a room that is gone or that the bot left, through the bot itself."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm that you want to forget this broken link.")
+    _check_chat_id(spec, chat_id)
+    _require_running(spec)
+    broken = next(
+        (item for item in overview(context, spec)["broken"] if item["chat_id"] == chat_id), None
+    )
+    if broken is None:
+        raise BridgeError("That link is not broken; refresh the page.")
+    replies = _bot_command(context, f"doin {broken['room_id']} unbridge", spec)["replies"]
+    record = _wait_for_record(
+        context, spec, chat_id, lambda current: not current or not current["room_id"]
+    )
+    if record and record["room_id"]:
+        detail = _texts(replies)
+        raise BridgeError(
+            f"The {spec.name} bridge kept the broken link."
+            + (f" It answered: {detail[:300]}" if detail else "")
+        )
+    _set_allowed(context, spec, chat_id, False)
+    return {"chat_id": chat_id, "replies": replies}
+
+
+def remove_portal_room(
+    context, room_id: str, confirmation: str, spec: BridgeSpec = WHATSAPP
+) -> dict[str, str]:
+    """Delete a bridged room for everyone, and stop the bridge from re-creating it."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm that removing this room deletes it for all its members.")
+    room = _portal_room(context, spec, room_id)
+    _join_portal_as_admin(context, room_id, spec)
+    _set_allowed(context, spec, room["chat_id"], False)
+    _portal_command(context, room_id, "delete-portal", spec)
+    bot = _bot_id(context, spec)
+    deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        status, members = _matrix(
+            context, "GET", f"/_matrix/client/v3/rooms/{_room_path(room_id)}/joined_members"
+        )
+        if status in (403, 404) or (status == 200 and bot not in members.get("joined", {})):
+            return {"room_id": room_id}
+        _sleep(POLL_SECONDS)
+    raise BridgeError(
+        "The chat was removed from the allowlist, but the bridge did not confirm deleting the "
+        "room. Check the bridge's logs under Health and logs."
+    )
+
+
+def leave_room(context, spec: BridgeSpec, room_id: str, confirmation: str) -> dict[str, str]:
+    """Make the bridge bot leave a room no chat is linked to. The room itself is kept."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm that the bridge bot should leave this room.")
+    _check_room_id(room_id)
+    if room_id not in {room["room_id"] for room in overview(context, spec)["leftovers"]}:
+        raise BridgeError("That room is linked to a chat, or the bot is not in it.")
+    status, reply = _as_bot(
+        context, spec, "POST", f"/_matrix/client/v3/rooms/{_room_path(room_id)}/leave", {}
+    )
+    if status != 200:
+        raise BridgeError(f"The bridge bot could not leave the room: {_error(reply, status)}")
+    return {"room_id": room_id}
+
+
+def forget_chat(context, spec: BridgeSpec, chat_id: str, confirmation: str) -> dict[str, bool]:
+    """Delete the bridge's record of a chat that has no room, while the bridge is stopped."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm that you want to forget this chat record.")
+    _check_chat_id(spec, chat_id)
+    state = _container_state(spec)
+    if state is None:
+        raise BridgeError("Docker is unavailable; stop the bridge before forgetting records.")
+    if state == "running":
+        raise BridgeError(
+            f"Stop the {spec.name} bridge under Services and updates before forgetting records."
+        )
+    database = _database_path(context, spec)
+    if not database.is_file():
+        raise BridgeError(f"The {spec.name} bridge database is missing.")
+    _set_allowed(context, spec, chat_id, False)
     try:
-        changed = provision.disallow_whatsapp_group(config_path, group_id)
-    except provision.ProvisionError as exc:
-        raise BridgeError(str(exc)) from exc
-    if changed and container and container.get("state") == "running":
-        _restart_bridge(context, WHATSAPP)
-    return {"allowed": False}
+        with sqlite3.connect(database, timeout=10) as db:
+            db.execute("PRAGMA foreign_keys = ON")
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT receiver FROM portal WHERE id = ? AND mxid IS NULL", (chat_id,)
+            ).fetchall()
+            if not rows:
+                raise BridgeError(
+                    "That chat has a room, or the bridge no longer has a record of it."
+                )
+            for (receiver,) in rows:
+                child = db.execute(
+                    "SELECT 1 FROM portal WHERE parent_id = ? AND parent_receiver = ? LIMIT 1",
+                    (chat_id, receiver),
+                ).fetchone()
+                if child:
+                    raise BridgeError(
+                        "Other records depend on this chat; it cannot be forgotten safely."
+                    )
+            db.execute("DELETE FROM portal WHERE id = ? AND mxid IS NULL", (chat_id,))
+            db.commit()
+    except sqlite3.Error as exc:
+        raise BridgeError(f"Could not forget the {spec.name} chat record.") from exc
+    return {"removed": True}
+
+
+# --- Status and diagnosis ----------------------------------------------------------------------
 
 
 def _synapse_started_at() -> datetime | None:
@@ -624,13 +1203,13 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         "enabled",
         enabled,
         f"{spec.name} bridge is enabled." if enabled else f"{spec.name} bridge is turned off.",
-        f"Turn {spec.name} on under Services.",
+        f"Turn {spec.name} on under Services and updates.",
     )
     add(
         "matrix",
         homeserver.is_file(),
         "Matrix is set up." if homeserver.is_file() else "Matrix has not been set up.",
-        "Set up Matrix on the Services page before the bridge.",
+        "Set up Matrix under Services and updates before the bridge.",
     )
     has_config = (data_dir / "config.yaml").is_file()
     add(
@@ -639,31 +1218,18 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         "Bridge configuration exists." if has_config else "Bridge configuration is missing.",
         f"Turn {spec.name} off and on again to regenerate it.",
     )
-    if spec.key == WHATSAPP.key and has_config:
-        try:
-            bridge_config = (
-                yaml.safe_load((data_dir / "config.yaml").read_text(encoding="utf-8")) or {}
-            )
-            history_sync = bridge_config.get("network", {}).get("history_sync", {})
-            network_settings = bridge_config.get("network", {})
-            bridge_settings = bridge_config.get("bridge", {})
-            portal_filter = bridge_settings.get("portal_create_filter", {})
-            privacy_ok = (
-                history_sync.get("max_initial_conversations") == 0
-                and history_sync.get("request_full_sync") is False
-                and network_settings.get("max_member_sync") == 0
-                and portal_filter.get("mode") == "allow"
-                and isinstance(portal_filter.get("list"), list)
-            )
-        except (OSError, AttributeError, yaml.YAMLError):
-            privacy_ok = False
+    if has_config:
+        guarded = bridge_config.safeguards_ok(data_dir / "config.yaml", spec)
+        extra = (
+            " History backfill and eager member import are off." if spec.required_settings else ""
+        )
         add(
-            "privacy_guard",
-            privacy_ok,
-            "History backfill is off; eager non-admin group member sync is disabled; portal creation is allow-only. Standalone contact/profile sync may still create ghosts."
-            if privacy_ok
-            else "WhatsApp history, eager member-sync, or portal allowlist safeguards are not applied.",
-            "Keep the bridge stopped, then turn it off and on from Services to apply the safeguards.",
+            "safeguards",
+            guarded,
+            f"The bridge only creates rooms by itself for chats you allow.{extra}"
+            if guarded
+            else "The bridge's chat allowlist or privacy settings are not applied.",
+            f"Turn {spec.name} off and on again under Services and updates to apply them.",
         )
     has_registration = (data_dir / "registration.yaml").is_file()
     add(
@@ -687,10 +1253,10 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     add(
         "synapse_registered",
         listed and registration.is_file(),
-        "Synapse lists the bridge registration."
+        "Matrix knows about the bridge."
         if listed and registration.is_file()
-        else "Synapse does not list the bridge registration.",
-        f"Turn {spec.name} off and on again so Synapse is given its registration.",
+        else "Matrix does not list the bridge's registration.",
+        f"Turn {spec.name} off and on again so Matrix is given its registration.",
     )
 
     started = (
@@ -705,283 +1271,35 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     add(
         "synapse_restarted",
         not stale,
-        "Synapse started after the bridge registration was last written."
+        "Matrix has loaded the bridge's current registration."
         if not stale
-        else "Synapse started before the bridge registration was written.",
-        "Restart Matrix so it reads the bridge registration.",
+        else "Matrix started before the bridge registration was written.",
+        "Restart Matrix under Services and updates so it reads the bridge registration.",
     )
 
-    containers = docker.list_community_containers() if docker.is_docker_available() else []
-    container = next((c for c in containers if c.get("name") == spec.container), None)
-    running = bool(container) and container.get("state") == "running"
+    state = _container_state(spec)
     add(
         "container",
-        running,
-        f"Bridge container is {container.get('state')}."
-        if container
+        state == "running",
+        f"Bridge container is {state}."
+        if state and state != "missing"
         else "Bridge container is not running.",
-        f"Start {spec.name} on the Services page.",
+        f"Start {spec.name} under Services and updates, or restart it here.",
     )
     return checks
-
-
-def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
-    """List rooms joined by the bridge bot, independent of the stack admin's membership.
-
-    Read-only: it reports whether the stack admin is in each room but never changes that.
-    Actions that post into a portal as the admin join it first (see _join_portal_as_admin).
-    """
-    token, bot = _appservice_token(context, spec)
-    status, joined = _appservice_request(
-        context, "GET", "/_matrix/client/v3/joined_rooms", None, token, bot, spec
-    )
-    if status != 200:
-        detail = joined.get("error", status) if isinstance(joined, dict) else status
-        raise BridgeError(f"Synapse did not list rooms for the {spec.name} bot: {detail}")
-    room_ids = joined.get("joined_rooms") if isinstance(joined, dict) else None
-    if not isinstance(room_ids, list):
-        raise BridgeError(f"Synapse returned an invalid room list for the {spec.name} bot.")
-
-    command_room = _load_room(context, spec)
-    whatsapp_access = _whatsapp_portal_access(context, spec) if spec.key == WHATSAPP.key else {}
-    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
-    rooms: list[dict[str, Any]] = []
-    for room_id in room_ids:
-        if not isinstance(room_id, str) or not ROOM_ID.fullmatch(room_id):
-            continue
-        if room_id == command_room:
-            continue
-        if spec.key == WHATSAPP.key and room_id not in whatsapp_access:
-            continue
-        state = _room_state(context, room_id, token, bot, spec)
-        if state is None:
-            continue
-        memberships = {
-            event.get("state_key"): event.get("content", {}).get("membership")
-            for event in state
-            if event.get("type") == "m.room.member"
-        }
-        if memberships.get(bot) != "join":
-            continue
-        name_event = next((event for event in state if event.get("type") == "m.room.name"), {})
-        name = name_event.get("content", {}).get("name") or ""
-        if name == command_chat_name(spec):
-            continue
-        is_allowed = whatsapp_access.get(room_id, True)
-        admin_membership = memberships.get(admin)
-        access_labels = {
-            "join": "Joined",
-            "invite": "Invite pending",
-            "leave": "Not joined",
-            "ban": "Banned",
-        }
-        rooms.append(
-            {
-                "room_id": room_id,
-                "name": name or "(unnamed room)",
-                "members": sum(value == "join" for value in memberships.values()),
-                "allowed": is_allowed,
-                "admin_access": access_labels.get(admin_membership, "Not joined"),
-                "access_error": "",
-            }
-        )
-    return sorted(rooms, key=lambda room: room["name"].lower())
-
-
-def invite_portal_user(
-    context, room_id: str, user_id: str, spec: BridgeSpec = WHATSAPP
-) -> dict[str, str]:
-    """Invite a Matrix account to one allowlisted WhatsApp portal through the bridge bot."""
-    if not matrix_admin.USER_ID.fullmatch(user_id):
-        raise BridgeError("Enter a valid Matrix user ID, such as @alice:example.org.")
-    room = next((item for item in portal_rooms(context, spec) if item["room_id"] == room_id), None)
-    if not room:
-        raise BridgeError(f"That room is not an active {spec.name} bridge portal.")
-    if not room.get("allowed"):
-        raise BridgeError("Only allowlisted WhatsApp rooms can invite new Matrix accounts.")
-    _invite_as_bot(context, room_id, user_id, spec)
-    return {"room_id": room_id, "user_id": user_id}
-
-
-def orphaned_portals(context) -> list[dict[str, str]]:
-    """List saved WhatsApp group portals that have no Matrix room."""
-    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
-    if not database.is_file():
-        return []
-    try:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-            rows = db.execute(
-                "SELECT id, name FROM portal WHERE mxid IS NULL AND id GLOB '[0-9]*@g.us'"
-            ).fetchall()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not read saved WhatsApp group records.") from exc
-    return [
-        {
-            "group_id": group_id,
-            "name": name.strip()
-            if name and name.strip()
-            else "WhatsApp group without a Matrix room",
-        }
-        for group_id, name in rows
-        if GROUP_ID_PATTERN.fullmatch(group_id)
-    ]
-
-
-def remove_orphaned_portal(context, group_id: str, confirmation: str) -> dict[str, str]:
-    """Remove a saved group record only when it has no Matrix room and the bridge is stopped."""
-    if confirmation != "yes":
-        raise BridgeError("Confirm removal of this saved group record.")
-    if not GROUP_ID_PATTERN.fullmatch(group_id):
-        raise BridgeError("That saved WhatsApp group record is invalid.")
-    if not docker.is_docker_available():
-        raise BridgeError(
-            "Docker is unavailable; stop the WhatsApp bridge before removing this record."
-        )
-    container = next(
-        (
-            item
-            for item in docker.list_community_containers()
-            if item.get("name") == WHATSAPP.container
-        ),
-        None,
-    )
-    if container and container.get("state") == "running":
-        raise BridgeError(
-            "Stop the WhatsApp bridge from Services before removing this saved record."
-        )
-
-    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
-    if not database.is_file():
-        raise BridgeError("The WhatsApp bridge database is missing.")
-    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
-    try:
-        provision.disallow_whatsapp_group(config_path, group_id)
-        with sqlite3.connect(database, timeout=10) as db:
-            db.execute("PRAGMA foreign_keys = ON")
-            db.execute("BEGIN IMMEDIATE")
-            rows = db.execute(
-                "SELECT receiver FROM portal WHERE id = ? AND mxid IS NULL", (group_id,)
-            ).fetchall()
-            if not rows:
-                raise BridgeError("That saved group has a Matrix room or no longer exists.")
-            for (receiver,) in rows:
-                child = db.execute(
-                    "SELECT 1 FROM portal WHERE parent_id = ? AND parent_receiver = ? LIMIT 1",
-                    (group_id, receiver),
-                ).fetchone()
-                if child:
-                    raise BridgeError(
-                        "This saved group has dependent portals and cannot be removed safely."
-                    )
-            db.execute("DELETE FROM portal WHERE id = ? AND mxid IS NULL", (group_id,))
-            db.commit()
-    except provision.ProvisionError as exc:
-        raise BridgeError(str(exc)) from exc
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not remove the saved WhatsApp group record.") from exc
-    return {"removed": True}
-
-
-def remove_portal_room(context, room_id: str, confirmation: str) -> dict[str, str]:
-    """Unallow and delete a bridged WhatsApp portal room after explicit confirmation."""
-    if confirmation != "yes":
-        raise BridgeError("Confirm that removing this portal will also delete its Matrix room.")
-    if room_id not in {room["room_id"] for room in portal_rooms(context)}:
-        raise BridgeError("That room is not a bridged WhatsApp room.")
-    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
-    try:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-            row = db.execute(
-                "SELECT id FROM portal WHERE mxid = ? AND id GLOB '[0-9]*@g.us' LIMIT 1",
-                (room_id,),
-            ).fetchone()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not identify the WhatsApp group for this room.") from exc
-    if not row or not GROUP_ID_PATTERN.fullmatch(row[0]):
-        raise BridgeError("Could not safely identify the WhatsApp group for this room.")
-
-    group_id = row[0]
-    _join_portal_as_admin(context, room_id, WHATSAPP)
-    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
-    try:
-        provision.disallow_whatsapp_group(config_path, group_id)
-    except provision.ProvisionError as exc:
-        raise BridgeError(str(exc)) from exc
-
-    event_id = _send_portal_command(context, room_id, "delete-portal", WHATSAPP)
-    deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
-    bot = f"@{WHATSAPP.bot_localpart}:{_server_name(context)}"
-    while time.monotonic() < deadline:
-        status, members = _matrix(
-            context,
-            "GET",
-            f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/joined_members",
-        )
-        if status == 404 or (status == 200 and bot not in members.get("joined", {})):
-            _restart_bridge(context, WHATSAPP)
-            return {"room_id": room_id, "event_id": event_id}
-        _sleep(POLL_SECONDS)
-    raise BridgeError(
-        "The group was removed from the allowlist, but the bridge did not confirm portal deletion. "
-        "Keep the bridge stopped and check its status."
-    )
-
-
-def login_state(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
-    """Whether an account is linked, judged from the bot's own answer to list-logins."""
-    result = run_command(context, "list-logins", spec)
-    texts = [reply["text"] for reply in result["replies"] if reply["kind"] == "text"]
-    if not texts:
-        return {"known": False, "linked": False, "detail": result["note"]}
-    detail = " ".join(texts)
-    linked = not any(marker in detail.lower() for marker in NOT_LINKED_MARKERS)
-    return {"known": True, "linked": linked, "detail": detail[:MAX_TEXT_CHARS]}
-
-
-def set_room_relay(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
-    """Make the linked service account relay for one bridged room: only rooms the bridge made."""
-    if room_id not in {room["room_id"] for room in portal_rooms(context, spec)}:
-        raise BridgeError(f"That room is not a bridged {spec.name} room.")
-    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
-    _join_portal_as_admin(context, room_id, spec)
-    event_id = _send_portal_command(context, room_id, "set-relay", spec)
-    replies = _collect_replies(context, room_id, event_id, bot, spec)
-    return {
-        "room_id": room_id,
-        "replies": replies,
-        "note": ""
-        if replies
-        else "The bridge bot did not answer. Check that the bridge is running, then try again.",
-    }
 
 
 def status(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     """Local state only: no Matrix or bot messages are sent to answer this."""
     checks = diagnose(context, spec)
     by_id = {check["id"]: check for check in checks}
-    container = by_id["container"]
-    privacy_guard = by_id.get("privacy_guard", {}).get("ok", False)
-    allowed_groups: list[str] = []
-    if spec.key == WHATSAPP.key:
-        config_path = context.project_dir / "data" / spec.service / "config.yaml"
-        if config_path.is_file():
-            try:
-                config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-            except (OSError, yaml.YAMLError) as exc:
-                raise BridgeError("Could not read the WhatsApp bridge configuration.") from exc
-            allowed = config.get("bridge", {}).get("portal_create_filter", {}).get("list", [])
-            if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
-                raise BridgeError("The WhatsApp bridge portal allowlist is invalid.")
-            allowed_groups = allowed
     return {
         "enabled": by_id["enabled"]["ok"],
         "registered_with_synapse": by_id["synapse_registered"]["ok"],
-        "container_state": "running" if container["ok"] else "not running",
-        "container_status": "",
+        "container_state": "running" if by_id["container"]["ok"] else "not running",
         "command_chat_created": _load_room(context, spec) is not None,
-        "allowed_groups": allowed_groups,
-        "privacy_guard_ok": privacy_guard,
-        "orphaned_portals": orphaned_portals(context) if spec.key == WHATSAPP.key else [],
+        "allowed_chats": _allowed_chats(context, spec),
+        "safeguards_ok": by_id.get("safeguards", {}).get("ok", False),
         "commands": dict(spec.commands),
         "checks": checks,
         "healthy": all(check["ok"] for check in checks),

@@ -8,16 +8,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 import string
-import tempfile
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from community_stack import docker
+from community_stack.bridges import config as bridge_config
 from community_stack.bridges.catalogue import MESSENGER, SIGNAL, WHATSAPP, BridgeSpec
 from community_stack.config_edit import set_env_values
 from community_stack.secrets import generate_secret, parse_env_file
@@ -25,7 +23,6 @@ from community_stack.secrets import generate_secret, parse_env_file
 SYNAPSE_UID = 991
 # Bridges provisioned by the generic path. Each one is off unless enabled in the configuration.
 BRIDGE_SPECS: tuple[BridgeSpec, ...] = (WHATSAPP, SIGNAL, MESSENGER)
-WHATSAPP_GROUP_ID_PATTERN = re.compile(r"\d{5,30}(?:-\d{1,15})?@g\.us")
 LOG_CONFIG = """version: 1
 formatters:
   precise:
@@ -441,9 +438,9 @@ def prepare_bridge(
         )
 
     data_dir = project_dir / "data" / spec.service
-    bridge_config = data_dir / "config.yaml"
+    bridge_config_path = data_dir / "config.yaml"
     registration_file = data_dir / "registration.yaml"
-    if registration_file.is_file() and not bridge_config.is_file():
+    if registration_file.is_file() and not bridge_config_path.is_file():
         raise ProvisionError(
             f"{spec.name} bridge data is incomplete: config.yaml is missing while "
             "registration.yaml exists. Restore the bridge config before starting the service."
@@ -451,8 +448,8 @@ def prepare_bridge(
     data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     data_dir.chmod(0o700)
 
-    secrets = _bridge_secrets(env_path, spec, create_missing=not bridge_config.exists())
-    if not bridge_config.exists():
+    secrets = _bridge_secrets(env_path, spec, create_missing=not bridge_config_path.exists())
+    if not bridge_config_path.exists():
         template_path = services_dir / spec.service / "config.template.yaml"
         template = template_path.read_text(encoding="utf-8")
         rendered = string.Template(template).substitute(
@@ -461,11 +458,13 @@ def prepare_bridge(
             HS_TOKEN=secrets[f"{spec.secret_prefix}_HS_TOKEN"],
         )
         yaml.safe_load(rendered)
-        bridge_config.write_text(rendered, encoding="utf-8")
-        bridge_config.chmod(0o600)
+        bridge_config_path.write_text(rendered, encoding="utf-8")
+        bridge_config_path.chmod(0o600)
 
-    if spec.key == WHATSAPP.key:
-        ensure_whatsapp_privacy_config(bridge_config)
+    try:
+        bridge_config.ensure_safeguards(bridge_config_path, spec)
+    except bridge_config.BridgeConfigError as exc:
+        raise ProvisionError(str(exc)) from exc
 
     if not registration_file.is_file():
         compose = yaml.safe_load(
@@ -520,104 +519,12 @@ def prepare_bridge(
     return None
 
 
-def _write_whatsapp_config(path: Path, config: dict, original_stat: os.stat_result) -> None:
-    fd, temporary_name = tempfile.mkstemp(prefix=".whatsapp-config-", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            yaml.safe_dump(config, stream, sort_keys=False)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chown(temporary, original_stat.st_uid, original_stat.st_gid)
-        os.chmod(temporary, stat.S_IMODE(original_stat.st_mode))
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _load_whatsapp_config(path: Path) -> tuple[dict, os.stat_result]:
-    try:
-        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        original_stat = path.stat()
-    except (OSError, yaml.YAMLError) as exc:
-        raise ProvisionError("Could not read the WhatsApp bridge configuration.") from exc
-    if not isinstance(config, dict):
-        raise ProvisionError("The WhatsApp bridge configuration must be a YAML object.")
-    return config, original_stat
-
-
 def ensure_whatsapp_privacy_config(path: Path) -> bool:
-    """Disable WhatsApp history and eager member sync; keep portals allow-only."""
-    original, original_stat = _load_whatsapp_config(path)
-    config = deepcopy(original)
-    network = config.setdefault("network", {})
-    bridge = config.setdefault("bridge", {})
-    if not isinstance(network, dict) or not isinstance(bridge, dict):
-        raise ProvisionError("The WhatsApp privacy settings have an invalid configuration shape.")
-
-    history_sync = network.setdefault("history_sync", {})
-    if not isinstance(history_sync, dict):
-        raise ProvisionError(
-            "The WhatsApp history sync settings have an invalid configuration shape."
-        )
-    for legacy_history_sync in (
-        config.pop("history_sync", None),
-        bridge.pop("history_sync", None),
-    ):
-        if legacy_history_sync is not None and not isinstance(legacy_history_sync, dict):
-            raise ProvisionError(
-                "The WhatsApp history sync settings have an invalid configuration shape."
-            )
-        if isinstance(legacy_history_sync, dict):
-            for key, value in legacy_history_sync.items():
-                history_sync.setdefault(key, value)
-    history_sync["max_initial_conversations"] = 0
-    history_sync["request_full_sync"] = False
-    network["max_member_sync"] = 0
-
-    portal_filter = bridge.setdefault("portal_create_filter", {})
-    if not isinstance(portal_filter, dict):
-        raise ProvisionError("The WhatsApp portal filter has an invalid configuration shape.")
-    if not isinstance(portal_filter.get("list", []), list):
-        raise ProvisionError("The WhatsApp portal allowlist must be a list.")
-    portal_filter["mode"] = "allow"
-    portal_filter.setdefault("list", [])
-
-    if config == original:
-        return False
-    _write_whatsapp_config(path, config, original_stat)
-    return True
-
-
-def allow_whatsapp_group(path: Path, group_id: str) -> bool:
-    """Add one explicitly selected WhatsApp group to the bridge portal allowlist."""
-    if not WHATSAPP_GROUP_ID_PATTERN.fullmatch(group_id):
-        raise ProvisionError("The WhatsApp group ID is invalid.")
-    ensure_whatsapp_privacy_config(path)
-    config, original_stat = _load_whatsapp_config(path)
-    portal_filter = config["bridge"]["portal_create_filter"]
-    allowed = portal_filter["list"]
-    if group_id in allowed:
-        return False
-    allowed.append(group_id)
-    _write_whatsapp_config(path, config, original_stat)
-    return True
-
-
-def disallow_whatsapp_group(path: Path, group_id: str) -> bool:
-    """Remove one WhatsApp group from the bridge portal allowlist."""
-    if not WHATSAPP_GROUP_ID_PATTERN.fullmatch(group_id):
-        raise ProvisionError("The WhatsApp group ID is invalid.")
-    privacy_changed = ensure_whatsapp_privacy_config(path)
-    config, original_stat = _load_whatsapp_config(path)
-    allowed = config["bridge"]["portal_create_filter"]["list"]
-    if group_id not in allowed:
-        return privacy_changed
-    config["bridge"]["portal_create_filter"]["list"] = [
-        item for item in allowed if item != group_id
-    ]
-    _write_whatsapp_config(path, config, original_stat)
-    return True
+    """Apply the WhatsApp bridge's safeguards; kept for the deployment script."""
+    try:
+        return bridge_config.ensure_safeguards(path, WHATSAPP)
+    except bridge_config.BridgeConfigError as exc:
+        raise ProvisionError(str(exc)) from exc
 
 
 def prepare_whatsapp(

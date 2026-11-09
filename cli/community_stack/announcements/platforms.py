@@ -26,10 +26,10 @@ from community_stack.announcements.adapters.social import (
     MASTODON_MAX_CHARACTERS,
     PIXELFED_MAX_CHARACTERS,
 )
-from community_stack.community import SOCIAL_PLATFORMS
-from community_stack.whatsapp.announcement_forwarder import (
+from community_stack.announcements.adapters.whatsapp import (
     WHATSAPP_MAX_TEXT_LENGTH,
 )
+from community_stack.community import SOCIAL_PLATFORMS
 
 
 class PublicationMode(str, Enum):

@@ -20,12 +20,13 @@ from community_stack.agent import (
     matrix_admin,
     updates,
     vikunja_users,
+    whatsapp_bridge,
 )
 from community_stack.agent import community as community_profile
 from community_stack.agent import safemode as safemode_ops
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
-from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec, supported
+from community_stack.bridges.catalogue import LOGIN_COMMAND, BridgeSpec, supported
 from community_stack.collaborative_apps import COLLABORATIVE_APPS
 from community_stack.config import ConfigError, load_config
 
@@ -277,7 +278,11 @@ def _bridge_call(handler):
 
 
 def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
-    """The console's operations for one bridge; every name is the bridge key, then the action."""
+    """The console's operations for one bridge; every name is the bridge key, then the action.
+
+    Every supported bridge gets the same set. The only network-specific operation is
+    joining a WhatsApp group from an invite link.
+    """
     key = spec.key
     command_pattern = re.compile(
         "|".join(
@@ -286,120 +291,188 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
             + [re.escape(f"{LOGIN_COMMAND} {flow}") for flow in spec.login_flows]
         )
     )
-    room_pattern = matrix_ids.ROOM_ID
-    operations = (
-        Operation(
-            f"bridge.{key}.status",
-            READ,
+    room = Param("room_id", matrix_ids.ROOM_ID, required=True)
+    chat = Param("chat_id", spec.chat_id_pattern, required=True)
+    confirmation = Param("confirmation", re.compile("yes"), required=True)
+
+    def op(action, risk, handler, params=(), summary=""):
+        return Operation(
+            f"bridge.{key}.{action}",
+            risk,
             "system",
-            _bridge_call(lambda context, params: bridges.status(context, spec)),
+            _bridge_call(handler),
+            params=tuple(params),
+            summary=summary,
+        )
+
+    operations = (
+        op(
+            "status",
+            READ,
+            lambda context, params: bridges.status(context, spec),
             summary=f"Whether the {spec.name} bridge is enabled, registered and running.",
         ),
-        Operation(
-            f"bridge.{key}.command",
-            CHANGE,
-            "system",
-            _bridge_call(
-                lambda context, params: bridges.run_command(context, params["command"], spec)
-            ),
-            params=(Param("command", command_pattern, required=True),),
-            summary=f"Send a {spec.name} bridge bot command and show its replies.",
-        ),
-        Operation(
-            f"bridge.{key}.rooms",
+        op(
+            "overview",
             READ,
-            "system",
-            _bridge_call(lambda context, params: {"rooms": bridges.portal_rooms(context, spec)}),
-            summary=f"List the Matrix rooms the {spec.name} bridge created for chats.",
+            lambda context, params: bridges.overview(context, spec),
+            summary=f"{spec.name} rooms, unlinked chats, and links that need repair.",
         ),
-        Operation(
-            f"bridge.{key}.login_state",
+        op(
+            "rooms",
+            READ,
+            lambda context, params: {"rooms": bridges.portal_rooms(context, spec)},
+            summary=f"List the Matrix rooms linked to {spec.name} chats.",
+        ),
+        op(
+            "matrix_rooms",
+            READ,
+            lambda context, params: {"rooms": bridges.matrix_rooms(context, spec)},
+            summary=f"Matrix rooms a {spec.name} {spec.chat_noun} could be linked to.",
+        ),
+        op(
+            "command",
             CHANGE,
-            "system",
-            _bridge_call(lambda context, params: bridges.login_state(context, spec)),
+            lambda context, params: bridges.run_command(context, params["command"], spec),
+            (Param("command", command_pattern, required=True),),
+            f"Send a {spec.name} bridge bot command and show its replies.",
+        ),
+        op(
+            "login_state",
+            CHANGE,
+            lambda context, params: bridges.login_state(context, spec),
             summary=f"Ask the {spec.name} bridge whether an account is linked.",
         ),
-        Operation(
-            f"bridge.{key}.room_relay",
+        op(
+            "command_chat_reset",
             CHANGE,
-            "system",
-            _bridge_call(
-                lambda context, params: bridges.set_room_relay(context, params["room_id"], spec)
-            ),
-            params=(Param("room_id", room_pattern, required=True),),
-            summary=f"Let the linked account relay messages into one bridged {spec.name} room.",
+            lambda context, params: bridges.reset_command_chat(context, spec),
+            summary=f"Open a new command chat with the {spec.name} bot.",
         ),
-        Operation(
-            f"bridge.{key}.room_invite",
+        op(
+            "restart",
             CHANGE,
-            "system",
-            _bridge_call(
-                lambda context, params: bridges.invite_portal_user(
-                    context, params["room_id"], params["user_id"], spec
-                )
+            lambda context, params: bridges.restart_bridge(context, spec),
+            summary=f"Restart the {spec.name} bridge container.",
+        ),
+        op(
+            "chat_allow",
+            CHANGE,
+            lambda context, params: bridges.allow_chat(context, spec, params["chat_id"]),
+            (chat,),
+            f"Let the {spec.name} bridge create a room for one {spec.chat_noun}.",
+        ),
+        op(
+            "chat_disallow",
+            CHANGE,
+            lambda context, params: bridges.disallow_chat(context, spec, params["chat_id"]),
+            (chat,),
+            f"Stop the {spec.name} bridge creating a room for one {spec.chat_noun}.",
+        ),
+        op(
+            "chat_forget",
+            CHANGE,
+            lambda context, params: bridges.forget_chat(
+                context, spec, params["chat_id"], params["confirmation"]
             ),
-            params=(
-                Param("room_id", room_pattern, required=True),
-                Param("user_id", matrix_admin.USER_ID, required=True),
+            (chat, confirmation),
+            f"Delete the record of a {spec.name} {spec.chat_noun} that has no room.",
+        ),
+        op(
+            "room_attach",
+            CHANGE,
+            lambda context, params: bridges.attach_room(
+                context,
+                spec,
+                params["chat_id"],
+                params["room_id"],
+                move=params.get("move") == "yes",
             ),
-            summary=f"Invite a Matrix account to one {spec.name} portal room.",
+            (chat, room, Param("move", re.compile("yes|no"))),
+            f"Link a {spec.name} {spec.chat_noun} to an existing Matrix room.",
+        ),
+        op(
+            "room_create",
+            CHANGE,
+            lambda context, params: bridges.create_room(context, spec, params["chat_id"]),
+            (chat,),
+            f"Create a new Matrix room for a {spec.name} {spec.chat_noun}.",
+        ),
+        op(
+            "room_detach",
+            CHANGE,
+            lambda context, params: bridges.detach_room(
+                context, spec, params["room_id"], params["confirmation"]
+            ),
+            (room, confirmation),
+            f"Unlink a Matrix room from its {spec.name} {spec.chat_noun}, keeping the room.",
+        ),
+        op(
+            "room_delete",
+            CHANGE,
+            lambda context, params: bridges.remove_portal_room(
+                context, params["room_id"], params["confirmation"], spec
+            ),
+            (room, confirmation),
+            f"Delete a {spec.name} room for all its members.",
+        ),
+        op(
+            "room_sync",
+            CHANGE,
+            lambda context, params: bridges.sync_room(context, spec, params["room_id"]),
+            (room,),
+            f"Refresh a room's name, picture and members from {spec.name}.",
+        ),
+        op(
+            "room_relay",
+            CHANGE,
+            lambda context, params: bridges.set_room_relay(
+                context, params["room_id"], spec, enabled=params.get("enabled", "on") == "on"
+            ),
+            (room, Param("enabled", re.compile("on|off"))),
+            f"Turn relaying through the linked account on or off in one {spec.name} room.",
+        ),
+        op(
+            "room_invite",
+            CHANGE,
+            lambda context, params: bridges.invite_portal_user(
+                context, params["room_id"], params["user_id"], spec
+            ),
+            (room, Param("user_id", matrix_admin.USER_ID, required=True)),
+            f"Invite a Matrix account to one {spec.name} room.",
+        ),
+        op(
+            "room_leave",
+            CHANGE,
+            lambda context, params: bridges.leave_room(
+                context, spec, params["room_id"], params["confirmation"]
+            ),
+            (room, confirmation),
+            f"Make the {spec.name} bot leave a room that no chat is linked to.",
+        ),
+        op(
+            "link_repair",
+            CHANGE,
+            lambda context, params: bridges.repair_link(
+                context, spec, params["chat_id"], params["confirmation"]
+            ),
+            (chat, confirmation),
+            f"Forget a {spec.name} link to a room that is gone or that the bot left.",
         ),
     )
-    if key == WHATSAPP.key:
+    if spec.invite_links:
         operations += (
-            Operation(
-                "bridge.whatsapp.group_add",
+            op(
+                "group_add",
                 CHANGE,
-                "system",
-                _bridge_call(
-                    lambda context, params: bridges.add_whatsapp_group(
-                        context, params["invite_link"]
-                    )
+                lambda context, params: whatsapp_bridge.add_group(
+                    context, params["invite_link"], params.get("room_id", "")
                 ),
-                params=(Param("invite_link", bridges.INVITE_LINK_PATTERN, required=True),),
-                summary="Allow and join one WhatsApp group from an invite link.",
-            ),
-            Operation(
-                "bridge.whatsapp.orphan_portal_remove",
-                CHANGE,
-                "system",
-                _bridge_call(
-                    lambda context, params: bridges.remove_orphaned_portal(
-                        context, params["group_id"], params["confirmation"]
-                    )
+                (
+                    Param("invite_link", whatsapp_bridge.INVITE_LINK_PATTERN, required=True),
+                    Param("room_id", matrix_ids.ROOM_ID),
                 ),
-                params=(
-                    Param("group_id", bridges.GROUP_ID_PATTERN, required=True),
-                    Param("confirmation", re.compile("yes"), required=True),
-                ),
-                summary="Remove a saved WhatsApp group record that has no Matrix room.",
-            ),
-            Operation(
-                "bridge.whatsapp.group_disallow",
-                CHANGE,
-                "system",
-                _bridge_call(
-                    lambda context, params: bridges.disallow_whatsapp_group(
-                        context, params["group_id"]
-                    )
-                ),
-                params=(Param("group_id", bridges.GROUP_ID_PATTERN, required=True),),
-                summary="Revoke one WhatsApp group's portal allowlist permission.",
-            ),
-            Operation(
-                "bridge.whatsapp.portal_remove",
-                CHANGE,
-                "system",
-                _bridge_call(
-                    lambda context, params: bridges.remove_portal_room(
-                        context, params["room_id"], params["confirmation"]
-                    )
-                ),
-                params=(
-                    Param("room_id", room_pattern, required=True),
-                    Param("confirmation", re.compile("yes"), required=True),
-                ),
-                summary="Remove a WhatsApp group portal and its Matrix room.",
+                f"Join a {spec.name} group from an invite link and give it a room.",
             ),
         )
     return operations

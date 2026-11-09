@@ -1,138 +1,364 @@
 {% extends "base.html" %}
 {% block title %}{{ spec.name }} bridge{% endblock %}
+{% macro element_link(room_id) -%}
+<a href="/app/#/room/{{ room_id }}{% if matrix_domain %}?via={{ matrix_domain }}{% endif %}" target="_blank" rel="noopener noreferrer">Open in Element</a>
+{%- endmacro %}
+{% macro room_select(name, id, include_new=False) -%}
+<select id="{{ id }}" name="{{ name }}"{% if not include_new %} required{% endif %}>
+  {% if include_new %}<option value="">Create a new room for it</option>{% else %}<option value="" disabled selected>Choose a room…</option>{% endif %}
+  {% for room in candidates %}<option value="{{ room.room_id }}">{{ room.name }} · {{ room.members }} member{{ "" if room.members == 1 else "s" }}{% if room.encrypted %} · encrypted{% endif %}</option>{% endfor %}
+</select>
+{%- endmacro %}
 {% block content %}
-<h1>{{ spec.name }} bridge</h1>
-<p>{{ spec.name }} is an optional bridge, run by the upstream mautrix project. Everything below runs from this page: the server talks to the bridge bot for you.</p>
-{% if spec.experimental %}<p class="notice">Experimental. {{ spec.limitations[0] }}</p>{% endif %}
+{% set base = "/admin/bridges/" ~ spec.key %}
+{% set running = bridge is not none and bridge.container_state == "running" %}
+{% set off = not agent_available or not running %}
+{% set noun = spec.chat_noun %}
+<a class="back-link" href="/admin/bridges">&larr; All bridges</a>
+<div class="page-heading">
+  <div>
+    <h1>{{ spec.name }} bridge</h1>
+    <p class="muted">Links {{ spec.name }} {{ noun }}s to Matrix rooms, in both directions.</p>
+  </div>
+  <div class="actions">
+    {% if bridge %}
+      {{ badge("running", "Running", "success") if running else badge("stopped", "Not running", "danger") }}
+      {% if problems %}<a href="#attention">{{ badge("attention", problems ~ " to check", "warning") }}</a>{% endif %}
+    {% endif %}
+  </div>
+</div>
+{% if spec.experimental %}<p class="notice notice-warning">Experimental. {{ spec.limitations[0] }}</p>{% endif %}
 {% if bridge_error %}<p class="error" role="alert">{{ bridge_error }}</p>{% endif %}
 
-<section class="panel">
-  <h2>Status</h2>
-  {% if not agent_available %}
-  <p>The system agent is not running, so bridge status and linking are unavailable. See docs/operations.md, "Control agent".</p>
-  {% elif bridge %}
-  <ul>
-    <li>Bridge enabled: <strong>{{ "Yes" if bridge.enabled else "No" }}</strong>{% if not bridge.enabled %} — <a href="/admin/services">turn it on under Services</a>.{% endif %}</li>
-    <li>Registered with Matrix: <strong>{{ "Yes" if bridge.registered_with_synapse else "No" }}</strong></li>
-    <li>Container: <strong>{{ bridge.container_state }}</strong></li>
-  </ul>
-  {% if bridge.checks %}
-  <table>
-    <thead><tr><th>Check</th><th>Result</th></tr></thead>
-    <tbody>
-    {% for check in bridge.checks %}
-    <tr>
-      <td>{{ check.message }}{% if check.fix %}<br><span class="muted">{{ check.fix }}</span>{% endif %}</td>
-      <td>{{ badge("ok", "OK", "success") if check.ok else badge("fail", "Needs attention", "error") }}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-  {% endif %}
-</section>
-
-<section class="panel">
-  <h2>1. Link an account</h2>
-  <p>{{ spec.login }}.</p>
-  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
+{% if not agent_available %}
+<div class="panel">
+  <h2>The system agent is not running</h2>
+  <p>Bridges are run by a separate, privileged agent on the server. Ask the person who manages the server to start it; the steps are in docs/operations.md under "Control agent".</p>
+</div>
+{% elif bridge and not bridge.enabled %}
+<p class="notice">The {{ spec.name }} bridge is turned off. Turn it on under <a href="/admin/services">Services and updates</a>; the server creates its credentials and connects it to Matrix.</p>
+{% elif bridge and not running %}
+<div class="notice notice-warning">
+  <p>The {{ spec.name }} bridge is not running. <a href="/admin/health?service={{ spec.service }}">Check its logs</a>, then restart it.</p>
+  <form method="post" action="{{ base }}/restart" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="command" value="login">
-    <button type="submit"{% if not agent_available %} disabled{% endif %}>Ask the bot for login options</button>
+    <button type="submit" class="small">Restart the bridge</button>
   </form>
-  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="command" value="login">
-    <label for="flow-{{ spec.key }}">Login option</label>
-    <input id="flow-{{ spec.key }}" name="flow" type="text" maxlength="32" pattern="[a-z][a-z0-9-]*" placeholder="as listed by the bot" required>
-    <button type="submit"{% if not agent_available %} disabled{% endif %}>Start linking</button>
-  </form>
-  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="command" value="cancel">
-    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Cancel linking</button>
-  </form>
-  <p class="muted">The linked session belongs to the stack's own admin account on Matrix, not to a person.</p>
-</section>
-
-<section class="panel">
-  <h2>2. Check and find chats</h2>
-  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="command" value="list-logins">
-    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Check linked accounts</button>
-  </form>
-  <form method="post" action="/admin/bridges/{{ spec.key }}/command" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="command" value="help">
-    <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>
-  </form>
-  <ul>
-    {% for limitation in spec.limitations %}<li class="muted">{{ limitation }}</li>{% endfor %}
-  </ul>
-</section>
-
-<section class="panel" id="bridged-rooms">
-  <h2>Bridged rooms</h2>
-  {% if rooms %}
-  <p>The bridge bot sends invitations, so the stack admin does not need to join a room to invite Matrix accounts.</p>
-  <table>
-    <thead><tr><th>Name</th><th>Members</th><th>Matrix room</th><th>Invite a Matrix account</th><th>Relay</th></tr></thead>
-    <tbody>
-    {% for room in rooms %}
-    <tr>
-      <td>
-        {{ room.name }}<br>
-        <span class="muted">Stack admin: {{ room.admin_access }}</span>
-        {% if room.access_error %}<br><span class="error" role="alert">{{ room.access_error }}</span>{% endif %}
-      </td>
-      <td>{{ room.members }}</td>
-      <td>
-        <a href="/app/#/room/{{ room.room_id }}?via={{ room.room_id.split(':', 1)[1] }}">Open in Element</a><br>
-        <code>{{ room.room_id }}</code>
-      </td>
-      <td>
-        <form method="post" action="/admin/bridges/{{ spec.key }}/room-invite">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="room_id" value="{{ room.room_id }}">
-          <label for="bridge-mxid-{{ loop.index }}">Matrix user ID</label>
-          <input id="bridge-mxid-{{ loop.index }}" name="user_id" type="text" placeholder="@person:matrix.example.org" autocapitalize="off" spellcheck="false" required>
-          <button type="submit"{% if not agent_available %} disabled{% endif %}>Invite</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="/admin/bridges/{{ spec.key }}/room-relay" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="room_id" value="{{ room.room_id }}">
-          <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Let the linked account relay here</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted">No bridged rooms yet. A room appears after the bridge receives a message from a chat it is allowed to bridge.</p>
-  {% endif %}
-</section>
+</div>
+{% endif %}
 
 {% if replies %}
-<section class="panel" id="bridge-replies">
-  <h2>Bridge bot reply</h2>
+<section class="panel" id="bridge-replies" data-reveal>
+  <h2>The bridge bot answered</h2>
   {% if replies.replies %}
     {% for reply in replies.replies %}
       {% if reply.kind == "image" and reply.image %}
         <p>{{ reply.text }}</p>
         <img src="{{ reply.image }}" alt="{{ spec.name }} linking code" width="280" height="280">
       {% elif reply.kind == "image" %}
-        <p class="muted">The bot sent an image, but it could not be shown here. Check the bridge logs.</p>
+        <p class="muted">The bot sent an image, but it could not be shown here. Check the bridge's logs.</p>
       {% else %}
         <pre>{{ reply.text }}</pre>
       {% endif %}
     {% endfor %}
-  {% else %}
+  {% elif replies.note %}
     <p class="muted">{{ replies.note }}</p>
+  {% else %}
+    <p class="muted">No text reply; the bot acknowledged the command.</p>
   {% endif %}
 </section>
 {% endif %}
+
+{% if overview %}
+<div class="kpis">
+  <div class="kpi"><p class="kpi-label">Linked rooms</p><p class="kpi-value"><a href="#rooms">{{ overview.rooms|length }}</a></p></div>
+  <div class="kpi"><p class="kpi-label">Unlinked {{ noun }}s</p><p class="kpi-value"><a href="#unlinked">{{ overview.chats|length }}</a></p></div>
+  <div class="kpi{% if problems %} kpi-danger{% endif %}"><p class="kpi-label">Needs attention</p><p class="kpi-value"><a href="#attention">{{ problems }}</a></p></div>
+</div>
+{% endif %}
+
+{% if overview and (overview.broken or overview.leftovers) %}
+<section class="card card-flush" id="attention">
+  <div class="card-h"><h2>Needs attention</h2><span class="muted">Fix these, then link the {{ noun }}s again if needed.</span></div>
+  {% for link in overview.broken %}
+  <div class="attn">
+    <span class="dot dot-problem" aria-hidden="true"></span>
+    <div class="attn-body">
+      <p><strong>{{ link.name }}</strong>: {{ link.problem }}</p>
+      <p class="muted">The bridge still links this {{ noun }} to <code>{{ link.room_id }}</code>, so its messages go nowhere. Forget the link, then link the {{ noun }} to a room again under Unlinked {{ noun }}s.</p>
+    </div>
+    <form method="post" action="{{ base }}/link-repair" data-confirm="Forget the link between {{ link.name }} and its missing room? The {{ noun }} then appears under Unlinked {{ noun }}s." data-confirm-label="Forget link">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="chat_id" value="{{ link.chat_id }}">
+      <input type="hidden" name="confirmation" value="yes">
+      <button type="submit" class="small"{% if off %} disabled{% endif %}>Forget link</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% for room in overview.leftovers %}
+  <div class="attn">
+    <span class="dot dot-warning" aria-hidden="true"></span>
+    <div class="attn-body">
+      <p><strong>{{ room.name }}</strong>: the bridge bot is in this room, but no {{ noun }} is linked to it.</p>
+      <p class="muted"><code>{{ room.room_id }}</code> · {{ room.members }} member{{ "" if room.members == 1 else "s" }} · {{ element_link(room.room_id) }}. Usually left over from an earlier link. Link a {{ noun }} to it from Unlinked {{ noun }}s, or let the bot leave.</p>
+    </div>
+    <form method="post" action="{{ base }}/room-leave" data-confirm="Make the bridge bot leave {{ room.name }}? The room and its Matrix members stay." data-confirm-label="Leave room">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="room_id" value="{{ room.room_id }}">
+      <input type="hidden" name="confirmation" value="yes">
+      <button type="submit" class="small secondary"{% if not agent_available %} disabled{% endif %}>Bot leaves</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<div class="section-heading" id="rooms"><h2>Linked rooms</h2></div>
+{% if overview and overview.rooms %}
+<p class="muted">Messages flow both ways between each room and its {{ noun }}. Open a room to invite people, change relay, move it, or unlink it.</p>
+<div class="channel-list">
+  {% for room in overview.rooms %}
+  <section class="channel" id="room-{{ loop.index }}">
+    <details{% if overview.rooms|length == 1 %} open{% endif %}>
+      <summary>
+        <span>
+          <span class="channel-name">{{ room.name }}</span><br>
+          <span class="muted">{{ spec.name }} {{ noun }}: {{ room.chat_name }} · {{ room.members }} member{{ "" if room.members == 1 else "s" }}</span>
+        </span>
+        <span class="channel-state">
+          {{ badge("relay", "Relay on", "success") if room.relay else badge("relay", "Relay off", "warning") }}
+          {% if announce_room == room.room_id %}{{ badge("announce", "Announcements", "info") }}{% endif %}
+          {% if room.encrypted %}{{ badge("encrypted", "Encrypted", "neutral") }}{% endif %}
+        </span>
+      </summary>
+      <div class="channel-body">
+        <dl class="facts">
+          <dt>Matrix room</dt><dd><code>{{ room.room_id }}</code> · {{ element_link(room.room_id) }}</dd>
+          <dt>{{ spec.name }} {{ noun }}</dt><dd><code>{{ room.chat_id }}</code></dd>
+          <dt>Relay</dt><dd>{% if room.relay %}On: messages from Matrix members are sent to {{ spec.name }} through the linked account, with their name.{% else %}Off: only the linked account's own messages reach {{ spec.name }}.{% endif %}</dd>
+        </dl>
+        <div class="account-forms">
+          <form method="post" action="{{ base }}/room-invite">
+            <h3>Invite someone</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            <label for="invite-{{ loop.index }}">Matrix user ID</label>
+            <input id="invite-{{ loop.index }}" name="user_id" type="text" placeholder="@person:{{ matrix_domain or 'matrix.example.org' }}" autocapitalize="off" spellcheck="false" required>
+            <p><button type="submit" class="small"{% if off %} disabled{% endif %}>Invite</button></p>
+          </form>
+          <form method="post" action="{{ base }}/room-relay">
+            <h3>Relay</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            <input type="hidden" name="enabled" value="{{ 'off' if room.relay else 'on' }}">
+            <p class="muted">{% if room.relay %}Stop sending Matrix members' messages to {{ spec.name }}.{% else %}Send Matrix members' messages to {{ spec.name }} through the linked account.{% endif %}</p>
+            <p><button type="submit" class="small{% if room.relay %} secondary{% endif %}"{% if off %} disabled{% endif %}>{{ "Turn relay off" if room.relay else "Turn relay on" }}</button></p>
+          </form>
+          <form method="post" action="{{ base }}/room-sync">
+            <h3>Refresh</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            <p class="muted">Update the room's name, picture and {{ spec.name }} members from the {{ noun }}.</p>
+            <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Refresh from {{ spec.name }}</button></p>
+          </form>
+          {% if spec.key == "whatsapp" %}
+          <form method="post" action="{{ base }}/announce-room">
+            <h3>Announcements</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            {% if announce_room == room.room_id %}
+            <p class="muted">Announcements published to the WhatsApp channel are posted here.</p>
+            {% elif announcements_ready %}
+            <p class="muted">Post announcements published to the WhatsApp channel in this {{ noun }}.</p>
+            <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Use for WhatsApp announcements</button></p>
+            {% else %}
+            <p class="muted">Connect Matrix announcements on the <a href="/admin/channels">Channels</a> page first; WhatsApp forwarding posts with that account.</p>
+            {% endif %}
+          </form>
+          {% endif %}
+          <form method="post" action="{{ base }}/room-attach" data-confirm="Link {{ room.chat_name }} to another room? This room is kept for its Matrix members, but stops receiving {{ spec.name }} messages." data-confirm-label="Move">
+            <h3>Move to another room</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="chat_id" value="{{ room.chat_id }}">
+            <input type="hidden" name="move" value="yes">
+            <label for="move-{{ loop.index }}">Room</label>
+            {{ room_select("room_id", "move-" ~ loop.index) }}
+            <p><button type="submit" class="small secondary"{% if off or not candidates %} disabled{% endif %}>Move</button></p>
+          </form>
+          <form method="post" action="{{ base }}/room-detach" data-confirm="Unlink {{ room.name }} from {{ spec.name }}? The room stays for its Matrix members; {{ spec.name }} members and the bot leave it. The bridge will not create a new room for this {{ noun }}." data-confirm-label="Unlink">
+            <h3>Unlink</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            <input type="hidden" name="confirmation" value="yes">
+            <p class="muted">Stop bridging. The Matrix room and its history stay.</p>
+            <p><button type="submit" class="small secondary danger"{% if off %} disabled{% endif %}>Unlink</button></p>
+          </form>
+          <form method="post" action="{{ base }}/room-delete" data-confirm="Delete {{ room.name }} for everyone? All Matrix members are removed. This cannot be undone." data-confirm-label="Delete room">
+            <h3>Delete room</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="room_id" value="{{ room.room_id }}">
+            <input type="hidden" name="confirmation" value="yes">
+            <p class="muted">Stop bridging and remove every member from the Matrix room.</p>
+            <p><button type="submit" class="small danger"{% if off %} disabled{% endif %}>Delete room</button></p>
+          </form>
+        </div>
+      </div>
+    </details>
+  </section>
+  {% endfor %}
+</div>
+{% elif overview %}
+<div class="empty-state"><p>No rooms are linked yet. Add a {{ noun }} below.</p></div>
+{% else %}
+<div class="empty-state"><p>Rooms are listed once the bridge is turned on and connected to Matrix.</p></div>
+{% endif %}
+
+<div class="section-heading" id="add"><h2>Add a {{ noun }}</h2></div>
+{% if spec.invite_links %}
+<form class="card" method="post" action="{{ base }}/group-add">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="invite-link">{{ spec.name }} group invite link</label>
+  <input id="invite-link" name="invite_link" type="url" placeholder="https://chat.whatsapp.com/..." autocomplete="off" required>
+  <label for="invite-room">Matrix room</label>
+  {{ room_select("room_id", "invite-room", include_new=True) }}
+  <p class="muted">The linked {{ spec.name }} account joins the group. Choose an existing room to bridge the group into it; the bridge bot joins that room and is made a room admin. Only add groups meant for this, and tell their members. The invite link is removed from the bot chat after use; revoke it in {{ spec.name }} if you can.</p>
+  <p><button type="submit"{% if off or not bridge.safeguards_ok %} disabled{% endif %}>Join and link the group</button></p>
+</form>
+{% endif %}
+
+<h3 id="unlinked">Unlinked {{ noun }}s</h3>
+<p class="muted">{{ spec.name }} {{ noun }}s the bridge has seen but that have no Matrix room. The bridge records a {{ noun }} when it receives a message from it.</p>
+{% if overview and overview.chats %}
+<div class="channel-list">
+  {% for chat in overview.chats %}
+  <section class="channel">
+    <details>
+      <summary>
+        <span><span class="channel-name">{{ chat.name }}</span><br><code class="muted">{{ chat.chat_id }}</code></span>
+        <span class="channel-state">{% if chat.allowed %}{{ badge("waiting", "Room on next message", "info") }}{% endif %}</span>
+      </summary>
+      <div class="channel-body">
+        <div class="account-forms">
+          <form method="post" action="{{ base }}/room-attach">
+            <h3>Link to an existing room</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="chat_id" value="{{ chat.chat_id }}">
+            <label for="attach-{{ loop.index }}">Room</label>
+            {{ room_select("room_id", "attach-" ~ loop.index) }}
+            <p><button type="submit" class="small"{% if off or not candidates %} disabled{% endif %}>Link</button></p>
+          </form>
+          <form method="post" action="{{ base }}/room-create">
+            <h3>Create a new room</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="chat_id" value="{{ chat.chat_id }}">
+            <p class="muted">The bridge creates a room named after the {{ noun }} and invites you.</p>
+            <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Create room</button></p>
+          </form>
+          {% if chat.allowed %}
+          <form method="post" action="{{ base }}/chat-disallow">
+            <h3>Waiting for a message</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="chat_id" value="{{ chat.chat_id }}">
+            <p class="muted">The bridge will create a room with this {{ noun }}'s next message.</p>
+            <p><button type="submit" class="small secondary"{% if not agent_available %} disabled{% endif %}>Don't create a room</button></p>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ base }}/chat-forget" data-confirm="Forget the bridge's record of {{ chat.name }}? It reappears if the {{ noun }} sends another message." data-confirm-label="Forget">
+            <h3>Forget</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="chat_id" value="{{ chat.chat_id }}">
+            <input type="hidden" name="confirmation" value="yes">
+            <p class="muted">Remove this record from the bridge. {% if running %}Stop the bridge under Services and updates first.{% endif %}</p>
+            <p><button type="submit" class="small secondary"{% if not agent_available or running %} disabled{% endif %}>Forget record</button></p>
+          </form>
+        </div>
+      </div>
+    </details>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state"><p>No unlinked {{ noun }}s.{% if not spec.invite_links %} Once the linked account receives a message in a {{ noun }}, it appears here.{% endif %}</p></div>
+{% endif %}
+
+<div class="section-heading" id="account"><h2>Linked {{ spec.name }} account</h2></div>
+<section class="panel">
+  <p>{{ spec.login }}. The linked account belongs to the stack's own Matrix admin account, not to a person; every room relays through it.</p>
+  {% if "qr" in spec.login_flows %}
+  <p>Press <strong>Start linking</strong>, then on the phone open {{ spec.name }} &rarr; Settings &rarr; Linked devices &rarr; Link a device, and scan the code shown here. The code expires quickly; start again if it does.</p>
+  <div class="actions">
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="login qr">
+      <button type="submit"{% if off or not bridge.safeguards_ok %} disabled{% endif %}>Start linking</button>
+    </form>
+  {% else %}
+  <div class="actions">
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="login">
+      <button type="submit" class="secondary"{% if off %} disabled{% endif %}>Ask the bot for login options</button>
+    </form>
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="login">
+      <label for="flow">Login option</label>
+      <input id="flow" name="flow" type="text" maxlength="32" pattern="[a-z][a-z0-9-]*" placeholder="as listed by the bot" required>
+      <button type="submit"{% if off %} disabled{% endif %}>Start linking</button>
+    </form>
+  {% endif %}
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="list-logins">
+      <button type="submit" class="secondary"{% if off %} disabled{% endif %}>Check the linked account</button>
+    </form>
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="cancel">
+      <button type="submit" class="secondary"{% if off %} disabled{% endif %}>Cancel linking</button>
+    </form>
+  </div>
+</section>
+
+<div class="section-heading" id="maintenance"><h2>Status and maintenance</h2></div>
+<section class="panel">
+  {% if bridge and bridge.checks %}
+  <details{% if not bridge.healthy %} open{% endif %}>
+  <summary>{% if bridge.healthy %}All {{ bridge.checks|length }} checks pass{% else %}{{ bridge.checks|rejectattr("ok")|list|length }} of {{ bridge.checks|length }} checks need attention{% endif %}</summary>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Check</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for check in bridge.checks %}
+    <tr>
+      <td>{{ check.message }}{% if check.fix %}<br><span class="muted">{{ check.fix }}</span>{% endif %}</td>
+      <td>{{ badge("ok", "OK", "success") if check.ok else badge("fail", "Needs attention", "danger") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  </details>
+  {% endif %}
+  <div class="actions-row">
+    <form method="post" action="{{ base }}/restart" class="inline" data-confirm="Restart the {{ spec.name }} bridge? Messages wait a few seconds and are then delivered." data-confirm-label="Restart">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary"{% if not agent_available or not bridge or not bridge.enabled %} disabled{% endif %}>Restart the bridge</button>
+    </form>
+    <form method="post" action="{{ base }}/command-chat-reset" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary"{% if off %} disabled{% endif %}>Open a new bot chat</button>
+    </form>
+    <form method="post" action="{{ base }}/command" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="command" value="help">
+      <button type="submit" class="secondary"{% if off %} disabled{% endif %}>Show the bot's commands</button>
+    </form>
+    <a class="button-link secondary" href="/admin/health?service={{ spec.service }}">View logs</a>
+  </div>
+  <p class="muted">Use <strong>Open a new bot chat</strong> if the bot stops answering commands from this page. Restarting does not unlink the account or any room.</p>
+  <ul>
+    {% for limitation in spec.limitations %}<li class="muted">{{ limitation }}</li>{% endfor %}
+  </ul>
+</section>
 {% endblock %}

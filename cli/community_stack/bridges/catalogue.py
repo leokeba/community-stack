@@ -8,9 +8,17 @@ installed; deferred entries are blocked on a decision.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 LOGIN_COMMAND = "login"
+
+# WhatsApp group JIDs: a numeric ID, sometimes "<creator phone>-<timestamp>" for older groups.
+WHATSAPP_GROUP_ID = re.compile(r"\d{5,30}(?:-\d{1,15})?@g\.us")
+# Remote chat IDs of the other bridges are opaque: base64 group IDs on Signal, numeric thread
+# IDs on Messenger. Accept those characters only, so an ID can never smuggle in a second
+# bot command argument.
+OPAQUE_CHAT_ID = re.compile(r"[A-Za-z0-9._=+/@:-]{1,200}")
 
 # Commands every bridgev2 bridge answers in its management room, in the order the console
 # offers them. Bridge-specific commands are added per entry.
@@ -18,7 +26,7 @@ GENERIC_COMMANDS: dict[str, str] = {
     "help": "Show the bridge's commands.",
     "list-logins": "Show which accounts are linked.",
     "cancel": "Cancel a linking attempt that is waiting for a scan or code.",
-    "set-relay": "Let the linked account relay messages for people who are not logged in.",
+    "version": "Show the bridge's version.",
     LOGIN_COMMAND: "Ask the bot which login options it offers.",
 }
 
@@ -45,6 +53,18 @@ class BridgeSpec:
     commands: dict[str, str] = field(default_factory=lambda: dict(GENERIC_COMMANDS))
     login_flows: tuple[str, ...] = ()  # fixed flow IDs when they are verified, e.g. ("qr",)
     limitations: tuple[str, ...] = field(default_factory=tuple)
+    # The bridge's SQLite database under data/<service>/; every bridgev2 bridge shares the
+    # same portal schema, which the console reads (never writes) to map chats to rooms.
+    database_file: str = ""
+    chat_noun: str = "chat"  # what one remote conversation is called, shown to people
+    chat_id_pattern: re.Pattern[str] = OPAQUE_CHAT_ID
+    # Settings the bridge must keep in its config.yaml, as (path, value). Applied when the
+    # bridge is provisioned and on deployment, and checked on its console page.
+    required_settings: tuple[tuple[tuple[str, ...], object], ...] = ()
+    invite_links: bool = False  # the bot can join a group from an invite link
+
+    def chat_id_ok(self, chat_id: str) -> bool:
+        return bool(self.chat_id_pattern.fullmatch(chat_id))
 
 
 WHATSAPP = BridgeSpec(
@@ -60,6 +80,16 @@ WHATSAPP = BridgeSpec(
     secret_prefix="WHATSAPP",
     command_prefix="!wa",
     image="dock.mau.dev/mautrix/whatsapp:v26.10",
+    database_file="mautrix-whatsapp.db",
+    chat_noun="group",
+    chat_id_pattern=WHATSAPP_GROUP_ID,
+    # No history backfill, and no eager import of every group member as a Matrix ghost.
+    required_settings=(
+        (("network", "history_sync", "max_initial_conversations"), 0),
+        (("network", "history_sync", "request_full_sync"), False),
+        (("network", "max_member_sync"), 0),
+    ),
+    invite_links=True,
     login="QR code scanned in WhatsApp Linked devices",
     commands={
         **GENERIC_COMMANDS,
@@ -85,6 +115,7 @@ SIGNAL = BridgeSpec(
     registration_file="signal.yaml",
     secret_prefix="SIGNAL",
     command_prefix="!signal",
+    database_file="mautrix-signal.db",
     image="dock.mau.dev/mautrix/signal:v26.10",
     login="Linked as a secondary device; the bot shows the linking code (flow to confirm live)",
     experimental=True,
@@ -107,6 +138,7 @@ MESSENGER = BridgeSpec(
     registration_file="meta.yaml",
     secret_prefix="META",
     command_prefix="!meta",
+    database_file="mautrix-meta.db",
     image="dock.mau.dev/mautrix/meta:v26.10",
     login="Account login through the bot; the login options are listed by the bot",
     experimental=True,

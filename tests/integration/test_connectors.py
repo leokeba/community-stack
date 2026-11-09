@@ -725,19 +725,19 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
     assert "Mirror a room" in mirror_page.text
     assert "not available in the admin UI yet" not in mirror_page.text
 
-    wa_page = client.get("/admin/whatsapp")
+    moved = client.get("/admin/whatsapp")
+    assert moved.headers["location"] == "/admin/bridges/whatsapp"
+    wa_page = client.get("/admin/bridges/whatsapp")
     assert "login qr" in wa_page.text
     assert "Linked devices" in wa_page.text
-    assert "Start QR linking" in wa_page.text
-    assert "Check linked accounts" in wa_page.text
-    assert 'action="/admin/whatsapp/group-add"' in wa_page.text
-    assert "Allow and join this group" in wa_page.text
+    assert "Start linking" in wa_page.text
+    assert "Check the linked account" in wa_page.text
+    assert 'action="/admin/bridges/whatsapp/group-add"' in wa_page.text
+    assert "Join and link the group" in wa_page.text
     route_paths = {route.path for route in app.routes}
-    assert "/admin/whatsapp/group-disallow" in route_paths
-    assert "/admin/whatsapp/orphan-portal-remove" in route_paths
-    assert "/admin/whatsapp/portal-remove" in route_paths
-    assert "/admin/whatsapp/room-invite" in route_paths
-    assert "/admin/bridges/{key}/room-invite" in route_paths
+    assert "/admin/bridges/{key}/{action}" in route_paths
+    assert "/admin/bridges/{key}/announce-room" in route_paths
+    assert not any(path.startswith("/admin/whatsapp/") for path in route_paths)
 
     saved_wa = client.post(
         "/admin/channels/whatsapp/save",

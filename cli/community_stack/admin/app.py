@@ -54,7 +54,6 @@ from community_stack.admin.subscriptions import register_subscriptions
 from community_stack.admin.system import register_system
 from community_stack.admin.templates import register_templates
 from community_stack.admin.vikunja_users import register_vikunja_users
-from community_stack.admin.whatsapp import register_whatsapp
 from community_stack.agent.client import AgentClient, AgentRefused, AgentUnavailable
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.announcements.matrix_mirror import mirror_for
@@ -704,16 +703,6 @@ def create_app(
     )
 
     register_bridges(
-        app,
-        agent=agent,
-        audit=audit,
-        checked_form=checked_form,
-        page=page,
-        render=render,
-        require=require,
-    )
-
-    register_whatsapp(
         app,
         agent=agent,
         audit=audit,

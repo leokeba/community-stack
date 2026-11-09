@@ -1,9 +1,7 @@
-"""Unit tests for WhatsApp announcement adapter and bridge manager."""
+"""Unit tests for the WhatsApp announcement adapter."""
 
-import pytest
+from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
 from community_stack.announcements.models import Announcement
-from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
-from community_stack.whatsapp.bridge_manager import BridgeError, WhatsAppBridgeManager
 
 
 def test_whatsapp_adapter_posts_to_matrix_portal():
@@ -46,69 +44,3 @@ def test_whatsapp_adapter_propagates_matrix_failures():
     assert not result.success
     assert result.retryable
     assert "Homeserver restarting" in (result.error or "")
-
-
-def test_bridge_manager_allowlist(tmp_path):
-    cfg_file = tmp_path / "community-stack.yaml"
-    cfg_file.write_text(
-        """
-project:
-  name: "test"
-  profile: "accessible"
-domain:
-  base: "example.org"
-services:
-  matrix:
-    enabled: true
-  element:
-    enabled: true
-  announcements:
-    enabled: true
-  whatsapp_bridge:
-    enabled: true
-    mode: "selective_bridge"
-    mapped_rooms:
-      - matrix_room_id: "!allowed_room:example.org"
-        whatsapp_chat_jid: "123456@g.us"
-""",
-        encoding="utf-8",
-    )
-
-    manager = WhatsAppBridgeManager(config_path=cfg_file)
-    assert manager.is_enabled() is True
-    assert manager.get_mode() == "selective_bridge"
-    assert manager.is_room_allowlisted("!allowed_room:example.org") is True
-    assert manager.is_room_allowlisted("!secret_room:example.org") is False
-
-
-def test_bridge_manager_emergency_disable(tmp_path):
-    cfg_file = tmp_path / "community-stack.yaml"
-    cfg_file.write_text(
-        """
-project:
-  name: "test"
-  profile: "accessible"
-domain:
-  base: "example.org"
-services:
-  matrix:
-    enabled: true
-  element:
-    enabled: true
-  announcements:
-    enabled: true
-  whatsapp_bridge:
-    enabled: true
-""",
-        encoding="utf-8",
-    )
-
-    manager = WhatsAppBridgeManager(config_path=cfg_file)
-
-    # Without confirmation should raise BridgeError
-    with pytest.raises(BridgeError, match="requires explicit confirmation"):
-        manager.emergency_disable(confirm=False)
-
-    # With confirmation should succeed
-    success = manager.emergency_disable(confirm=True)
-    assert success is True

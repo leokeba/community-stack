@@ -5,10 +5,10 @@ from pathlib import Path
 import yaml
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
+from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
 from community_stack.announcements.models import Announcement
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
-from community_stack.whatsapp.announcement_forwarder import WhatsAppAnnouncementAdapter
 
 
 def test_whatsapp_compose_configuration():
