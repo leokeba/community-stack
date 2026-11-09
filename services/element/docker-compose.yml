@@ -1,6 +1,6 @@
 services:
   element:
-    image: vectorim/element-web:v1.11.70
+    image: vectorim/element-web:v1.12.33
     container_name: community_element
     restart: unless-stopped
     volumes:

@@ -35,7 +35,7 @@ def project(tmp_path, monkeypatch):
     running = {
         "community_synapse": "matrixdotorg/synapse:v1.118.0",
         "community_postgres": "postgres:16-alpine",
-        "community_element": "vectorim/element-web:v1.11.70",
+        "community_element": "vectorim/element-web:v1.12.33",
         "community_proxy": "caddy:2.8.4-alpine",
         "community_landing": "nginx:1.27-alpine",
     }
@@ -56,13 +56,18 @@ def rows(context):
 
 
 def test_versions_compare_running_images_with_release_pins(project):
-    root, _ = project
+    root, running = project
+    running["community_element"] = "vectorim/element-web:v1.11.70"
     components = rows(AgentContext(root))
     assert components["synapse"]["update_available"]
     assert components["synapse"]["release_notes"] == (
         "https://github.com/element-hq/synapse/releases/tag/" + SYNAPSE_PIN.rsplit(":", 1)[1]
     )
-    assert not components["element"]["update_available"]
+    assert components["element"]["update_available"]
+    assert components["element"]["pinned"] == "vectorim/element-web:v1.12.33"
+    assert components["element"]["release_notes"] == (
+        "https://github.com/element-hq/element-web/releases/tag/v1.12.33"
+    )
     assert components["whatsapp_bridge"]["running"] is None
 
 
