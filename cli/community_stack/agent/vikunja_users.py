@@ -6,7 +6,7 @@ import os
 import pty
 import re
 import secrets
-import select
+import selectors
 import subprocess
 import termios
 import time
@@ -52,35 +52,36 @@ def _run_user_create(command: list[str], password: str) -> None:
         finally:
             os.close(slave_fd)
 
-        deadline = time.monotonic() + CLI_TIMEOUT_SECONDS
-        while process.poll() is None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                process.kill()
-                process.wait()
-                raise VikunjaUserError("Vikunja's account command timed out.")
-            readable, _, _ = select.select([master_fd], [], [], min(0.25, remaining))
-            if not readable:
-                continue
-            try:
-                chunk = os.read(master_fd, 4096)
-            except OSError:
-                if process.poll() is not None:
+        with selectors.DefaultSelector() as selector:
+            selector.register(master_fd, selectors.EVENT_READ)
+            deadline = time.monotonic() + CLI_TIMEOUT_SECONDS
+            while process.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    raise VikunjaUserError("Vikunja's account command timed out.")
+                if not selector.select(min(0.25, remaining)):
+                    continue
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    if process.poll() is not None:
+                        break
+                    raise
+                if not chunk:
                     break
-                raise
-            if not chunk:
-                break
-            output.extend(chunk)
-            if len(output) > 8192:
-                trimmed = len(output) - 4096
-                del output[:trimmed]
-                prompt_offset = max(0, prompt_offset - trimmed)
-            for match in PASSWORD_PROMPT.finditer(bytes(output), prompt_offset):
-                if prompts_sent == 2:
-                    break
-                os.write(master_fd, (password + "\n").encode("utf-8"))
-                prompts_sent += 1
-                prompt_offset = match.end()
+                output.extend(chunk)
+                if len(output) > 8192:
+                    trimmed = len(output) - 4096
+                    del output[:trimmed]
+                    prompt_offset = max(0, prompt_offset - trimmed)
+                for match in PASSWORD_PROMPT.finditer(bytes(output), prompt_offset):
+                    if prompts_sent == 2:
+                        break
+                    os.write(master_fd, (password + "\n").encode("utf-8"))
+                    prompts_sent += 1
+                    prompt_offset = match.end()
 
         return_code = process.wait(timeout=5)
     except VikunjaUserError:
