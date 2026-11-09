@@ -185,23 +185,7 @@ def configure_portal(project, *, allowed=True, members=None):
         ),
         encoding="utf-8",
     )
-    (data_dir / "registration.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "whatsapp",
-                "as_token": "appservice-secret",
-                "namespaces": {
-                    "users": [
-                        {
-                            "exclusive": True,
-                            "regex": r"^@whatsappbot:community\.test$",
-                        }
-                    ]
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    (root / ".env").write_text("WHATSAPP_AS_TOKEN=appservice-secret\n", encoding="utf-8")
     with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
         db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
         db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
@@ -550,18 +534,7 @@ def test_generic_bridge_room_discovery_and_invites_use_the_bridge_bot(project):
     data_dir = root / "data" / "signal_bridge"
     data_dir.mkdir(parents=True)
     bot = f"@signalbot:{SERVER}"
-    (data_dir / "registration.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "signal",
-                "as_token": "signal-appservice-secret",
-                "namespaces": {
-                    "users": [{"exclusive": True, "regex": r"^@signalbot:community\.test$"}]
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    (root / ".env").write_text("SIGNAL_AS_TOKEN=signal-appservice-secret\n", encoding="utf-8")
     fake.portal_members = {bot: "join"}
 
     rooms = bridges.portal_rooms(AgentContext(root), SIGNAL)
@@ -646,18 +619,7 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
         ),
         encoding="utf-8",
     )
-    (data_dir / "registration.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "whatsapp",
-                "as_token": "appservice-secret",
-                "namespaces": {
-                    "users": [{"exclusive": True, "regex": r"^@whatsappbot:community\.test$"}]
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    (root / ".env").write_text("WHATSAPP_AS_TOKEN=appservice-secret\n", encoding="utf-8")
     with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
         db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
         db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
