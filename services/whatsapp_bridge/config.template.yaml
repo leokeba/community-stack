@@ -26,12 +26,14 @@ database:
   type: sqlite3-fk-wal
   uri: file:/data/mautrix-whatsapp.db?_txlock=immediate
 
+history_sync:
+  max_initial_conversations: 0
+  request_full_sync: false
+
 bridge:
   personal_filtering_spaces: false
   # Do not create a room and Matrix accounts for every contact or chat on the linked phone.
   # Only chats listed under portal_create_filter are bridged automatically.
-  history_sync:
-    max_initial_conversations: 0
   portal_create_filter:
     mode: allow
     list: []

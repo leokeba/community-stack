@@ -8,7 +8,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import string
+import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -460,6 +463,9 @@ def prepare_bridge(
         bridge_config.write_text(rendered, encoding="utf-8")
         bridge_config.chmod(0o600)
 
+    if spec.key == WHATSAPP.key:
+        ensure_whatsapp_privacy_config(bridge_config)
+
     if not registration_file.is_file():
         compose = yaml.safe_load(
             (services_dir / spec.service / "docker-compose.yml").read_text(encoding="utf-8")
@@ -511,6 +517,76 @@ def prepare_bridge(
     if registered:
         return f"Generated {spec.name} bridge configuration and registered it with Synapse."
     return None
+
+
+def _write_whatsapp_config(path: Path, config: dict, original_stat: os.stat_result) -> None:
+    fd, temporary_name = tempfile.mkstemp(prefix=".whatsapp-config-", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            yaml.safe_dump(config, stream, sort_keys=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, stat.S_IMODE(original_stat.st_mode))
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _load_whatsapp_config(path: Path) -> tuple[dict, os.stat_result]:
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        original_stat = path.stat()
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProvisionError("Could not read the WhatsApp bridge configuration.") from exc
+    if not isinstance(config, dict):
+        raise ProvisionError("The WhatsApp bridge configuration must be a YAML object.")
+    return config, original_stat
+
+
+def ensure_whatsapp_privacy_config(path: Path) -> bool:
+    """Keep WhatsApp history sync disabled and portal creation explicitly allow-only."""
+    original, original_stat = _load_whatsapp_config(path)
+    config = deepcopy(original)
+    history_sync = config.setdefault("history_sync", {})
+    bridge = config.setdefault("bridge", {})
+    if not isinstance(history_sync, dict) or not isinstance(bridge, dict):
+        raise ProvisionError("The WhatsApp privacy settings have an invalid configuration shape.")
+
+    legacy_history_sync = bridge.pop("history_sync", None)
+    if isinstance(legacy_history_sync, dict):
+        for key, value in legacy_history_sync.items():
+            history_sync.setdefault(key, value)
+    history_sync["max_initial_conversations"] = 0
+    history_sync["request_full_sync"] = False
+
+    portal_filter = bridge.setdefault("portal_create_filter", {})
+    if not isinstance(portal_filter, dict):
+        raise ProvisionError("The WhatsApp portal filter has an invalid configuration shape.")
+    if not isinstance(portal_filter.get("list", []), list):
+        raise ProvisionError("The WhatsApp portal allowlist must be a list.")
+    portal_filter["mode"] = "allow"
+    portal_filter.setdefault("list", [])
+
+    if config == original:
+        return False
+    _write_whatsapp_config(path, config, original_stat)
+    return True
+
+
+def allow_whatsapp_group(path: Path, group_id: str) -> bool:
+    """Add one explicitly selected WhatsApp group to the bridge portal allowlist."""
+    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+        raise ProvisionError("The WhatsApp group ID is invalid.")
+    ensure_whatsapp_privacy_config(path)
+    config, original_stat = _load_whatsapp_config(path)
+    portal_filter = config["bridge"]["portal_create_filter"]
+    allowed = portal_filter["list"]
+    if group_id in allowed:
+        return False
+    allowed.append(group_id)
+    _write_whatsapp_config(path, config, original_stat)
+    return True
 
 
 def prepare_whatsapp(

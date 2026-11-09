@@ -14,29 +14,40 @@ containers by hand.
 
 1. **Services**: turn on **WhatsApp bridge** and review the warning. The server
    creates the bridge's private credentials, its configuration and its Matrix
-   registration, then starts the bridge.
-2. **Channels**: connect a dedicated **Matrix announcements** account. It is used to
-   post into the bridged WhatsApp group.
-3. **WhatsApp bridge** page, step 1: press **Start QR linking**. The console asks the
+   registration, then starts the bridge. Initial conversation history sync is
+   disabled and no group is bridged until you explicitly select it.
+2. **WhatsApp bridge** page, step 1: press **Start QR linking**. The console asks the
    bridge bot for a QR code and shows it. On your phone: WhatsApp &rarr; Settings
    &rarr; Linked devices &rarr; Link a device, then scan the code. Codes expire quickly.
-4. Step 2: press **Check linked accounts**. It should list the linked account. Registered
+3. Step 2: press **Check linked accounts**. It should list the linked account. Registered
    and running is not the same as linked, so check this before going on.
-5. Step 2: press **Show bridge commands** to read the bot's own help. Use the bot's
-   instructions to bridge the intended WhatsApp group into a Matrix room, and invite
-   the announcements account to that room.
-6. **Channels**: save the room ID (starts with `!`) as the WhatsApp destination and
-   press **Test connection**. It checks that the announcements account can reach the
-   room; it cannot confirm the phone is still linked.
+4. On the **WhatsApp bridge** page, paste an invite link for the one group you want
+   to bridge and press **Allow and join this group**. The console resolves the group,
+   adds only its ID to the allowlist, and joins it. The invite message is redacted
+   from the bridge command chat after processing; revoke the invite in WhatsApp
+   afterward if possible.
+5. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
+   new portal room ID (starts with `!`) from **Bridged rooms**, save it as the
+   WhatsApp destination and press **Test connection**. Invite the announcements
+   account to the portal room. The test checks Matrix access, not phone linkage.
+6. To publish from an **existing Matrix room** to WhatsApp, open **Mirrored rooms**,
+   add that source room, choose the WhatsApp destination, and select immediate
+   publishing or review. Invite the announcements account to the source room first.
 
-The admin console sends only three bot commands: `help`, `list-logins` and
-`login qr`. Other commands, such as logout, are not available from the console.
+The general command form only sends the allowlisted `help`, `list-logins`,
+`login qr`, and `cancel` commands. Group selection is a separate, validated
+admin operation; invite links are not written to the admin audit log.
 
 ## Two operating models
 
 - **Shared relay (what this page sets up):** the linked session belongs to the
   stack's own admin account (`@community-stack-admin`). It relays the group for the
   community. The phone is a community-owned device, so it must stay charged and online.
+- **Announcements from an existing Matrix room:** this is one-way publishing from
+  the selected Matrix source room to the WhatsApp portal. Messages arriving from
+  WhatsApp appear in the bridge-created portal room, not in the original source room.
+  Two-way chat requires using that portal room; the bridge cannot attach an existing
+  Matrix room directly to a WhatsApp group.
 - **Personal puppeting (not offered here):** a person links their own WhatsApp and
   reaches their chats through their own Matrix account. Do not mix the two in one
   session.
@@ -54,6 +65,8 @@ The admin console sends only three bot commands: `help`, `list-logins` and
   encryption across WhatsApp.
 - Bridging is **bidirectional**: messages in the WhatsApp group also appear in Matrix.
   Tell group members before bridging, and never bridge private coordination rooms.
+- The allowlist and disabled initial sync prevent future bulk contact/conversation
+  creation. They do not remove ghost users or portal rooms created before this fix.
 
 ## Privacy, storage and operations
 
@@ -62,6 +75,7 @@ The admin console sends only three bot commands: `help`, `list-logins` and
   encrypted backups.
 - The console keeps the command chat's room ID in `data/agent/bridges/whatsapp.json`.
   QR images are returned to the administrator who asked for them and are not logged.
+  Group invite messages are redacted from that chat after the bridge replies.
 - To stop the bridge, turn it off on the Services page. Its data and linked session
   are kept so it can start again without pairing. To unlink the phone for good, also
   remove the linked device in WhatsApp under **Settings &rarr; Linked devices**.

@@ -23,7 +23,7 @@ from urllib.parse import quote
 
 import yaml
 
-from community_stack import docker
+from community_stack import docker, provision
 from community_stack.agent import matrix_admin
 from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
 
@@ -40,6 +40,9 @@ JOIN_TIMEOUT_SECONDS = 20.0
 MAX_TEXT_CHARS = 4000
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
 NOT_LINKED_MARKERS = ("not logged in", "no user logins", "no logins")
+INVITE_LINK_PATTERN = re.compile(
+    r"https://chat\.whatsapp\.com/[A-Za-z0-9_-]{10,80}(?:\?[A-Za-z0-9=&_-]+)?"
+)
 # Replaceable in tests.
 _sleep: Callable[[float], None] = time.sleep
 
@@ -162,6 +165,20 @@ def _send(context, room_id: str, text: str) -> str:
     return reply["event_id"]
 
 
+def _redact_command_event(context, room_id: str, event_id: str) -> None:
+    txn = secrets.token_hex(8)
+    path = (
+        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/redact/"
+        f"{quote(event_id, safe='')}/{txn}"
+    )
+    status, _ = _matrix(context, "PUT", path, {"reason": "Remove a WhatsApp invite link"})
+    if status != 200:
+        raise BridgeError(
+            "Synapse could not redact the invite link from the bridge chat. Revoke that "
+            "WhatsApp invite link before trying again."
+        )
+
+
 def _fetch_image(context, mxc: str) -> str | None:
     match = re.fullmatch(r"mxc://([A-Za-z0-9.:_-]+)/([A-Za-z0-9_-]+)", mxc or "")
     if not match:
@@ -217,21 +234,40 @@ def _collect_replies(
     return [_reply_view(context, event, spec) for event in reversed(seen)]
 
 
-def run_command(context, command: str, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
+def run_command(
+    context, command: str, spec: BridgeSpec = WHATSAPP, redact_sensitive: bool = False
+) -> dict[str, Any]:
     """Send one allowlisted command to the bridge bot and return its replies."""
-    if not is_allowed_command(spec, command):
+    sensitive_prefixes = (
+        "resolve-link https://chat.whatsapp.com/",
+        "join https://chat.whatsapp.com/",
+    )
+    sensitive_command = (
+        redact_sensitive
+        and spec.key == WHATSAPP.key
+        and command.startswith(sensitive_prefixes)
+        and bool(INVITE_LINK_PATTERN.fullmatch(command.partition(" ")[2]))
+    )
+    if not is_allowed_command(spec, command) and not sensitive_command:
         raise BridgeError("That command is not available from the console.")
     bot = f"@{spec.bot_localpart}:{_server_name(context)}"
     room_id = ensure_direct_room(context, spec)
-    event_id = _send(context, room_id, command)
-    replies = _collect_replies(context, room_id, event_id, bot, spec)
+
+    def send_and_collect(current_room: str) -> list[dict[str, Any]]:
+        event_id = _send(context, current_room, command)
+        try:
+            return _collect_replies(context, current_room, event_id, bot, spec)
+        finally:
+            if sensitive_command:
+                _redact_command_event(context, current_room, event_id)
+
+    replies = send_and_collect(room_id)
     if replies and NOT_MANAGEMENT_ROOM in replies[0]["text"]:
         # The bridge keeps its own record of the management room; if it was reset, the cached
         # chat is stale. Open a fresh chat once, which the bridge marks as its management room.
         _forget_room(context, spec)
         room_id = ensure_direct_room(context, spec)
-        event_id = _send(context, room_id, command)
-        replies = _collect_replies(context, room_id, event_id, bot, spec)
+        replies = send_and_collect(room_id)
     return {
         "command": command,
         "replies": replies,
@@ -239,6 +275,85 @@ def run_command(context, command: str, spec: BridgeSpec = WHATSAPP) -> dict[str,
         if replies
         else "The bridge bot did not answer. Check that the bridge is running, then try again.",
     }
+
+
+def _restart_bridge(context, spec: BridgeSpec) -> None:
+    result = docker.run_compose(
+        context.services_dir / spec.service,
+        ["restart", spec.service],
+        env_file=context.env_path,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise BridgeError(
+            f"The {spec.name} configuration was updated, but the bridge could not restart. "
+            "Stop it from the Services page until the issue is resolved."
+        )
+    from community_stack.agent import settings
+
+    try:
+        settings.wait_for(context, spec.service, True)
+    except settings.SettingsError as exc:
+        raise BridgeError(
+            f"The {spec.name} bridge did not become healthy after its configuration changed. "
+            "Stop it from the Services page until the issue is resolved."
+        ) from exc
+
+
+def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
+    """Resolve and allow one group, then join it without retaining its invite link."""
+    invite_link = invite_link.strip()
+    if not INVITE_LINK_PATTERN.fullmatch(invite_link):
+        raise BridgeError("Enter a valid WhatsApp group invite link.")
+    if not docker.is_docker_available():
+        raise BridgeError("Docker is unavailable; start the WhatsApp bridge from Services first.")
+    container = next(
+        (
+            item
+            for item in docker.list_community_containers()
+            if item.get("name") == WHATSAPP.container
+        ),
+        None,
+    )
+    if not container or container.get("state") != "running":
+        raise BridgeError("Start the WhatsApp bridge from the Services page first.")
+
+    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    try:
+        privacy_changed = provision.ensure_whatsapp_privacy_config(config_path)
+    except provision.ProvisionError as exc:
+        raise BridgeError(str(exc)) from exc
+    if privacy_changed:
+        _restart_bridge(context, WHATSAPP)
+
+    resolved = run_command(context, f"resolve-link {invite_link}", redact_sensitive=True)
+    resolved_text = "\n".join(
+        reply["text"] for reply in resolved["replies"] if reply["kind"] == "text"
+    )
+    match = re.search(
+        r"That invite link points at (.+?) \(`?(\d{5,30}@g\.us)`?\)", resolved_text
+    )
+    if not match:
+        raise BridgeError("The bridge could not resolve that WhatsApp group invite link.")
+    group_name, group_id = match.groups()
+
+    try:
+        allowlist_changed = provision.allow_whatsapp_group(config_path, group_id)
+    except provision.ProvisionError as exc:
+        raise BridgeError(str(exc)) from exc
+    if allowlist_changed:
+        _restart_bridge(context, WHATSAPP)
+
+    joined = run_command(context, f"join {invite_link}", redact_sensitive=True)
+    joined_text = "\n".join(
+        reply["text"] for reply in joined["replies"] if reply["kind"] == "text"
+    )
+    if f"Successfully joined group `{group_id}`" not in joined_text:
+        raise BridgeError(
+            f"{group_name} is allowlisted, but the bridge did not confirm joining it. "
+            "Check the bridge status and retry."
+        )
+    return {"group_id": group_id, "name": group_name}
 
 
 def _synapse_started_at() -> datetime | None:
@@ -300,6 +415,30 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         "Bridge configuration exists." if has_config else "Bridge configuration is missing.",
         f"Turn {spec.name} off and on again to regenerate it.",
     )
+    if spec.key == WHATSAPP.key and has_config:
+        try:
+            bridge_config = yaml.safe_load(
+                (data_dir / "config.yaml").read_text(encoding="utf-8")
+            ) or {}
+            history_sync = bridge_config.get("history_sync", {})
+            bridge_settings = bridge_config.get("bridge", {})
+            portal_filter = bridge_settings.get("portal_create_filter", {})
+            privacy_ok = (
+                history_sync.get("max_initial_conversations") == 0
+                and history_sync.get("request_full_sync") is False
+                and portal_filter.get("mode") == "allow"
+                and isinstance(portal_filter.get("list"), list)
+            )
+        except (OSError, AttributeError, yaml.YAMLError):
+            privacy_ok = False
+        add(
+            "privacy_guard",
+            privacy_ok,
+            "Initial history sync is disabled and portal creation is allow-only."
+            if privacy_ok
+            else "WhatsApp contact and history sync safeguards are not applied.",
+            "Keep the bridge stopped, then turn it off and on from Services to apply the safeguards.",
+        )
     has_registration = (data_dir / "registration.yaml").is_file()
     add(
         "bridge_registration",
@@ -415,12 +554,25 @@ def status(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     checks = diagnose(context, spec)
     by_id = {check["id"]: check for check in checks}
     container = by_id["container"]
+    allowed_groups: list[str] = []
+    if spec.key == WHATSAPP.key:
+        config_path = context.project_dir / "data" / spec.service / "config.yaml"
+        if config_path.is_file():
+            try:
+                config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError) as exc:
+                raise BridgeError("Could not read the WhatsApp bridge configuration.") from exc
+            allowed = config.get("bridge", {}).get("portal_create_filter", {}).get("list", [])
+            if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
+                raise BridgeError("The WhatsApp bridge portal allowlist is invalid.")
+            allowed_groups = allowed
     return {
         "enabled": by_id["enabled"]["ok"],
         "registered_with_synapse": by_id["synapse_registered"]["ok"],
         "container_state": "running" if container["ok"] else "not running",
         "container_status": "",
         "command_chat_created": _load_room(context, spec) is not None,
+        "allowed_groups": allowed_groups,
         "commands": dict(spec.commands),
         "checks": checks,
         "healthy": all(check["ok"] for check in checks),

@@ -50,6 +50,12 @@ def test_prepare_whatsapp_provisions_secrets_config_and_synapse_registration(tmp
         ]
         == "matrix.community.test"
     )
+    bridge_config = yaml.safe_load(
+        (root / "data/whatsapp_bridge/config.yaml").read_text(encoding="utf-8")
+    )
+    assert bridge_config["history_sync"]["max_initial_conversations"] == 0
+    assert bridge_config["history_sync"]["request_full_sync"] is False
+    assert bridge_config["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
     registrations = yaml.safe_load(homeserver_path.read_text())["app_service_config_files"]
     assert registrations == [
         "/data/appservices/existing.yaml",
@@ -62,6 +68,62 @@ def test_prepare_whatsapp_provisions_secrets_config_and_synapse_registration(tmp
 
     assert provision.prepare_whatsapp(root, config, env_path, Path("services")) is None
     assert len(calls) == 3
+
+
+def test_prepare_whatsapp_migrates_existing_config_without_losing_allowlist(tmp_path, monkeypatch):
+    root = tmp_path / "stack"
+    bridge_dir = root / "data" / "whatsapp_bridge"
+    bridge_dir.mkdir(parents=True)
+    bridge_config_path = bridge_dir / "config.yaml"
+    bridge_config_path.write_text(
+        yaml.safe_dump(
+            {
+                "homeserver": {"domain": "community.test"},
+                "bridge": {
+                    "history_sync": {"max_initial_conversations": 0},
+                    "portal_create_filter": {
+                        "mode": "allow",
+                        "list": ["123456789@g.us"],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env_path = root / ".env"
+    env_path.write_text(
+        "WHATSAPP_AS_TOKEN=existing-as-token\nWHATSAPP_HS_TOKEN=existing-hs-token\n",
+        encoding="utf-8",
+    )
+    config = yaml.safe_load(Path("config/example.yaml").read_text(encoding="utf-8"))
+    config["domain"]["matrix"] = "community.test"
+    matrix_dir = root / "data" / "matrix"
+    matrix_dir.mkdir(parents=True)
+    homeserver_path = matrix_dir / "homeserver.yaml"
+    homeserver_path.write_text(
+        "server_name: community.test\napp_service_config_files:\n  - /data/appservices/whatsapp.yaml\n",
+        encoding="utf-8",
+    )
+    (bridge_dir / "registration.yaml").write_text(
+        "id: whatsapp\nas_token: generated-as-token\nhs_token: generated-hs-token\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        provision.docker,
+        "run_container",
+        lambda args: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    provision.prepare_whatsapp(root, config, env_path, Path("services"))
+
+    migrated = yaml.safe_load(bridge_config_path.read_text(encoding="utf-8"))
+    assert migrated["history_sync"]["max_initial_conversations"] == 0
+    assert migrated["history_sync"]["request_full_sync"] is False
+    assert "history_sync" not in migrated["bridge"]
+    assert migrated["bridge"]["portal_create_filter"] == {
+        "mode": "allow",
+        "list": ["123456789@g.us"],
+    }
 
 
 def test_prepare_whatsapp_requires_matrix_and_does_not_replace_existing_bridge_data(tmp_path):

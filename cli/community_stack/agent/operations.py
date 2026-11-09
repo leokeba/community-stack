@@ -25,7 +25,7 @@ from community_stack.agent import community as community_profile
 from community_stack.agent import safemode as safemode_ops
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
-from community_stack.bridges.catalogue import LOGIN_COMMAND, BridgeSpec, supported
+from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec, supported
 from community_stack.collaborative_apps import COLLABORATIVE_APPS
 from community_stack.config import ConfigError, load_config
 
@@ -287,7 +287,7 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
         )
     )
     room_pattern = re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}")
-    return (
+    operations = (
         Operation(
             f"bridge.{key}.status",
             READ,
@@ -330,6 +330,22 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
             summary=f"Let the linked account relay messages into one bridged {spec.name} room.",
         ),
     )
+    if key == WHATSAPP.key:
+        operations += (
+            Operation(
+                "bridge.whatsapp.group_add",
+                CHANGE,
+                "system",
+                _bridge_call(
+                    lambda context, params: bridges.add_whatsapp_group(
+                        context, params["invite_link"]
+                    )
+                ),
+                params=(Param("invite_link", bridges.INVITE_LINK_PATTERN, required=True),),
+                summary="Allow and join one WhatsApp group from an invite link.",
+            ),
+        )
+    return operations
 
 
 BRIDGE_OPERATIONS: tuple[Operation, ...] = tuple(

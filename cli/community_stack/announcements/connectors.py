@@ -497,7 +497,7 @@ CONNECTORS: dict[str, ConnectorType] = {
             steps=(
                 "Enable the WhatsApp bridge on the Services page and complete its safety confirmation.",
                 "Open the WhatsApp bridge bot in Element and send `login qr`; scan it from WhatsApp > Linked devices.",
-                "Bridge one chosen WhatsApp group to a Matrix portal room using the bridge bot's help. Bridging is bidirectional, so use a group intended for public announcements.",
+                "On the WhatsApp Bridge page, add only a group intended for public announcements. The selected group is joined and its invite link is redacted after processing.",
                 "Enter that portal room's Matrix room ID below. Only announcements published to this channel are sent there.",
             ),
             fields=(

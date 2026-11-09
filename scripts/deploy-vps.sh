@@ -136,6 +136,38 @@ config = load_config(root / "community-stack.yaml")
 prepare_vikunja(root, config, root / ".env")
 prepare_facilmap(root, config, root / ".env")
 PY
+# Keep the bridge from syncing while its persistent config is migrated. The
+# helper preserves the existing login, secrets, and explicitly selected groups.
+if bridge_state="$(sudo -n docker inspect community_whatsapp_bridge \
+    --format '{{.State.Status}}' 2>/dev/null)"; then
+    if [[ "$bridge_state" == running ]]; then
+        sudo -n docker stop community_whatsapp_bridge >/dev/null
+    fi
+else
+    container_names="$(sudo -n docker container ls -a --format '{{.Names}}')"
+    if printf '%s\n' "$container_names" | grep -Fxq community_whatsapp_bridge; then
+        printf 'Could not inspect the existing WhatsApp bridge container.\n' >&2
+        exit 1
+    fi
+fi
+sudo -n -u community "$project_dir/.venv/bin/python" - "$project_dir" <<'PY'
+from pathlib import Path
+import sys
+
+from community_stack.provision import ensure_whatsapp_privacy_config
+
+config = Path(sys.argv[1]) / "data/whatsapp_bridge/config.yaml"
+if config.is_file():
+    ensure_whatsapp_privacy_config(config)
+PY
+if [[ -n "${bridge_state:-}" ]]; then
+    bridge_state="$(sudo -n docker inspect community_whatsapp_bridge \
+        --format '{{.State.Status}}')"
+    if [[ "$bridge_state" == running ]]; then
+        printf 'WhatsApp bridge is still running after its privacy migration.\n' >&2
+        exit 1
+    fi
+fi
 # The announcements container runs as the UID/GID in .env (COMMUNITY_STACK_UID/GID), which
 # is not always 1000. Read only those two numbers, and give the contact page folder that
 # owner before Docker can create it as root.

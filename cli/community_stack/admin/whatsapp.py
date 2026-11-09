@@ -170,3 +170,37 @@ def register_whatsapp(
             flash(f"WhatsApp bridge: sent '{command}'."),
             replies=result,
         )
+
+    @app.post("/admin/whatsapp/group-add")
+    async def whatsapp_group_add(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        try:
+            result = await run_in_threadpool(
+                agent.call,
+                "bridge.whatsapp.group_add",
+                session["username"],
+                {"invite_link": form.get("invite_link", "").strip()},
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.group_add",
+                "WhatsApp invite link",
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request, session, flash(f"WhatsApp group setup: {exc}", "error"), status_code=400
+            )
+        audit(
+            request,
+            session["username"],
+            "bridge.whatsapp.group_add",
+            result.get("group_id", "WhatsApp group"),
+            outcome="succeeded",
+        )
+        return await whatsapp_page(
+            request,
+            session,
+            flash(f"WhatsApp group '{result['name']}' was added and joined."),
+        )

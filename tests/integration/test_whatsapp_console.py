@@ -5,6 +5,7 @@ import json
 from urllib.parse import unquote
 
 import pytest
+import yaml
 from community_stack import docker
 from community_stack.admin.store import AdminStore
 from community_stack.agent import bridges, matrix_admin, updates
@@ -39,19 +40,42 @@ class FakeMatrix:
             return (200, {"name": "Neighbours"}) if PORTAL in unquote(path) else (404, {})
         if path.endswith("/joined_members"):
             return 200, {"joined": {BOT: {}, f"@community-stack-admin:{SERVER}": {}}}
+        if "/redact/" in path:
+            event_id = unquote(path.split("/redact/", 1)[1].split("/", 1)[0])
+            for event in self.events:
+                if event["event_id"] == event_id:
+                    event["content"] = {"msgtype": "m.room.message"}
+            return 200, {"event_id": event_id}
         if "/send/m.room.message/" in path:
             self.counter += 1
-            self._add(
-                f"@community-stack-admin:{SERVER}", {"msgtype": "m.text", "body": body["body"]}
+            command = body["body"]
+            command_event = self._add(
+                f"@community-stack-admin:{SERVER}", {"msgtype": "m.text", "body": command}
             )
-            if body["body"] == "login qr" and self.bot_answers:
+            if command == "login qr" and self.bot_answers:
                 self._add(
                     BOT, {"msgtype": "m.image", "body": "qr.png", "url": f"mxc://{SERVER}/qr1"}
                 )
                 self._add(BOT, {"msgtype": "m.text", "body": "Scan within 60 seconds."})
+            elif command.startswith("resolve-link ") and self.bot_answers:
+                self._add(
+                    BOT,
+                    {
+                        "msgtype": "m.text",
+                        "body": "That invite link points at Announcements (`123456789@g.us`)",
+                    },
+                )
+            elif command.startswith("join ") and self.bot_answers:
+                self._add(
+                    BOT,
+                    {
+                        "msgtype": "m.text",
+                        "body": "Successfully joined group `123456789@g.us`, the portal should be created momentarily",
+                    },
+                )
             elif self.bot_answers:
-                self._add(BOT, {"msgtype": "m.text", "body": f"help for {body['body']}"})
-            return 200, {"event_id": f"$cmd{self.counter}"}
+                self._add(BOT, {"msgtype": "m.text", "body": f"help for {command}"})
+            return 200, {"event_id": command_event}
         if "/messages?" in path:
             chunk = [dict(event) for event in reversed(self.events)]
             return 200, {"chunk": chunk}
@@ -59,14 +83,14 @@ class FakeMatrix:
 
     def _add(self, sender, content):
         self.counter += 1
-        self.events.append(
-            {
-                "event_id": f"$e{self.counter}",
-                "sender": sender,
-                "type": "m.room.message",
-                "content": content,
-            }
-        )
+        event = {
+            "event_id": f"$e{self.counter}",
+            "sender": sender,
+            "type": "m.room.message",
+            "content": content,
+        }
+        self.events.append(event)
+        return event["event_id"]
 
 
 @pytest.fixture
@@ -325,6 +349,74 @@ def test_the_agent_lists_bridged_rooms_for_an_admin(project):
     assert reply["result"]["rooms"][0]["room_id"] == PORTAL
 
 
+def test_group_setup_is_a_validated_admin_operation(project, monkeypatch):
+    root, fake = project
+    invite = "https://chat.whatsapp.com/abcdefghijklmnopqrstuv"
+    monkeypatch.setattr(
+        bridges,
+        "add_whatsapp_group",
+        lambda context, invite_link: {"group_id": "123456789@g.us", "name": "Announcements"},
+    )
+    service = AgentService(AgentContext(root))
+
+    reply = service.handle(
+        {
+            "op": "bridge.whatsapp.group_add",
+            "actor": "olga",
+            "params": {"invite_link": invite},
+        }
+    )
+    refused = service.handle(
+        {
+            "op": "bridge.whatsapp.group_add",
+            "actor": "olga",
+            "params": {"invite_link": "https://example.com/not-a-wa-link"},
+        }
+    )
+
+    assert reply["ok"] is True
+    assert reply["result"] == {"group_id": "123456789@g.us", "name": "Announcements"}
+    assert invite not in json.dumps(reply)
+    assert refused["ok"] is False
+    assert fake.calls == []
+
+
+def test_adding_a_whatsapp_group_allows_only_that_group_and_redacts_the_invite(project, monkeypatch):
+    root, fake = project
+    config_path = root / "data" / "whatsapp_bridge" / "config.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "history_sync": {
+                    "max_initial_conversations": 0,
+                    "request_full_sync": False,
+                },
+                "bridge": {"portal_create_filter": {"mode": "allow", "list": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(
+        docker,
+        "list_community_containers",
+        lambda: [{"name": "community_whatsapp_bridge", "state": "running"}],
+    )
+    monkeypatch.setattr(bridges, "_restart_bridge", lambda context, spec: None)
+    monkeypatch.setattr(bridges, "_sleep", lambda seconds: None)
+    monkeypatch.setattr(bridges, "REPLY_QUIET_SECONDS", 0.0)
+
+    invite = "https://chat.whatsapp.com/abcdefghijklmnopqrstuv"
+    result = bridges.add_whatsapp_group(AgentContext(root), invite)
+
+    assert result == {"group_id": "123456789@g.us", "name": "Announcements"}
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["bridge"]["portal_create_filter"]["list"] == ["123456789@g.us"]
+    assert invite not in str(fake.events)
+    assert any("/redact/" in path for _, path in fake.calls)
+
+
 def test_the_template_enables_shared_relay_for_admins_only():
     from pathlib import Path
 
@@ -344,7 +436,9 @@ def test_the_template_bridges_no_chats_until_they_are_listed():
     template = yaml.safe_load(
         Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
     )
-    assert template["bridge"]["history_sync"]["max_initial_conversations"] == 0
+    assert template["history_sync"]["max_initial_conversations"] == 0
+    assert template["history_sync"]["request_full_sync"] is False
+    assert "history_sync" not in template["bridge"]
     assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
 
 

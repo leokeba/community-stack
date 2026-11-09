@@ -52,7 +52,20 @@
 </section>
 
 <section class="panel">
-  <h2>2. Check and find groups</h2>
+  <h2>2. Choose a WhatsApp group</h2>
+  <p>Only add a group intended for public announcements. This joins the linked WhatsApp account to the group and creates its Matrix portal. The invite link is removed from the bridge command chat after processing; revoke it in WhatsApp after use if possible.</p>
+  <form method="post" action="/admin/whatsapp/group-add">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="whatsapp-invite-link">WhatsApp group invite link</label>
+    <input id="whatsapp-invite-link" name="invite_link" type="url" placeholder="https://chat.whatsapp.com/..." required>
+    <p><button type="submit"{% if not agent_available or not bridge or bridge.container_state != "running" %} disabled{% endif %}>Allow and join this group</button></p>
+  </form>
+  {% if bridge and bridge.allowed_groups %}
+  <p>Groups explicitly allowed for bridging:</p>
+  <ul>{% for group_id in bridge.allowed_groups %}<li><code>{{ group_id }}</code></li>{% endfor %}</ul>
+  {% else %}
+  <p class="muted">No WhatsApp groups are allowed yet. Contact syncing and initial history sync are disabled.</p>
+  {% endif %}
   <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="command" value="list-logins">
@@ -63,7 +76,7 @@
     <input type="hidden" name="command" value="help">
     <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>
   </form>
-  <p>To bridge a WhatsApp group into a Matrix room, follow the bot's own instructions from <em>Show bridge commands</em> in the command chat. Then save the room on the <a href="/admin/channels">Channels page</a>, with the announcements account as a member.</p>
+  <p>After adding a group, copy its Matrix room ID from the <strong>Bridged rooms</strong> table below. Save it as the WhatsApp destination on the <a href="/admin/channels">Channels page</a>, then invite the announcements account to the portal room.</p>
   <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group also appear in Matrix. Only bridge a group intended for this purpose, and tell its members first. Bridged messages are readable by the server operator, so do not claim end-to-end encryption across WhatsApp.</p>
 </section>
 
@@ -89,7 +102,7 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No bridged rooms yet. WhatsApp creates a room for a group after the bridge receives a message from it. Ask someone in the group to send a message, then reload this page.</p>
+  <p class="muted">No bridged rooms yet. Add a group above; the bridge will create its Matrix portal when it joins.</p>
   {% endif %}
 </section>
 
