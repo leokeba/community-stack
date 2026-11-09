@@ -354,7 +354,7 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
                     )
                 ),
                 params=(
-                    Param("group_id", re.compile(r"\d{5,30}@g\.us"), required=True),
+                    Param("group_id", bridges.GROUP_ID_PATTERN, required=True),
                     Param("confirmation", re.compile("yes"), required=True),
                 ),
                 summary="Remove a saved WhatsApp group record that has no Matrix room.",
@@ -368,7 +368,7 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
                         context, params["group_id"]
                     )
                 ),
-                params=(Param("group_id", re.compile(r"\d{5,30}@g\.us"), required=True),),
+                params=(Param("group_id", bridges.GROUP_ID_PATTERN, required=True),),
                 summary="Revoke one WhatsApp group's portal allowlist permission.",
             ),
             Operation(

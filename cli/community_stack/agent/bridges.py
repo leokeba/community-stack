@@ -29,6 +29,7 @@ from community_stack.agent import matrix_admin
 from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
 
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
+GROUP_ID_PATTERN = provision.WHATSAPP_GROUP_ID_PATTERN
 COMMANDS: dict[str, str] = dict(WHATSAPP.commands)
 COMMAND_PATTERN = re.compile("|".join(re.escape(command) for command in COMMANDS))
 # A login flow named by the bot, for bridges whose flows are not fixed in the catalogue.
@@ -331,7 +332,9 @@ def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
     resolved_text = "\n".join(
         reply["text"] for reply in resolved["replies"] if reply["kind"] == "text"
     )
-    match = re.search(r"That invite link points at (.+?) \(`?(\d{5,30}@g\.us)`?\)", resolved_text)
+    match = re.search(
+        rf"That invite link points at (.+?) \(`?({GROUP_ID_PATTERN.pattern})`?\)", resolved_text
+    )
     if not match:
         raise BridgeError("The bridge could not resolve that WhatsApp group invite link.")
     group_name, group_id = match.groups()
@@ -355,7 +358,7 @@ def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
 
 def disallow_whatsapp_group(context, group_id: str) -> dict[str, bool]:
     """Revoke one group's permission and reload the running bridge if needed."""
-    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+    if not GROUP_ID_PATTERN.fullmatch(group_id):
         raise BridgeError("The WhatsApp group ID is invalid.")
     if not docker.is_docker_available():
         raise BridgeError("Docker is unavailable; cannot safely apply the group permission change.")
@@ -565,7 +568,7 @@ def orphaned_portals(context) -> list[dict[str, str]]:
             else "WhatsApp group without a Matrix room",
         }
         for group_id, name in rows
-        if re.fullmatch(r"\d{5,30}@g\.us", group_id)
+        if GROUP_ID_PATTERN.fullmatch(group_id)
     ]
 
 
@@ -573,7 +576,7 @@ def remove_orphaned_portal(context, group_id: str, confirmation: str) -> dict[st
     """Remove a saved group record only when it has no Matrix room and the bridge is stopped."""
     if confirmation != "yes":
         raise BridgeError("Confirm removal of this saved group record.")
-    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+    if not GROUP_ID_PATTERN.fullmatch(group_id):
         raise BridgeError("That saved WhatsApp group record is invalid.")
     if not docker.is_docker_available():
         raise BridgeError(
@@ -639,7 +642,7 @@ def remove_portal_room(context, room_id: str, confirmation: str) -> dict[str, st
             ).fetchone()
     except sqlite3.Error as exc:
         raise BridgeError("Could not identify the WhatsApp group for this room.") from exc
-    if not row or not re.fullmatch(r"\d{5,30}@g\.us", row[0]):
+    if not row or not GROUP_ID_PATTERN.fullmatch(row[0]):
         raise BridgeError("Could not safely identify the WhatsApp group for this room.")
 
     group_id = row[0]

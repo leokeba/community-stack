@@ -25,6 +25,7 @@ from community_stack.secrets import generate_secret, parse_env_file
 SYNAPSE_UID = 991
 # Bridges provisioned by the generic path. Each one is off unless enabled in the configuration.
 BRIDGE_SPECS: tuple[BridgeSpec, ...] = (WHATSAPP, SIGNAL, MESSENGER)
+WHATSAPP_GROUP_ID_PATTERN = re.compile(r"\d{5,30}(?:-\d{1,15})?@g\.us")
 LOG_CONFIG = """version: 1
 formatters:
   precise:
@@ -590,7 +591,7 @@ def ensure_whatsapp_privacy_config(path: Path) -> bool:
 
 def allow_whatsapp_group(path: Path, group_id: str) -> bool:
     """Add one explicitly selected WhatsApp group to the bridge portal allowlist."""
-    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+    if not WHATSAPP_GROUP_ID_PATTERN.fullmatch(group_id):
         raise ProvisionError("The WhatsApp group ID is invalid.")
     ensure_whatsapp_privacy_config(path)
     config, original_stat = _load_whatsapp_config(path)
@@ -605,7 +606,7 @@ def allow_whatsapp_group(path: Path, group_id: str) -> bool:
 
 def disallow_whatsapp_group(path: Path, group_id: str) -> bool:
     """Remove one WhatsApp group from the bridge portal allowlist."""
-    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+    if not WHATSAPP_GROUP_ID_PATTERN.fullmatch(group_id):
         raise ProvisionError("The WhatsApp group ID is invalid.")
     privacy_changed = ensure_whatsapp_privacy_config(path)
     config, original_stat = _load_whatsapp_config(path)

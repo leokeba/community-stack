@@ -375,7 +375,7 @@ def test_stale_group_portals_can_be_removed_only_while_bridge_is_stopped(project
     data_dir = root / "data" / "whatsapp_bridge"
     data_dir.mkdir(parents=True)
     config_path = data_dir / "config.yaml"
-    group_id = "123456789@g.us"
+    group_id = "123456789-12345@g.us"
     config_path.write_text(
         yaml.safe_dump(
             {
