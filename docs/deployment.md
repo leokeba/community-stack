@@ -175,7 +175,7 @@ announcement archive remains unauthenticated at `/feed/announcements.html`.
 The app's SQLite database is mounted from `data/announcements`; generated public
 files are shared read-only with the landing service from `data/landing/feed`.
 
-The contact page (`/connect`) is shared the same way from `data/landing/connect`. `scripts/deploy-vps.sh` creates that folder with the owner the announcements container needs (UID 1000), recreates the landing service so it attaches the folder, and renders the page once the announcements container is healthy. The page is rebuilt after every delivery and profile change.
+The contact page (`/connect`) is shared the same way from `data/landing/connect`. `scripts/deploy-vps.sh` creates that folder with the owner the announcements container needs (`COMMUNITY_STACK_UID`/`GID` from `.env`; the `community` account on servers set up with `scripts/bootstrap.sh`), recreates the landing service so it attaches the folder, and renders the page once the announcements container is healthy. The page is rebuilt after every delivery and profile change.
 
 Upload the community logo and optional cover image from **Admin → Community
 profile**. Uploads accept raster images up to 2 MB; the app re-encodes them to
@@ -305,6 +305,29 @@ SSH key, Docker socket, or deployment shell access.
 The announcement database schema is migrated additively at application startup.
 Public files are rebuildable from SQLite and are regenerated after publication,
 withdrawal, or re-enabling the web-feed destination.
+
+### Accounts and file ownership on the server
+
+`scripts/bootstrap.sh` creates a dedicated system account, `community`, and
+the stack is split across three identities:
+
+| Identity | Runs | Owns |
+| --- | --- | --- |
+| `community` (system account; UID/GID recorded as `COMMUNITY_STACK_UID`/`GID` in `.env`) | the announcements and admin console container | `/opt/community-stack`, its source tree, `.venv`, `.env` and `data/announcements` |
+| `root` (systemd) | the control agent (`community-stack-agent.service`) and Docker | `data/agent`; it hands the console a socket in `data/agent/run`, readable only by the `community` group |
+| your SSH login (for example `debian`) | nothing | nothing in the stack |
+
+The SSH login is deliberately **not** in the `docker` group, because that group
+is equivalent to root without any audit trail. Use `sudo -n docker …` for
+containers and `sudo -n -u community …` for files and the CLI, as
+`scripts/deploy-vps.sh` does.
+
+`/opt/community-stack` itself is mode `0700`. That keeps other local accounts
+out of service data whose own permissions are wider, such as the
+subscriber database under `data/announcements`, which the container creates
+world-readable. Deployment sets this mode explicitly on every run. Containers
+are not affected: Docker resolves bind mounts as root, and each service then
+needs access only to its own data folder.
 
 ---
 

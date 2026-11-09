@@ -96,6 +96,9 @@ REMOTE
 stage="$(mktemp -d "${TMPDIR:-/tmp}/community-stack-deploy.XXXXXX")"
 trap 'rm -rf -- "$stage"' EXIT
 git archive --format=tar "$commit" | tar -xf - -C "$stage"
+# rsync -a copies this folder's mode onto the remote project directory. Keep it
+# 0700 on purpose: see "Accounts and file ownership" in docs/deployment.md.
+chmod 0700 "$stage"
 
 printf 'Transferring committed source while preserving production config and data...\n'
 rsync -a -e "ssh ${ssh_opts[*]}" \
