@@ -105,6 +105,28 @@
     </tbody>
   </table>
   {% endif %}
+  {% if stale_portals %}
+  <h3>Groups pointing to deleted Matrix rooms</h3>
+  <p>These allowlisted groups still have a saved room reference, but Synapse no longer has that room. Stop the WhatsApp bridge from Services, reset the stale reference here, then start the bridge. This preserves the group and its allowlist; send a new group message if the portal does not reappear.</p>
+  <table>
+    <thead><tr><th>Group</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for portal in stale_portals %}
+    <tr>
+      <td>{{ portal.name }}</td>
+      <td>
+        <form method="post" action="/admin/whatsapp/stale-portal-reset">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="group_id" value="{{ portal.group_id }}">
+          <label><input type="checkbox" name="confirmation" value="yes" required> Clear only the deleted Matrix room reference</label>
+          <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state == "running" %} disabled{% endif %}>Reset stale mapping</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="command" value="list-logins">

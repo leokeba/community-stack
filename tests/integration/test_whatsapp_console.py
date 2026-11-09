@@ -634,6 +634,65 @@ def test_stale_group_portals_can_be_removed_only_while_bridge_is_stopped(project
     assert saved_config["bridge"]["portal_create_filter"]["list"] == []
 
 
+def test_stale_mapped_portals_are_reported_when_synapse_room_is_missing(project, monkeypatch):
+    root, _ = project
+    configure_portal(project)
+    monkeypatch.setattr(matrix_admin, "_call", lambda context, method, path, body=None: (404, {}))
+
+    reply = AgentService(AgentContext(root)).handle(
+        {"op": "bridge.whatsapp.stale_portals", "actor": "olga", "params": {}}
+    )
+
+    assert reply["ok"] is True
+    assert reply["result"]["portals"] == [{"group_id": "123456789@g.us", "name": "Neighbours"}]
+
+
+def test_stale_portal_mapping_reset_preserves_group_and_allowlist(project, monkeypatch):
+    root, _ = project
+    configure_portal(project)
+    container = {"name": bridges.WHATSAPP.container, "state": "running"}
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(docker, "list_community_containers", lambda: [container])
+    monkeypatch.setattr(matrix_admin, "_call", lambda context, method, path, body=None: (404, {}))
+    context = AgentContext(root)
+    group_id = "123456789@g.us"
+
+    with pytest.raises(bridges.BridgeError, match="Stop the WhatsApp bridge"):
+        bridges.reset_stale_portal(context, group_id, "yes")
+
+    container["state"] = "exited"
+    reply = AgentService(context).handle(
+        {
+            "op": "bridge.whatsapp.portal_mapping_reset",
+            "actor": "olga",
+            "params": {"group_id": group_id, "confirmation": "yes"},
+        }
+    )
+    assert reply["ok"] is True
+    assert reply["result"] == {"reset": 1}
+    with sqlite3.connect(root / "data" / "whatsapp_bridge" / "mautrix-whatsapp.db") as db:
+        assert db.execute("SELECT mxid FROM portal WHERE id = ?", (group_id,)).fetchone() == (None,)
+    saved_config = yaml.safe_load(
+        (root / "data" / "whatsapp_bridge" / "config.yaml").read_text(encoding="utf-8")
+    )
+    assert saved_config["bridge"]["portal_create_filter"]["list"] == [group_id]
+
+
+def test_stale_portal_mapping_reset_refuses_a_room_that_still_exists(project, monkeypatch):
+    root, _ = project
+    configure_portal(project)
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(
+        docker,
+        "list_community_containers",
+        lambda: [{"name": bridges.WHATSAPP.container, "state": "exited"}],
+    )
+    monkeypatch.setattr(matrix_admin, "_call", lambda context, method, path, body=None: (200, {}))
+
+    with pytest.raises(bridges.BridgeError, match="room still exists"):
+        bridges.reset_stale_portal(AgentContext(root), "123456789@g.us", "yes")
+
+
 def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(project, monkeypatch):
     root, _ = project
     data_dir = root / "data" / "whatsapp_bridge"
