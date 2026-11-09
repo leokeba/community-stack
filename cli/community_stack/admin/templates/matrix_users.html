@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Matrix users</h1>
 <p>Accounts on this server's Matrix chat. Registration stays closed: create accounts here and give each person their temporary password privately; they can change it in Element under Settings, Account.</p>
+<p class="muted">Deactivated accounts are hidden by default. Synapse retains erased accounts as deactivated records; they are not hard-deleted from its database.</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if not agent_available %}
 <div class="panel"><p>Matrix accounts are managed through the system agent, which is not running. See docs/operations.md, "Control agent".</p></div>
@@ -16,6 +17,22 @@
   <input id="mx-display" name="display_name" type="text" maxlength="100">
   <p><button type="submit">Create account</button></p>
 </form>
+<p>
+  {% if listing.show_deactivated %}
+  <a href="/admin/matrix-users">Hide deactivated accounts</a>
+  {% else %}
+  <a href="/admin/matrix-users?deactivated=true">Include deactivated accounts</a>
+  {% endif %}
+</p>
+<nav class="pagination" aria-label="Matrix user pages">
+  {% if listing.has_previous %}
+  <a href="/admin/matrix-users?from={{ listing.previous_from }}{% if listing.show_deactivated %}&amp;deactivated=true{% endif %}">Previous</a>
+  {% endif %}
+  <span>Page {{ listing.page }} of {{ listing.pages }} · {{ listing.total }} accounts</span>
+  {% if listing.has_next %}
+  <a href="/admin/matrix-users?from={{ listing.next_from }}{% if listing.show_deactivated %}&amp;deactivated=true{% endif %}">Next</a>
+  {% endif %}
+</nav>
 <table>
   <thead><tr><th>Account</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>

@@ -445,6 +445,10 @@ CATALOG: dict[str, Operation] = {
             READ,
             "system",
             _matrix_call(matrix_admin.list_users),
+            params=(
+                Param("from", re.compile(r"\d{1,8}")),
+                Param("deactivated", re.compile(r"(?:true|false)")),
+            ),
             summary="List the Matrix accounts on this server.",
         ),
         Operation(

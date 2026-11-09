@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from community_stack.admin.app import create_app
@@ -36,6 +37,8 @@ class FakeSynapse:
                 "access_token": "adm",
             }
         if path.startswith("/_synapse/admin/v2/users?"):
+            query = parse_qs(urlsplit(path).query)
+            include_deactivated = query.get("deactivated", ["false"])[0] == "true"
             users = [
                 {
                     "name": u,
@@ -46,7 +49,12 @@ class FakeSynapse:
                 for u, d in self.users.items()
             ]
             users.append({"name": "@community-stack-admin:matrix.ourtown.org", "admin": True})
-            return 200, {"users": users}
+            users.sort(key=lambda user: user["name"])
+            if not include_deactivated:
+                users = [user for user in users if not user.get("deactivated", False)]
+            offset = int(query.get("from", ["0"])[0])
+            limit = int(query.get("limit", ["100"])[0])
+            return 200, {"users": users[offset : offset + limit], "total": len(users)}
         if path.startswith("/_synapse/admin/v2/users/"):
             user = path.rsplit("/", 1)[-1].replace("%40", "@").replace("%3A", ":")
             if method == "GET":
@@ -102,6 +110,36 @@ def test_listing_hides_the_stacks_own_admin_account(project):
     assert [u["user_id"] for u in users] == ["@alice:matrix.ourtown.org"]
 
 
+def test_listing_paginates_and_hides_deactivated_accounts_by_default(project):
+    root, fake = project
+    fake.users.update(
+        {f"@member{i:03}:matrix.ourtown.org": {"displayname": f"Member {i}"} for i in range(205)}
+    )
+    fake.users["@erased:matrix.ourtown.org"] = {
+        "displayname": "Erased",
+        "deactivated": True,
+    }
+    context = AgentContext(root)
+
+    first = matrix_admin.list_users(context, {})
+    second = matrix_admin.list_users(context, {"from": "100"})
+    third = matrix_admin.list_users(context, {"from": "200"})
+    users = first["users"] + second["users"] + third["users"]
+
+    assert first["total"] == 206
+    assert first["pages"] == 3
+    assert first["has_next"] and second["has_previous"] and third["has_next"] is False
+    assert len(users) == 206
+    assert len({user["user_id"] for user in users}) == 206
+    assert all(user["user_id"] != "@erased:matrix.ourtown.org" for user in users)
+
+    include_deactivated = matrix_admin.list_users(context, {"deactivated": "true"})
+    assert include_deactivated["total"] == 207
+    assert "@erased:matrix.ourtown.org" in {
+        user["user_id"] for user in include_deactivated["users"]
+    }
+
+
 def test_create_reset_and_deactivate(project):
     root, fake = project
     context = AgentContext(root)
@@ -145,7 +183,14 @@ def test_resets_and_deactivation_need_the_password_and_passwords_stay_out_of_log
 
 
 def test_console_page_shows_accounts_and_temporary_passwords_once(project):
-    root, _ = project
+    root, fake = project
+    fake.users.update(
+        {f"@member{i:03}:matrix.ourtown.org": {"displayname": f"Member {i}"} for i in range(101)}
+    )
+    fake.users["@erased:matrix.ourtown.org"] = {
+        "displayname": "Erased",
+        "deactivated": True,
+    }
     directory = Path(tempfile.mkdtemp(prefix="csmx-"))
     server = AgentSocketServer(directory / "agent.sock", AgentService(AgentContext(root)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -166,6 +211,14 @@ def test_console_page_shows_accounts_and_temporary_passwords_once(project):
         )
         page = client.get("/admin/matrix-users")
         assert "@alice:matrix.ourtown.org" in page.text
+        assert "@erased:matrix.ourtown.org" not in page.text
+        assert "Page 1 of 2" in page.text
+        assert "Include deactivated accounts" in page.text
+        next_page = client.get("/admin/matrix-users?from=100")
+        assert "Page 2 of 2" in next_page.text
+        assert "@member100:matrix.ourtown.org" in next_page.text
+        deactivated = client.get("/admin/matrix-users?deactivated=true")
+        assert "@erased:matrix.ourtown.org" in deactivated.text
         token = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
         created = client.post(
             "/admin/matrix-users/create", data={"csrf_token": token, "username": "carol"}

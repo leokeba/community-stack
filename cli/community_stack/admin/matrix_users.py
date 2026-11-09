@@ -22,10 +22,22 @@ def register_matrix_users(
         status_code: int = 200,
     ) -> HTMLResponse:
         listing, error = None, None
-        if agent.available():
+        offset = request.query_params.get("from", "0")
+        deactivated = request.query_params.get("deactivated", "false")
+        if (
+            not offset.isascii()
+            or not offset.isdigit()
+            or len(offset) > 8
+            or deactivated not in ("true", "false")
+        ):
+            error = "The account page or status filter is invalid."
+        elif agent.available():
             try:
                 listing = await run_in_threadpool(
-                    agent.call, "matrix.users.list", session["username"]
+                    agent.call,
+                    "matrix.users.list",
+                    session["username"],
+                    {"from": offset, "deactivated": deactivated},
                 )
             except (AgentUnavailable, AgentRefused) as exc:
                 error = str(exc)

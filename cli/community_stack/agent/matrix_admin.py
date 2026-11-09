@@ -174,11 +174,30 @@ def _user_id(context, value: str) -> str:
 
 
 def list_users(context, params: dict[str, Any]) -> dict[str, Any]:
-    status, reply = _call(
-        context, "GET", "/_synapse/admin/v2/users?from=0&limit=500&guests=false&deactivated=true"
-    )
-    if status != 200:
-        raise MatrixAdminError(f"Synapse refused the account list: {reply.get('error', status)}")
+    try:
+        offset = int(params.get("from", "0"))
+    except (TypeError, ValueError) as exc:
+        raise MatrixAdminError("The account page number is invalid.") from exc
+    if offset < 0 or offset > 10_000_000:
+        raise MatrixAdminError("The account page number is out of range.")
+    include_deactivated = params.get("deactivated", "false") == "true"
+    limit = 100
+    while True:
+        status, reply = _call(
+            context,
+            "GET",
+            f"/_synapse/admin/v2/users?from={offset}&limit={limit}&guests=false"
+            f"&deactivated={str(include_deactivated).lower()}",
+        )
+        if status != 200:
+            raise MatrixAdminError(
+                f"Synapse refused the account list: {reply.get('error', status)}"
+            )
+        page_users = reply.get("users", [])
+        total = int(reply.get("total", offset + len(page_users)))
+        if not offset or offset < total:
+            break
+        offset = max(0, ((total - 1) // limit) * limit)
     users = [
         {
             "user_id": user["name"],
@@ -187,10 +206,24 @@ def list_users(context, params: dict[str, Any]) -> dict[str, Any]:
             "deactivated": bool(user.get("deactivated")),
             "created": user.get("creation_ts"),
         }
-        for user in reply.get("users", [])
+        for user in page_users
         if not user["name"].startswith(f"@{ADMIN_LOCALPART}:")
     ]
-    return {"server_name": _homeserver(context).get("server_name"), "users": users}
+    visible_total = max(0, total - 1)
+    return {
+        "server_name": _homeserver(context).get("server_name"),
+        "users": users,
+        "from": offset,
+        "limit": limit,
+        "total": visible_total,
+        "page": offset // limit + 1,
+        "pages": max(1, (total + limit - 1) // limit),
+        "has_previous": offset > 0,
+        "previous_from": max(0, offset - limit),
+        "has_next": offset + len(page_users) < total,
+        "next_from": offset + limit,
+        "show_deactivated": include_deactivated,
+    }
 
 
 def create_user(context, params: dict[str, Any]) -> dict[str, Any]:
