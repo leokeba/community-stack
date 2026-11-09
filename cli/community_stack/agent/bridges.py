@@ -272,6 +272,8 @@ def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
 
     portal_access: dict[str, bool] = {}
     for group_id, room_id in records:
+        if isinstance(room_id, str) and room_id.startswith("!") and ":" not in room_id:
+            room_id = f"{room_id}:{_server_name(context)}"
         if (
             not isinstance(group_id, str)
             or not GROUP_ID_PATTERN.fullmatch(group_id)

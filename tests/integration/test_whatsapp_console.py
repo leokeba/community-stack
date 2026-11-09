@@ -167,7 +167,7 @@ def project(tmp_path, monkeypatch):
     return root, fake
 
 
-def configure_portal(project, *, allowed=True, members=None):
+def configure_portal(project, *, allowed=True, members=None, stored_room_id=PORTAL):
     root, fake = project
     data_dir = root / "data" / "whatsapp_bridge"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +198,10 @@ def configure_portal(project, *, allowed=True, members=None):
     )
     with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
         db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
-        db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
+        db.execute(
+            "INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')",
+            (group_id, stored_room_id),
+        )
     fake.portal_members = members or {
         BOT: "join",
         f"@community-stack-admin:{SERVER}": "join",
@@ -469,6 +472,16 @@ def test_portal_rooms_list_bridged_chats_but_not_the_command_chat(project):
             "access_error": "",
         }
     ]
+
+
+def test_portal_rooms_normalizes_serverless_room_id_from_bridge_database(project):
+    root, _ = project
+    configure_portal(project, stored_room_id=PORTAL.split(":", 1)[0], members={BOT: "join"})
+
+    rooms = bridges.portal_rooms(AgentContext(root))
+
+    assert rooms[0]["room_id"] == PORTAL
+    assert rooms[0]["allowed"] is True
 
 
 def test_portal_discovery_autojoins_stack_admin_without_relying_on_its_joined_rooms(project):
