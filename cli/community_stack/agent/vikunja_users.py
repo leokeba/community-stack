@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import pty
 import re
@@ -65,8 +66,8 @@ def _run_user_create(command: list[str], password: str) -> None:
                     continue
                 try:
                     chunk = os.read(master_fd, 4096)
-                except OSError:
-                    if process.poll() is not None:
+                except OSError as exc:
+                    if exc.errno == errno.EIO or process.poll() is not None:
                         break
                     raise
                 if not chunk:
