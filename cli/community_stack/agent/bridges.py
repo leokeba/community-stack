@@ -13,6 +13,7 @@ import base64
 import json
 import re
 import secrets
+import sqlite3
 import subprocess
 import time
 from collections.abc import Callable
@@ -352,6 +353,30 @@ def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
     return {"group_id": group_id, "name": group_name}
 
 
+def disallow_whatsapp_group(context, group_id: str) -> dict[str, bool]:
+    """Revoke one group's permission and reload the running bridge if needed."""
+    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+        raise BridgeError("The WhatsApp group ID is invalid.")
+    if not docker.is_docker_available():
+        raise BridgeError("Docker is unavailable; cannot safely apply the group permission change.")
+    container = next(
+        (
+            item
+            for item in docker.list_community_containers()
+            if item.get("name") == WHATSAPP.container
+        ),
+        None,
+    )
+    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    try:
+        changed = provision.disallow_whatsapp_group(config_path, group_id)
+    except provision.ProvisionError as exc:
+        raise BridgeError(str(exc)) from exc
+    if changed and container and container.get("state") == "running":
+        _restart_bridge(context, WHATSAPP)
+    return {"allowed": False}
+
+
 def _synapse_started_at() -> datetime | None:
     """When the Synapse container last started, or None if Docker cannot say."""
     result = subprocess.run(
@@ -417,11 +442,13 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
                 yaml.safe_load((data_dir / "config.yaml").read_text(encoding="utf-8")) or {}
             )
             history_sync = bridge_config.get("network", {}).get("history_sync", {})
+            network_settings = bridge_config.get("network", {})
             bridge_settings = bridge_config.get("bridge", {})
             portal_filter = bridge_settings.get("portal_create_filter", {})
             privacy_ok = (
                 history_sync.get("max_initial_conversations") == 0
                 and history_sync.get("request_full_sync") is False
+                and network_settings.get("max_member_sync") == 200
                 and portal_filter.get("mode") == "allow"
                 and isinstance(portal_filter.get("list"), list)
             )
@@ -430,7 +457,7 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         add(
             "privacy_guard",
             privacy_ok,
-            "Initial history sync is disabled and portal creation is allow-only."
+            "Initial history sync is disabled; group member sync is capped at 200; portal creation is allow-only."
             if privacy_ok
             else "WhatsApp contact and history sync safeguards are not applied.",
             "Keep the bridge stopped, then turn it off and on from Services to apply the safeguards.",
@@ -518,6 +545,129 @@ def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     return sorted(rooms, key=lambda room: room["name"].lower())
 
 
+def orphaned_portals(context) -> list[dict[str, str]]:
+    """List saved WhatsApp group portals that have no Matrix room."""
+    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
+    if not database.is_file():
+        return []
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+            rows = db.execute(
+                "SELECT id, name FROM portal WHERE mxid IS NULL AND id GLOB '[0-9]*@g.us'"
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise BridgeError("Could not read saved WhatsApp group records.") from exc
+    return [
+        {
+            "group_id": group_id,
+            "name": name.strip()
+            if name and name.strip()
+            else "WhatsApp group without a Matrix room",
+        }
+        for group_id, name in rows
+        if re.fullmatch(r"\d{5,30}@g\.us", group_id)
+    ]
+
+
+def remove_orphaned_portal(context, group_id: str, confirmation: str) -> dict[str, str]:
+    """Remove a saved group record only when it has no Matrix room and the bridge is stopped."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm removal of this saved group record.")
+    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+        raise BridgeError("That saved WhatsApp group record is invalid.")
+    if not docker.is_docker_available():
+        raise BridgeError(
+            "Docker is unavailable; stop the WhatsApp bridge before removing this record."
+        )
+    container = next(
+        (
+            item
+            for item in docker.list_community_containers()
+            if item.get("name") == WHATSAPP.container
+        ),
+        None,
+    )
+    if container and container.get("state") == "running":
+        raise BridgeError(
+            "Stop the WhatsApp bridge from Services before removing this saved record."
+        )
+
+    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
+    if not database.is_file():
+        raise BridgeError("The WhatsApp bridge database is missing.")
+    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    try:
+        provision.disallow_whatsapp_group(config_path, group_id)
+        with sqlite3.connect(database, timeout=10) as db:
+            db.execute("PRAGMA foreign_keys = ON")
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT receiver FROM portal WHERE id = ? AND mxid IS NULL", (group_id,)
+            ).fetchall()
+            if not rows:
+                raise BridgeError("That saved group has a Matrix room or no longer exists.")
+            for (receiver,) in rows:
+                child = db.execute(
+                    "SELECT 1 FROM portal WHERE parent_id = ? AND parent_receiver = ? LIMIT 1",
+                    (group_id, receiver),
+                ).fetchone()
+                if child:
+                    raise BridgeError(
+                        "This saved group has dependent portals and cannot be removed safely."
+                    )
+            db.execute("DELETE FROM portal WHERE id = ? AND mxid IS NULL", (group_id,))
+            db.commit()
+    except provision.ProvisionError as exc:
+        raise BridgeError(str(exc)) from exc
+    except sqlite3.Error as exc:
+        raise BridgeError("Could not remove the saved WhatsApp group record.") from exc
+    return {"removed": True}
+
+
+def remove_portal_room(context, room_id: str, confirmation: str) -> dict[str, str]:
+    """Unallow and delete a bridged WhatsApp portal room after explicit confirmation."""
+    if confirmation != "yes":
+        raise BridgeError("Confirm that removing this portal will also delete its Matrix room.")
+    if room_id not in {room["room_id"] for room in portal_rooms(context)}:
+        raise BridgeError("That room is not a bridged WhatsApp room.")
+    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+            row = db.execute(
+                "SELECT id FROM portal WHERE mxid = ? AND id GLOB '[0-9]*@g.us' LIMIT 1",
+                (room_id,),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise BridgeError("Could not identify the WhatsApp group for this room.") from exc
+    if not row or not re.fullmatch(r"\d{5,30}@g\.us", row[0]):
+        raise BridgeError("Could not safely identify the WhatsApp group for this room.")
+
+    group_id = row[0]
+    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    try:
+        provision.disallow_whatsapp_group(config_path, group_id)
+    except provision.ProvisionError as exc:
+        raise BridgeError(str(exc)) from exc
+
+    event_id = _send(context, room_id, "delete-portal")
+    deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
+    bot = f"@{WHATSAPP.bot_localpart}:{_server_name(context)}"
+    while time.monotonic() < deadline:
+        status, members = _matrix(
+            context,
+            "GET",
+            f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/joined_members",
+        )
+        if status == 404 or (status == 200 and bot not in members.get("joined", {})):
+            _restart_bridge(context, WHATSAPP)
+            return {"room_id": room_id, "event_id": event_id}
+        _sleep(POLL_SECONDS)
+    raise BridgeError(
+        "The group was removed from the allowlist, but the bridge did not confirm portal deletion. "
+        "Keep the bridge stopped and check its status."
+    )
+
+
 def login_state(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     """Whether an account is linked, judged from the bot's own answer to list-logins."""
     result = run_command(context, "list-logins", spec)
@@ -550,6 +700,7 @@ def status(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
     checks = diagnose(context, spec)
     by_id = {check["id"]: check for check in checks}
     container = by_id["container"]
+    privacy_guard = by_id.get("privacy_guard", {}).get("ok", False)
     allowed_groups: list[str] = []
     if spec.key == WHATSAPP.key:
         config_path = context.project_dir / "data" / spec.service / "config.yaml"
@@ -569,6 +720,8 @@ def status(context, spec: BridgeSpec = WHATSAPP) -> dict[str, Any]:
         "container_status": "",
         "command_chat_created": _load_room(context, spec) is not None,
         "allowed_groups": allowed_groups,
+        "privacy_guard_ok": privacy_guard,
+        "orphaned_portals": orphaned_portals(context) if spec.key == WHATSAPP.key else [],
         "commands": dict(spec.commands),
         "checks": checks,
         "healthy": all(check["ok"] for check in checks),

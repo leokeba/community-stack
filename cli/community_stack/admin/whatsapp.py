@@ -204,3 +204,107 @@ def register_whatsapp(
             session,
             flash(f"WhatsApp group '{result['name']}' was added and joined."),
         )
+
+    @app.post("/admin/whatsapp/group-disallow")
+    async def whatsapp_group_disallow(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        try:
+            await run_in_threadpool(
+                agent.call,
+                "bridge.whatsapp.group_disallow",
+                session["username"],
+                {"group_id": form.get("group_id", "")},
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.group_disallow",
+                "WhatsApp group permission",
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request,
+                session,
+                flash(f"WhatsApp group permission: {exc}", "error"),
+                status_code=400,
+            )
+        audit(
+            request,
+            session["username"],
+            "bridge.whatsapp.group_disallow",
+            "WhatsApp group permission",
+            outcome="succeeded",
+        )
+        return await whatsapp_page(
+            request, session, flash("WhatsApp group removed from the allowlist.")
+        )
+
+    @app.post("/admin/whatsapp/orphan-portal-remove")
+    async def whatsapp_orphan_portal_remove(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        try:
+            await run_in_threadpool(
+                agent.call,
+                "bridge.whatsapp.orphan_portal_remove",
+                session["username"],
+                {
+                    "group_id": form.get("group_id", ""),
+                    "confirmation": form.get("confirmation", ""),
+                },
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.orphan_portal_remove",
+                "saved WhatsApp group record",
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request, session, flash(f"WhatsApp group removal: {exc}", "error"), status_code=400
+            )
+        audit(
+            request,
+            session["username"],
+            "bridge.whatsapp.orphan_portal_remove",
+            "saved WhatsApp group record",
+            outcome="succeeded",
+        )
+        return await whatsapp_page(request, session, flash("Saved WhatsApp group record removed."))
+
+    @app.post("/admin/whatsapp/portal-remove")
+    async def whatsapp_portal_remove(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        room_id = form.get("room_id", "")
+        try:
+            await run_in_threadpool(
+                agent.call,
+                "bridge.whatsapp.portal_remove",
+                session["username"],
+                {
+                    "room_id": room_id,
+                    "confirmation": form.get("confirmation", ""),
+                },
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.portal_remove",
+                "bridged WhatsApp room",
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request, session, flash(f"WhatsApp portal removal: {exc}", "error"), status_code=400
+            )
+        audit(
+            request,
+            session["username"],
+            "bridge.whatsapp.portal_remove",
+            "bridged WhatsApp room",
+            outcome="succeeded",
+        )
+        return await whatsapp_page(
+            request, session, flash("WhatsApp group portal and its Matrix room were removed.")
+        )

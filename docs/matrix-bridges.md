@@ -99,10 +99,10 @@ rely on one (`community-stack restore`, with the restore drill on the Backups pa
 
 - Linking an **existing** Matrix room to a chat is not supported by the bridge version in
   use. Rooms are created by the bridge; the console lists them and can set relay on them.
-- Unlinking a single room is not offered: the bridge's delete-portal command removes the
-  Matrix room too.
+- Removing a bridged portal is available in the WhatsApp console. The bridge's
+  `delete-portal` command also removes its Matrix room.
 - Chats are bridged automatically only when listed in the bridge configuration
-  (`portal_create_filter`). The console does not edit that list yet.
+  (`portal_create_filter`); the WhatsApp console manages this allowlist.
 - Ghost accounts (Matrix users for platform contacts) are created by the bridge for
   members of bridged chats only.
 

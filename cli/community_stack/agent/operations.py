@@ -344,6 +344,48 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
                 params=(Param("invite_link", bridges.INVITE_LINK_PATTERN, required=True),),
                 summary="Allow and join one WhatsApp group from an invite link.",
             ),
+            Operation(
+                "bridge.whatsapp.orphan_portal_remove",
+                CHANGE,
+                "system",
+                _bridge_call(
+                    lambda context, params: bridges.remove_orphaned_portal(
+                        context, params["group_id"], params["confirmation"]
+                    )
+                ),
+                params=(
+                    Param("group_id", re.compile(r"\d{5,30}@g\.us"), required=True),
+                    Param("confirmation", re.compile("yes"), required=True),
+                ),
+                summary="Remove a saved WhatsApp group record that has no Matrix room.",
+            ),
+            Operation(
+                "bridge.whatsapp.group_disallow",
+                CHANGE,
+                "system",
+                _bridge_call(
+                    lambda context, params: bridges.disallow_whatsapp_group(
+                        context, params["group_id"]
+                    )
+                ),
+                params=(Param("group_id", re.compile(r"\d{5,30}@g\.us"), required=True),),
+                summary="Revoke one WhatsApp group's portal allowlist permission.",
+            ),
+            Operation(
+                "bridge.whatsapp.portal_remove",
+                CHANGE,
+                "system",
+                _bridge_call(
+                    lambda context, params: bridges.remove_portal_room(
+                        context, params["room_id"], params["confirmation"]
+                    )
+                ),
+                params=(
+                    Param("room_id", room_pattern, required=True),
+                    Param("confirmation", re.compile("yes"), required=True),
+                ),
+                summary="Remove a WhatsApp group portal and its Matrix room.",
+            ),
         )
     return operations
 

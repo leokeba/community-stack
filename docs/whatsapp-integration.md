@@ -25,7 +25,9 @@ containers by hand.
    to bridge and press **Allow and join this group**. The console resolves the group,
    adds only its ID to the allowlist, and joins it. The invite message is redacted
    from the bridge command chat after processing; revoke the invite in WhatsApp
-   afterward if possible.
+   afterward if possible. Chats outside this allowlist do not get portals. Initial
+   history sync is disabled. Members are synced for groups up to 200 people; in
+   larger groups, non-admin members are synced as they participate.
 5. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
    new portal room ID (starts with `!`) from **Bridged rooms**, save it as the
    WhatsApp destination and press **Test connection**. Invite the announcements
@@ -65,10 +67,15 @@ admin operation; invite links are not written to the admin audit log.
   encryption across WhatsApp.
 - Bridging is **bidirectional**: messages in the WhatsApp group also appear in Matrix.
   Tell group members before bridging, and never bridge private coordination rooms.
-- The allowlist and disabled initial sync prevent future bulk contact/conversation
-  creation. They do not remove ghost users or portal rooms created before this fix.
+- The allowlist and disabled initial sync prevent automatic portals for unselected
+  chats. Members of allowed groups may appear as Matrix ghost accounts. In groups
+  over 200 members, non-admin members are synced as they participate.
+- On the WhatsApp bridge page, remove stale saved group records that have no Matrix
+  room, or remove a bridged portal. Removing a bridged portal also deletes its Matrix
+  room and revokes that group's allowlist entry.
 - The pinned mautrix-whatsapp v26 configuration stores history-sync settings under
-  `network.history_sync`; the admin status check verifies the settings at that path.
+  `network.history_sync` and member-sync limits under `network.max_member_sync`; the
+  admin status check verifies both settings and the portal allowlist.
 
 ## Privacy, storage and operations
 

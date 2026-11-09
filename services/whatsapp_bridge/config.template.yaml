@@ -4,6 +4,8 @@
 
 network:
   displayname_template: "{{or .FullName .PushName}} (WA)"
+  # Larger groups sync non-admin members only as they participate.
+  max_member_sync: 200
   history_sync:
     max_initial_conversations: 0
     request_full_sync: false

@@ -732,6 +732,10 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
     assert "Check linked accounts" in wa_page.text
     assert 'action="/admin/whatsapp/group-add"' in wa_page.text
     assert "Allow and join this group" in wa_page.text
+    route_paths = {route.path for route in app.routes}
+    assert "/admin/whatsapp/group-disallow" in route_paths
+    assert "/admin/whatsapp/orphan-portal-remove" in route_paths
+    assert "/admin/whatsapp/portal-remove" in route_paths
 
     saved_wa = client.post(
         "/admin/channels/whatsapp/save",

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import sqlite3
 from urllib.parse import unquote
 
 import pytest
@@ -227,7 +228,8 @@ def test_diagnostics_verify_network_history_sync_safeguards(project):
             "history_sync": {
                 "max_initial_conversations": 0,
                 "request_full_sync": False,
-            }
+            },
+            "max_member_sync": 200,
         },
         "bridge": {"portal_create_filter": {"mode": "allow", "list": []}},
     }
@@ -237,6 +239,11 @@ def test_diagnostics_verify_network_history_sync_safeguards(project):
     assert checks["privacy_guard"]["ok"] is True
 
     config["network"]["history_sync"]["max_initial_conversations"] = -1
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["privacy_guard"]["ok"] is False
+    config["network"]["history_sync"]["max_initial_conversations"] = 0
+    config["network"]["max_member_sync"] = -1
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
     assert checks["privacy_guard"]["ok"] is False
@@ -363,6 +370,104 @@ def test_portal_rooms_list_bridged_chats_but_not_the_command_chat(project):
     assert rooms == [{"room_id": PORTAL, "name": "Neighbours", "members": 2}]
 
 
+def test_stale_group_portals_can_be_removed_only_while_bridge_is_stopped(project, monkeypatch):
+    root, _ = project
+    data_dir = root / "data" / "whatsapp_bridge"
+    data_dir.mkdir(parents=True)
+    config_path = data_dir / "config.yaml"
+    group_id = "123456789@g.us"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "network": {"max_member_sync": 200},
+                "bridge": {"portal_create_filter": {"mode": "allow", "list": [group_id]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    database = data_dir / "mautrix-whatsapp.db"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE portal (bridge_id TEXT, id TEXT, receiver TEXT, mxid TEXT, "
+            "name TEXT, parent_id TEXT, parent_receiver TEXT)"
+        )
+        db.execute(
+            "INSERT INTO portal VALUES ('whatsapp', ?, 'account', NULL, '', NULL, '')",
+            (group_id,),
+        )
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(docker, "list_community_containers", list)
+
+    context = AgentContext(root)
+    assert bridges.orphaned_portals(context) == [
+        {"group_id": group_id, "name": "WhatsApp group without a Matrix room"}
+    ]
+    with pytest.raises(bridges.BridgeError, match="Confirm removal"):
+        bridges.remove_orphaned_portal(context, group_id, "")
+    assert bridges.remove_orphaned_portal(context, group_id, "yes") == {"removed": True}
+    assert bridges.orphaned_portals(context) == []
+    saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved_config["bridge"]["portal_create_filter"]["list"] == []
+
+
+def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(project, monkeypatch):
+    root, _ = project
+    data_dir = root / "data" / "whatsapp_bridge"
+    data_dir.mkdir(parents=True)
+    group_id = "123456789@g.us"
+    config_path = data_dir / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "network": {
+                    "history_sync": {"max_initial_conversations": 0, "request_full_sync": False},
+                    "max_member_sync": 200,
+                },
+                "bridge": {"portal_create_filter": {"mode": "allow", "list": [group_id]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
+        db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
+        db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
+
+    removed = False
+
+    def fake_matrix(context, method, path, body=None):
+        nonlocal removed
+        if path == "/_matrix/client/v3/joined_rooms":
+            return 200, {"joined_rooms": [ROOM, PORTAL]}
+        if path.endswith("/joined_members"):
+            members = {f"@community-stack-admin:{SERVER}": {}}
+            if not removed:
+                members[BOT] = {}
+            return 200, {"joined": members}
+        if path.endswith("/state/m.room.name"):
+            return 200, {"name": "Neighbours"}
+        return 404, {}
+
+    def fake_send(context, room_id, command):
+        nonlocal removed
+        assert room_id == PORTAL
+        assert command == "delete-portal"
+        removed = True
+        return "$delete"
+
+    restarts = []
+    monkeypatch.setattr(bridges, "_matrix", fake_matrix)
+    monkeypatch.setattr(bridges, "_send", fake_send)
+    monkeypatch.setattr(bridges, "_restart_bridge", lambda context, spec: restarts.append(spec.key))
+
+    result = bridges.remove_portal_room(AgentContext(root), PORTAL, "yes")
+
+    assert result == {"room_id": PORTAL, "event_id": "$delete"}
+    assert removed is True
+    assert restarts == ["whatsapp"]
+    saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved_config["bridge"]["portal_create_filter"]["list"] == []
+
+
 def test_the_agent_lists_bridged_rooms_for_an_admin(project):
     root, _ = project
     bridges.ensure_direct_room(AgentContext(root))
@@ -466,6 +571,7 @@ def test_the_template_bridges_no_chats_until_they_are_listed():
     )
     assert template["network"]["history_sync"]["max_initial_conversations"] == 0
     assert template["network"]["history_sync"]["request_full_sync"] is False
+    assert template["network"]["max_member_sync"] == 200
     assert "history_sync" not in template["bridge"]
     assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
 

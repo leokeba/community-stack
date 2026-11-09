@@ -572,6 +572,7 @@ def ensure_whatsapp_privacy_config(path: Path) -> bool:
                 history_sync.setdefault(key, value)
     history_sync["max_initial_conversations"] = 0
     history_sync["request_full_sync"] = False
+    network["max_member_sync"] = 200
 
     portal_filter = bridge.setdefault("portal_create_filter", {})
     if not isinstance(portal_filter, dict):
@@ -598,6 +599,22 @@ def allow_whatsapp_group(path: Path, group_id: str) -> bool:
     if group_id in allowed:
         return False
     allowed.append(group_id)
+    _write_whatsapp_config(path, config, original_stat)
+    return True
+
+
+def disallow_whatsapp_group(path: Path, group_id: str) -> bool:
+    """Remove one WhatsApp group from the bridge portal allowlist."""
+    if not re.fullmatch(r"\d{5,30}@g\.us", group_id):
+        raise ProvisionError("The WhatsApp group ID is invalid.")
+    privacy_changed = ensure_whatsapp_privacy_config(path)
+    config, original_stat = _load_whatsapp_config(path)
+    allowed = config["bridge"]["portal_create_filter"]["list"]
+    if group_id not in allowed:
+        return privacy_changed
+    config["bridge"]["portal_create_filter"]["list"] = [
+        item for item in allowed if item != group_id
+    ]
     _write_whatsapp_config(path, config, original_stat)
     return True
 

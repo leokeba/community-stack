@@ -41,7 +41,7 @@
   <form method="post" action="/admin/whatsapp/command">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="command" value="login qr">
-    <p><button type="submit"{% if not agent_available %} disabled{% endif %}>Start QR linking</button></p>
+    <p>    <button type="submit"{% if not agent_available or not bridge or bridge.container_state != "running" or not bridge.privacy_guard_ok %} disabled{% endif %}>Start QR linking</button></p>
   </form>
   <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -58,13 +58,52 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="whatsapp-invite-link">WhatsApp group invite link</label>
     <input id="whatsapp-invite-link" name="invite_link" type="url" placeholder="https://chat.whatsapp.com/..." required>
-    <p><button type="submit"{% if not agent_available or not bridge or bridge.container_state != "running" %} disabled{% endif %}>Allow and join this group</button></p>
+    <p><button type="submit"{% if not agent_available or not bridge or bridge.container_state != "running" or not bridge.privacy_guard_ok %} disabled{% endif %}>Allow and join this group</button></p>
   </form>
   {% if bridge and bridge.allowed_groups %}
   <p>Groups explicitly allowed for bridging:</p>
-  <ul>{% for group_id in bridge.allowed_groups %}<li><code>{{ group_id }}</code></li>{% endfor %}</ul>
+  <p class="muted">Revoking permission prevents future portal creation after the bridge reloads. To remove an existing bridge connection, use <strong>Remove bridge</strong> in its room row below.</p>
+  <table>
+    <thead><tr><th>Group ID</th><th>Permission</th></tr></thead>
+    <tbody>
+  {% for group_id in bridge.allowed_groups %}
+    <tr>
+      <td><code>{{ group_id }}</code></td>
+      <td>
+        <form method="post" action="/admin/whatsapp/group-disallow" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="group_id" value="{{ group_id }}">
+          <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Revoke permission</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+    </tbody>
+  </table>
   {% else %}
-  <p class="muted">No WhatsApp groups are allowed yet. Contact syncing and initial history sync are disabled.</p>
+  <p class="muted">No WhatsApp groups are allowed yet. Initial history sync is disabled and eager group-member syncing is limited.</p>
+  {% endif %}
+  {% if bridge and bridge.orphaned_portals %}
+  <h3>Saved groups without a Matrix room</h3>
+  <p>These are stale bridge records, not Matrix rooms. Removing one deletes its saved WhatsApp portal record and revokes its allowlist entry. The bridge must be stopped first.</p>
+  <table>
+    <thead><tr><th>Group</th><th>Action</th></tr></thead>
+    <tbody>
+    {% for portal in bridge.orphaned_portals %}
+    <tr>
+      <td>{{ portal.name }}</td>
+      <td>
+        <form method="post" action="/admin/whatsapp/orphan-portal-remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="group_id" value="{{ portal.group_id }}">
+          <label><input type="checkbox" name="confirmation" value="yes" required> Remove this saved record</label>
+          <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state == "running" %} disabled{% endif %}>Remove record</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
   {% endif %}
   <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -83,9 +122,9 @@
 <section class="panel" id="bridged-rooms">
   <h2>Bridged rooms</h2>
   {% if rooms %}
-  <p>These Matrix rooms were created by the bridge for WhatsApp chats. Copy a room ID into the WhatsApp destination on the <a href="/admin/channels">Channels page</a>, and invite the announcements account to it.</p>
+  <p>These Matrix rooms were created by the bridge for allowlisted WhatsApp groups. Removing a portal also deletes its Matrix room and revokes the group’s allowlist entry.</p>
   <table>
-    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th></tr></thead>
+    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th><th>Remove</th></tr></thead>
     <tbody>
     {% for room in rooms %}
     <tr>
@@ -95,6 +134,14 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="room_id" value="{{ room.room_id }}">
           <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Let the linked account relay here</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/admin/whatsapp/portal-remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <label><input type="checkbox" name="confirmation" value="yes" required> Delete portal and Matrix room</label>
+          <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state != "running" %} disabled{% endif %}>Remove bridge</button>
         </form>
       </td>
     </tr>
