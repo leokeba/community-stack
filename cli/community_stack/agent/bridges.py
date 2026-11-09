@@ -451,7 +451,7 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
             privacy_ok = (
                 history_sync.get("max_initial_conversations") == 0
                 and history_sync.get("request_full_sync") is False
-                and network_settings.get("max_member_sync") == 200
+                and network_settings.get("max_member_sync") == 0
                 and portal_filter.get("mode") == "allow"
                 and isinstance(portal_filter.get("list"), list)
             )
@@ -460,9 +460,9 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         add(
             "privacy_guard",
             privacy_ok,
-            "Initial history sync is disabled; group member sync is capped at 200; portal creation is allow-only."
+            "History backfill is off; eager non-admin group member sync is disabled; portal creation is allow-only. Standalone contact/profile sync may still create ghosts."
             if privacy_ok
-            else "WhatsApp contact and history sync safeguards are not applied.",
+            else "WhatsApp history, eager member-sync, or portal allowlist safeguards are not applied.",
             "Keep the bridge stopped, then turn it off and on from Services to apply the safeguards.",
         )
     has_registration = (data_dir / "registration.yaml").is_file()

@@ -229,7 +229,7 @@ def test_diagnostics_verify_network_history_sync_safeguards(project):
                 "max_initial_conversations": 0,
                 "request_full_sync": False,
             },
-            "max_member_sync": 200,
+            "max_member_sync": 0,
         },
         "bridge": {"portal_create_filter": {"mode": "allow", "list": []}},
     }
@@ -243,6 +243,10 @@ def test_diagnostics_verify_network_history_sync_safeguards(project):
     checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
     assert checks["privacy_guard"]["ok"] is False
     config["network"]["history_sync"]["max_initial_conversations"] = 0
+    config["network"]["max_member_sync"] = 200
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["privacy_guard"]["ok"] is False
     config["network"]["max_member_sync"] = -1
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
@@ -379,7 +383,7 @@ def test_stale_group_portals_can_be_removed_only_while_bridge_is_stopped(project
     config_path.write_text(
         yaml.safe_dump(
             {
-                "network": {"max_member_sync": 200},
+                "network": {"max_member_sync": 0},
                 "bridge": {"portal_create_filter": {"mode": "allow", "list": [group_id]}},
             }
         ),
@@ -421,7 +425,7 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
             {
                 "network": {
                     "history_sync": {"max_initial_conversations": 0, "request_full_sync": False},
-                    "max_member_sync": 200,
+                    "max_member_sync": 0,
                 },
                 "bridge": {"portal_create_filter": {"mode": "allow", "list": [group_id]}},
             }
@@ -571,7 +575,7 @@ def test_the_template_bridges_no_chats_until_they_are_listed():
     )
     assert template["network"]["history_sync"]["max_initial_conversations"] == 0
     assert template["network"]["history_sync"]["request_full_sync"] is False
-    assert template["network"]["max_member_sync"] == 200
+    assert template["network"]["max_member_sync"] == 0
     assert "history_sync" not in template["bridge"]
     assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
 

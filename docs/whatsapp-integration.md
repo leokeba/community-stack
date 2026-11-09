@@ -25,9 +25,9 @@ containers by hand.
    to bridge and press **Allow and join this group**. The console resolves the group,
    adds only its ID to the allowlist, and joins it. The invite message is redacted
    from the bridge command chat after processing; revoke the invite in WhatsApp
-   afterward if possible. Chats outside this allowlist do not get portals. Initial
-   history sync is disabled. Members are synced for groups up to 200 people; in
-   larger groups, non-admin members are synced as they participate.
+   afterward if possible. Initial history sync is disabled. The allowlist is intended
+   to restrict which chats get Matrix rooms, but it does not currently prevent all
+   portal records or contact ghosts; see the privacy issue below.
 5. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
    new portal room ID (starts with `!`) from **Bridged rooms**, save it as the
    WhatsApp destination and press **Test connection**. Invite the announcements
@@ -67,15 +67,42 @@ admin operation; invite links are not written to the admin audit log.
   encryption across WhatsApp.
 - Bridging is **bidirectional**: messages in the WhatsApp group also appear in Matrix.
   Tell group members before bridging, and never bridge private coordination rooms.
-- The allowlist and disabled initial sync prevent automatic portals for unselected
-  chats. Members of allowed groups may appear as Matrix ghost accounts. In groups
-  over 200 members, non-admin members are synced as they participate.
+- Members of allowed groups may appear as Matrix ghost accounts. The current
+  `max_member_sync: 0` setting disables eager non-admin member sync in every group;
+  admins may still sync, and non-admins can appear as they participate. It is not
+  a per-group allowlist and does not stop standalone contact/profile events.
 - On the WhatsApp bridge page, remove stale saved group records that have no Matrix
   room, or remove a bridged portal. Removing a bridged portal also deletes its Matrix
   room and revokes that group's allowlist entry.
 - The pinned mautrix-whatsapp v26 configuration stores history-sync settings under
   `network.history_sync` and member-sync limits under `network.max_member_sync`; the
   admin status check verifies both settings and the portal allowlist.
+
+## Known privacy issue in mautrix-whatsapp v26.10
+
+The allowlist is not currently a complete boundary for remote data retained by the
+bridge. Investigation found two independent paths:
+
+- mautrix-go checks `portal_create_filter` after the remote-event queue has already
+  created a portal database row. Rejected chats do not get a Matrix room, but new
+  rows for them can remain in the bridge database.
+- mautrix-whatsapp handles `Contact`, `PushName`, `BusinessName`, and contact-picture
+  events independently of bridged-group membership and syncs the corresponding
+  Matrix ghosts. This can create or update identities for contacts outside the
+  allowlist.
+
+The current deployment uses `network.max_member_sync: 0` as a partial mitigation.
+It disables eager sync of non-admin members for every group (admins may still sync),
+but does not gate standalone contact/profile events. `history_sync.max_initial_conversations: 0`
+only disables initial history backfill.
+
+Proposed upstream fixes address these paths separately:
+[mautrix/go#688](https://github.com/mautrix/go/pull/688) checks the filter before
+inserting new event-driven portal rows, and
+[mautrix/whatsapp#1038](https://github.com/mautrix/whatsapp/pull/1038) adds an
+opt-out for unsolicited contact/profile sync. Until the latter is available in the
+deployed bridge, do not assume the allowlist prevents all contact identities from
+being synced.
 
 ## Privacy, storage and operations
 

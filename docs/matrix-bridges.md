@@ -47,9 +47,11 @@ The catalogue lives in `cli/community_stack/bridges/catalogue.py`. Images are pi
 - A bridge reads every message in a bridged room, including messages from encrypted
   rooms, so its operator can read them in plaintext. Community Stack does **not** claim
   end-to-end encryption across a bridged platform.
-- The bridge syncs the linked account's contacts and chats. Only chats listed as allowed
-  are bridged automatically; everything else stays on the phone. Contacts that are not in
-  a bridged chat do not become Matrix accounts.
+- The WhatsApp allowlist is intended to limit bridged chats, but it is not currently a
+  complete boundary for bridge database records or contact identities. mautrix-whatsapp
+  can sync standalone contact/profile events for people outside allowed chats, and the
+  core filter is checked after a new portal record may have been inserted. See the
+  [WhatsApp integration notes](./whatsapp-integration.md#known-privacy-issue-in-mautrix-whatsapp-v2610).
 - Bridged rooms are bidirectional. Tell members before bridging a group, and never bridge
   private coordination rooms.
 - Bridge secrets (registration tokens, linked-session data) live in `.env` and
@@ -103,8 +105,10 @@ rely on one (`community-stack restore`, with the restore drill on the Backups pa
   `delete-portal` command also removes its Matrix room.
 - Chats are bridged automatically only when listed in the bridge configuration
   (`portal_create_filter`); the WhatsApp console manages this allowlist.
-- Ghost accounts (Matrix users for platform contacts) are created by the bridge for
-  members of bridged chats only.
+- WhatsApp ghost accounts can be created from standalone contact/profile events as
+  well as bridged-chat membership; the allowlist alone does not restrict those events.
+  Proposed upstream fixes are tracked in [mautrix/go#688](https://github.com/mautrix/go/pull/688)
+  and [mautrix/whatsapp#1038](https://github.com/mautrix/whatsapp/pull/1038).
 
 ## Validation for phases 3 and 4
 

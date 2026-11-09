@@ -547,7 +547,7 @@ def _load_whatsapp_config(path: Path) -> tuple[dict, os.stat_result]:
 
 
 def ensure_whatsapp_privacy_config(path: Path) -> bool:
-    """Keep WhatsApp history sync disabled and portal creation explicitly allow-only."""
+    """Disable WhatsApp history and eager member sync; keep portals allow-only."""
     original, original_stat = _load_whatsapp_config(path)
     config = deepcopy(original)
     network = config.setdefault("network", {})
@@ -573,7 +573,7 @@ def ensure_whatsapp_privacy_config(path: Path) -> bool:
                 history_sync.setdefault(key, value)
     history_sync["max_initial_conversations"] = 0
     history_sync["request_full_sync"] = False
-    network["max_member_sync"] = 200
+    network["max_member_sync"] = 0
 
     portal_filter = bridge.setdefault("portal_create_filter", {})
     if not isinstance(portal_filter, dict):
