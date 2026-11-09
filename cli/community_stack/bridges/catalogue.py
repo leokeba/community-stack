@@ -35,6 +35,9 @@ class BridgeSpec:
     bot_localpart: str = ""
     registration_file: str = ""
     secret_prefix: str = ""  # env prefix for the appservice tokens, e.g. WHATSAPP
+    # Upstream default for bridge.command_prefix. Commands sent in a portal room, rather than
+    # the management room, are ignored unless they start with it.
+    command_prefix: str = ""
     image: str = ""  # pinned image, when the bridge is supported or planned
     login: str = ""  # how accounts are linked, shown to people
     experimental: bool = False
@@ -55,6 +58,7 @@ WHATSAPP = BridgeSpec(
     bot_localpart="whatsappbot",
     registration_file="whatsapp.yaml",
     secret_prefix="WHATSAPP",
+    command_prefix="!wa",
     image="dock.mau.dev/mautrix/whatsapp:v26.10",
     login="QR code scanned in WhatsApp Linked devices",
     commands={
@@ -80,6 +84,7 @@ SIGNAL = BridgeSpec(
     bot_localpart="signalbot",
     registration_file="signal.yaml",
     secret_prefix="SIGNAL",
+    command_prefix="!signal",
     image="dock.mau.dev/mautrix/signal:v26.10",
     login="Linked as a secondary device; the bot shows the linking code (flow to confirm live)",
     experimental=True,
@@ -101,6 +106,7 @@ MESSENGER = BridgeSpec(
     bot_localpart="metabot",
     registration_file="meta.yaml",
     secret_prefix="META",
+    command_prefix="!meta",
     image="dock.mau.dev/mautrix/meta:v26.10",
     login="Account login through the bot; the login options are listed by the bot",
     experimental=True,

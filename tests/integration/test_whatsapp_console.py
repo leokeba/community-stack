@@ -503,6 +503,7 @@ def test_setting_relay_puts_the_stack_admin_in_the_portal_first(project):
     join = next(index for index, path in enumerate(paths) if path.endswith("/join"))
     send = next(index for index, path in enumerate(paths) if "/send/m.room.message/" in path)
     assert invite < join < send
+    assert fake.requests[send][2]["body"] == "!wa set-relay"
     invite_request = fake.requests[invite]
     assert invite_request[2] == {"user_id": f"@community-stack-admin:{SERVER}"}
     assert invite_request[3] == "appservice-secret"
@@ -711,7 +712,7 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
     def fake_send(context, room_id, command):
         nonlocal removed
         assert room_id == PORTAL
-        assert command == "delete-portal"
+        assert command == "!wa delete-portal"
         removed = True
         return "$delete"
 
@@ -876,3 +877,17 @@ def test_room_relay_only_for_bridged_rooms(project):
         {"op": "bridge.whatsapp.room_relay", "actor": "olga", "params": {"room_id": "not a room"}}
     )
     assert reply["ok"] is False
+
+
+def test_portal_commands_use_the_prefix_configured_for_the_bridge(project):
+    root, fake = project
+    configure_portal(project)
+    config_path = root / "data" / "whatsapp_bridge" / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["bridge"]["command_prefix"] = "!whatsapp"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    bridges.set_room_relay(AgentContext(root), PORTAL)
+
+    sent = [body["body"] for _, path, body, _ in fake.requests if "/send/m.room.message/" in path]
+    assert sent == ["!whatsapp set-relay"]

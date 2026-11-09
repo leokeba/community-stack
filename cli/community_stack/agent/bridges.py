@@ -346,6 +346,27 @@ def _send(context, room_id: str, text: str) -> str:
     return reply["event_id"]
 
 
+def _command_prefix(context, spec: BridgeSpec) -> str:
+    """The prefix the bridge expects on commands sent in a portal room."""
+    config_path = context.project_dir / "data" / spec.service / "config.yaml"
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        config = {}
+    bridge = config.get("bridge") if isinstance(config, dict) else None
+    prefix = bridge.get("command_prefix") if isinstance(bridge, dict) else None
+    if isinstance(prefix, str) and prefix.strip():
+        return prefix.strip()
+    if not spec.command_prefix:
+        raise BridgeError(f"The {spec.name} bridge has no known command prefix.")
+    return spec.command_prefix
+
+
+def _send_portal_command(context, room_id: str, command: str, spec: BridgeSpec) -> str:
+    """Post a bot command in a portal room; outside the management room it needs the prefix."""
+    return _send(context, room_id, f"{_command_prefix(context, spec)} {command}")
+
+
 def _redact_command_event(context, room_id: str, event_id: str) -> None:
     txn = secrets.token_hex(8)
     path = (
@@ -887,7 +908,7 @@ def remove_portal_room(context, room_id: str, confirmation: str) -> dict[str, st
     except provision.ProvisionError as exc:
         raise BridgeError(str(exc)) from exc
 
-    event_id = _send(context, room_id, "delete-portal")
+    event_id = _send_portal_command(context, room_id, "delete-portal", WHATSAPP)
     deadline = time.monotonic() + REPLY_TIMEOUT_SECONDS
     bot = f"@{WHATSAPP.bot_localpart}:{_server_name(context)}"
     while time.monotonic() < deadline:
@@ -923,7 +944,7 @@ def set_room_relay(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> dict[s
         raise BridgeError(f"That room is not a bridged {spec.name} room.")
     bot = f"@{spec.bot_localpart}:{_server_name(context)}"
     _join_portal_as_admin(context, room_id, spec)
-    event_id = _send(context, room_id, "set-relay")
+    event_id = _send_portal_command(context, room_id, "set-relay", spec)
     replies = _collect_replies(context, room_id, event_id, bot, spec)
     return {
         "room_id": room_id,
