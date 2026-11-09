@@ -17,7 +17,7 @@ from community_stack.secrets import parse_env_file
 
 
 def test_prepare_vikunja_generates_secrets_and_persistent_paths(tmp_path):
-    config = load_config("community-stack.yaml")
+    config = load_config("config/example.yaml")
     config["services"]["vikunja"].update(enabled=True, hostname="tasks.community.org")
     env_file = tmp_path / ".env"
     env_file.write_text("RESTIC_PASSWORD=keep-this\n", encoding="utf-8")
@@ -39,7 +39,7 @@ def test_prepare_vikunja_generates_secrets_and_persistent_paths(tmp_path):
 
 
 def test_prepare_disabled_vikunja_creates_the_empty_route_before_proxy_start(tmp_path):
-    config = load_config("community-stack.yaml")
+    config = load_config("config/example.yaml")
 
     prepare_vikunja(tmp_path, config, tmp_path / ".env")
 
@@ -49,7 +49,7 @@ def test_prepare_disabled_vikunja_creates_the_empty_route_before_proxy_start(tmp
 
 
 def test_prepare_vikunja_refuses_to_regenerate_secrets_for_existing_data(tmp_path):
-    config = load_config("community-stack.yaml")
+    config = load_config("config/example.yaml")
     config["services"]["vikunja"]["enabled"] = True
     database = tmp_path / "data/vikunja/postgres"
     database.mkdir(parents=True)
@@ -64,7 +64,7 @@ def test_prepare_vikunja_refuses_to_regenerate_secrets_for_existing_data(tmp_pat
 def test_prepare_vikunja_does_not_inspect_protected_storage_when_secrets_exist(
     tmp_path, monkeypatch
 ):
-    config = load_config("community-stack.yaml")
+    config = load_config("config/example.yaml")
     config["services"]["vikunja"]["enabled"] = True
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -91,7 +91,7 @@ def test_prepare_vikunja_does_not_inspect_protected_storage_when_secrets_exist(
 def test_prepare_vikunja_refuses_to_generate_secrets_if_storage_cannot_be_inspected(
     tmp_path, monkeypatch
 ):
-    config = load_config("community-stack.yaml")
+    config = load_config("config/example.yaml")
     config["services"]["vikunja"]["enabled"] = True
     env_file = tmp_path / ".env"
     env_file.write_text("RESTIC_PASSWORD=keep-this\n", encoding="utf-8")
