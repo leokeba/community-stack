@@ -527,6 +527,7 @@ def _write_whatsapp_config(path: Path, config: dict, original_stat: os.stat_resu
             yaml.safe_dump(config, stream, sort_keys=False)
             stream.flush()
             os.fsync(stream.fileno())
+        os.chown(temporary, original_stat.st_uid, original_stat.st_gid)
         os.chmod(temporary, stat.S_IMODE(original_stat.st_mode))
         os.replace(temporary, path)
     finally:

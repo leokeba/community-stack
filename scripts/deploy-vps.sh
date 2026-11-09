@@ -124,7 +124,7 @@ else
     sudo -n -u community "$project_dir/.venv/bin/pip" install --quiet -e "$project_dir"
 fi
 sudo -n -u community "$project_dir/.venv/bin/community-stack" --help >/dev/null
-sudo -n -u community "$project_dir/.venv/bin/python" - "$project_dir" <<'PY'
+sudo -n "$project_dir/.venv/bin/python" - "$project_dir" <<'PY'
 from pathlib import Path
 import sys
 

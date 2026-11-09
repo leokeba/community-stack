@@ -90,6 +90,7 @@ def test_prepare_whatsapp_migrates_existing_config_without_losing_allowlist(tmp_
         ),
         encoding="utf-8",
     )
+    original_config_stat = bridge_config_path.stat()
     env_path = root / ".env"
     env_path.write_text(
         "WHATSAPP_AS_TOKEN=existing-as-token\nWHATSAPP_HS_TOKEN=existing-hs-token\n",
@@ -124,6 +125,11 @@ def test_prepare_whatsapp_migrates_existing_config_without_losing_allowlist(tmp_
         "mode": "allow",
         "list": ["123456789@g.us"],
     }
+    if os.name == "posix":
+        migrated_stat = bridge_config_path.stat()
+        assert migrated_stat.st_uid == original_config_stat.st_uid
+        assert migrated_stat.st_gid == original_config_stat.st_gid
+        assert migrated_stat.st_mode & 0o777 == original_config_stat.st_mode & 0o777
 
 
 def test_prepare_whatsapp_requires_matrix_and_does_not_replace_existing_bridge_data(tmp_path):
