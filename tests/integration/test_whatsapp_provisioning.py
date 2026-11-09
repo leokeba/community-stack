@@ -53,8 +53,8 @@ def test_prepare_whatsapp_provisions_secrets_config_and_synapse_registration(tmp
     bridge_config = yaml.safe_load(
         (root / "data/whatsapp_bridge/config.yaml").read_text(encoding="utf-8")
     )
-    assert bridge_config["history_sync"]["max_initial_conversations"] == 0
-    assert bridge_config["history_sync"]["request_full_sync"] is False
+    assert bridge_config["network"]["history_sync"]["max_initial_conversations"] == 0
+    assert bridge_config["network"]["history_sync"]["request_full_sync"] is False
     assert bridge_config["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
     registrations = yaml.safe_load(homeserver_path.read_text())["app_service_config_files"]
     assert registrations == [
@@ -79,6 +79,15 @@ def test_prepare_whatsapp_migrates_existing_config_without_losing_allowlist(tmp_
         yaml.safe_dump(
             {
                 "homeserver": {"domain": "community.test"},
+                "network": {
+                    "displayname_template": "{{.FullName}}",
+                    "history_sync": {
+                        "max_initial_conversations": -1,
+                        "request_full_sync": True,
+                        "backwards_on_demand": True,
+                    },
+                },
+                "history_sync": {"max_initial_conversations": 25},
                 "bridge": {
                     "history_sync": {"max_initial_conversations": 0},
                     "portal_create_filter": {
@@ -118,8 +127,10 @@ def test_prepare_whatsapp_migrates_existing_config_without_losing_allowlist(tmp_
     provision.prepare_whatsapp(root, config, env_path, Path("services"))
 
     migrated = yaml.safe_load(bridge_config_path.read_text(encoding="utf-8"))
-    assert migrated["history_sync"]["max_initial_conversations"] == 0
-    assert migrated["history_sync"]["request_full_sync"] is False
+    assert migrated["network"]["history_sync"]["max_initial_conversations"] == 0
+    assert migrated["network"]["history_sync"]["request_full_sync"] is False
+    assert migrated["network"]["history_sync"]["backwards_on_demand"] is True
+    assert "history_sync" not in migrated
     assert "history_sync" not in migrated["bridge"]
     assert migrated["bridge"]["portal_create_filter"] == {
         "mode": "allow",

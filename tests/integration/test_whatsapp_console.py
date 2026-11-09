@@ -218,6 +218,30 @@ def test_diagnostics_name_what_is_missing_and_how_to_fix_it(project):
     assert bridges.status(AgentContext(root))["healthy"] is False
 
 
+def test_diagnostics_verify_network_history_sync_safeguards(project):
+    root, _ = project
+    config_path = root / "data" / "whatsapp_bridge" / "config.yaml"
+    config_path.parent.mkdir(parents=True)
+    config = {
+        "network": {
+            "history_sync": {
+                "max_initial_conversations": 0,
+                "request_full_sync": False,
+            }
+        },
+        "bridge": {"portal_create_filter": {"mode": "allow", "list": []}},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["privacy_guard"]["ok"] is True
+
+    config["network"]["history_sync"]["max_initial_conversations"] = -1
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    checks = {check["id"]: check for check in bridges.diagnose(AgentContext(root))}
+    assert checks["privacy_guard"]["ok"] is False
+
+
 def test_a_registration_written_after_synapse_started_is_flagged(project, monkeypatch):
     root, _ = project
     from datetime import datetime, timezone
@@ -390,9 +414,11 @@ def test_adding_a_whatsapp_group_allows_only_that_group_and_redacts_the_invite(
     config_path.write_text(
         yaml.safe_dump(
             {
-                "history_sync": {
-                    "max_initial_conversations": 0,
-                    "request_full_sync": False,
+                "network": {
+                    "history_sync": {
+                        "max_initial_conversations": 0,
+                        "request_full_sync": False,
+                    },
                 },
                 "bridge": {"portal_create_filter": {"mode": "allow", "list": []}},
             }
@@ -438,8 +464,8 @@ def test_the_template_bridges_no_chats_until_they_are_listed():
     template = yaml.safe_load(
         Path("services/whatsapp_bridge/config.template.yaml").read_text(encoding="utf-8")
     )
-    assert template["history_sync"]["max_initial_conversations"] == 0
-    assert template["history_sync"]["request_full_sync"] is False
+    assert template["network"]["history_sync"]["max_initial_conversations"] == 0
+    assert template["network"]["history_sync"]["request_full_sync"] is False
     assert "history_sync" not in template["bridge"]
     assert template["bridge"]["portal_create_filter"] == {"mode": "allow", "list": []}
 

@@ -549,15 +549,27 @@ def ensure_whatsapp_privacy_config(path: Path) -> bool:
     """Keep WhatsApp history sync disabled and portal creation explicitly allow-only."""
     original, original_stat = _load_whatsapp_config(path)
     config = deepcopy(original)
-    history_sync = config.setdefault("history_sync", {})
+    network = config.setdefault("network", {})
     bridge = config.setdefault("bridge", {})
-    if not isinstance(history_sync, dict) or not isinstance(bridge, dict):
+    if not isinstance(network, dict) or not isinstance(bridge, dict):
         raise ProvisionError("The WhatsApp privacy settings have an invalid configuration shape.")
 
-    legacy_history_sync = bridge.pop("history_sync", None)
-    if isinstance(legacy_history_sync, dict):
-        for key, value in legacy_history_sync.items():
-            history_sync.setdefault(key, value)
+    history_sync = network.setdefault("history_sync", {})
+    if not isinstance(history_sync, dict):
+        raise ProvisionError(
+            "The WhatsApp history sync settings have an invalid configuration shape."
+        )
+    for legacy_history_sync in (
+        config.pop("history_sync", None),
+        bridge.pop("history_sync", None),
+    ):
+        if legacy_history_sync is not None and not isinstance(legacy_history_sync, dict):
+            raise ProvisionError(
+                "The WhatsApp history sync settings have an invalid configuration shape."
+            )
+        if isinstance(legacy_history_sync, dict):
+            for key, value in legacy_history_sync.items():
+                history_sync.setdefault(key, value)
     history_sync["max_initial_conversations"] = 0
     history_sync["request_full_sync"] = False
 

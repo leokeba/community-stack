@@ -416,7 +416,7 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
             bridge_config = (
                 yaml.safe_load((data_dir / "config.yaml").read_text(encoding="utf-8")) or {}
             )
-            history_sync = bridge_config.get("history_sync", {})
+            history_sync = bridge_config.get("network", {}).get("history_sync", {})
             bridge_settings = bridge_config.get("bridge", {})
             portal_filter = bridge_settings.get("portal_create_filter", {})
             privacy_ok = (

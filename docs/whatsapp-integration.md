@@ -67,6 +67,8 @@ admin operation; invite links are not written to the admin audit log.
   Tell group members before bridging, and never bridge private coordination rooms.
 - The allowlist and disabled initial sync prevent future bulk contact/conversation
   creation. They do not remove ghost users or portal rooms created before this fix.
+- The pinned mautrix-whatsapp v26 configuration stores history-sync settings under
+  `network.history_sync`; the admin status check verifies the settings at that path.
 
 ## Privacy, storage and operations
 

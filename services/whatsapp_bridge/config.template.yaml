@@ -4,6 +4,9 @@
 
 network:
   displayname_template: "{{or .FullName .PushName}} (WA)"
+  history_sync:
+    max_initial_conversations: 0
+    request_full_sync: false
 
 homeserver:
   address: http://matrix-synapse:8008
@@ -25,10 +28,6 @@ appservice:
 database:
   type: sqlite3-fk-wal
   uri: file:/data/mautrix-whatsapp.db?_txlock=immediate
-
-history_sync:
-  max_initial_conversations: 0
-  request_full_sync: false
 
 bridge:
   personal_filtering_spaces: false
