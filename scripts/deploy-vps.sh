@@ -144,6 +144,7 @@ PY
 if bridge_state="$(sudo -n docker inspect community_whatsapp_bridge \
     --format '{{.State.Status}}' 2>/dev/null)"; then
     if [[ "$bridge_state" == running ]]; then
+        bridge_was_running=true
         sudo -n docker stop community_whatsapp_bridge >/dev/null
     fi
 else
@@ -170,6 +171,11 @@ if [[ -n "${bridge_state:-}" ]]; then
         printf 'WhatsApp bridge is still running after its privacy migration.\n' >&2
         exit 1
     fi
+fi
+# Bring the bridge back if it was running before the migration; docker stop
+# otherwise leaves it down until someone starts it by hand.
+if [[ "${bridge_was_running:-false}" == true ]]; then
+    sudo -n docker start community_whatsapp_bridge >/dev/null
 fi
 # The announcements container runs as the UID/GID in .env (COMMUNITY_STACK_UID/GID), which
 # is not always 1000. Read only those two numbers, and give the contact page folder that
