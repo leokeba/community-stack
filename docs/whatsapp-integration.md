@@ -56,8 +56,9 @@ appservice bot's authorized Matrix identity; it does not grant the stack admin
 or the invitee room-admin power. Rooms that are no longer allowlisted remain
 visible for cleanup but cannot be used to invite additional accounts.
 If an allowlisted group still points to a Matrix room that was deleted, the
-console offers a stale-mapping reset. Stop the bridge first, reset the reference,
-then restart it; send a new group message if a fresh portal is not created.
+console offers a stale-mapping repair. Stop the bridge first, then attach the
+group to one of its live matching rooms or clear the stale reference. Restart
+the bridge afterward; send a new group message if a fresh portal is needed.
 
 ## Two operating models
 
@@ -93,8 +94,8 @@ then restart it; send a new group message if a fresh portal is not created.
 - On the WhatsApp bridge page, remove stale saved group records that have no Matrix
   room, or remove a bridged portal. Removing a bridged portal also deletes its Matrix
   room and revokes that group's allowlist entry. If the Matrix room was deleted
-  separately, reset its stale mapping from the same page; this preserves the group
-  record and allowlist.
+  separately, repair its stale mapping from the same page; this preserves the group
+  record and allowlist, and can reconnect it to a live matching room.
 - The pinned mautrix-whatsapp v26 configuration stores history-sync settings under
   `network.history_sync` and member-sync limits under `network.max_member_sync`; the
   admin status check verifies both settings and the portal allowlist.

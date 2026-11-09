@@ -644,10 +644,12 @@ def test_stale_mapped_portals_are_reported_when_synapse_room_is_missing(project,
     )
 
     assert reply["ok"] is True
-    assert reply["result"]["portals"] == [{"group_id": "123456789@g.us", "name": "Neighbours"}]
+    assert reply["result"]["portals"] == [
+        {"group_id": "123456789@g.us", "name": "Neighbours", "candidates": []}
+    ]
 
 
-def test_stale_portal_mapping_reset_preserves_group_and_allowlist(project, monkeypatch):
+def test_stale_portal_mapping_repair_preserves_group_and_allowlist(project, monkeypatch):
     root, _ = project
     configure_portal(project)
     container = {"name": bridges.WHATSAPP.container, "state": "running"}
@@ -658,18 +660,18 @@ def test_stale_portal_mapping_reset_preserves_group_and_allowlist(project, monke
     group_id = "123456789@g.us"
 
     with pytest.raises(bridges.BridgeError, match="Stop the WhatsApp bridge"):
-        bridges.reset_stale_portal(context, group_id, "yes")
+        bridges.repair_stale_portal(context, group_id, "yes")
 
     container["state"] = "exited"
     reply = AgentService(context).handle(
         {
-            "op": "bridge.whatsapp.portal_mapping_reset",
+            "op": "bridge.whatsapp.portal_mapping_repair",
             "actor": "olga",
             "params": {"group_id": group_id, "confirmation": "yes"},
         }
     )
-    assert reply["ok"] is True
-    assert reply["result"] == {"reset": 1}
+    assert reply["ok"] is True, reply
+    assert reply["result"] == {"updated": 1, "attached": False}
     with sqlite3.connect(root / "data" / "whatsapp_bridge" / "mautrix-whatsapp.db") as db:
         assert db.execute("SELECT mxid FROM portal WHERE id = ?", (group_id,)).fetchone() == (None,)
     saved_config = yaml.safe_load(
@@ -678,7 +680,7 @@ def test_stale_portal_mapping_reset_preserves_group_and_allowlist(project, monke
     assert saved_config["bridge"]["portal_create_filter"]["list"] == [group_id]
 
 
-def test_stale_portal_mapping_reset_refuses_a_room_that_still_exists(project, monkeypatch):
+def test_stale_portal_mapping_repair_refuses_a_room_that_still_exists(project, monkeypatch):
     root, _ = project
     configure_portal(project)
     monkeypatch.setattr(docker, "is_docker_available", lambda: True)
@@ -690,7 +692,71 @@ def test_stale_portal_mapping_reset_refuses_a_room_that_still_exists(project, mo
     monkeypatch.setattr(matrix_admin, "_call", lambda context, method, path, body=None: (200, {}))
 
     with pytest.raises(bridges.BridgeError, match="room still exists"):
-        bridges.reset_stale_portal(AgentContext(root), "123456789@g.us", "yes")
+        bridges.repair_stale_portal(AgentContext(root), "123456789@g.us", "yes")
+
+
+def test_stale_portal_mapping_can_attach_to_a_live_room_for_the_same_group(project, monkeypatch):
+    root, _ = project
+    configure_portal(project)
+    container = {"name": bridges.WHATSAPP.container, "state": "exited"}
+    live_room = "!live:community.test"
+    group_id = "123456789@g.us"
+    admin = f"@community-stack-admin:{SERVER}"
+    state = [
+        {
+            "type": "m.room.create",
+            "origin_server_ts": 1762732800000,
+            "content": {},
+        },
+        {"type": "m.room.name", "state_key": "", "content": {"name": "Neighbours"}},
+        {"type": "m.room.member", "state_key": BOT, "content": {"membership": "join"}},
+        {"type": "m.room.member", "state_key": admin, "content": {"membership": "join"}},
+        {
+            "type": "m.bridge",
+            "state_key": "",
+            "content": {
+                "bridgebot": BOT,
+                "protocol": {"id": "whatsapp"},
+                "channel": {"id": group_id, "displayname": "Neighbours"},
+            },
+        },
+    ]
+    monkeypatch.setattr(docker, "is_docker_available", lambda: True)
+    monkeypatch.setattr(docker, "list_community_containers", lambda: [container])
+    monkeypatch.setattr(matrix_admin, "_call", lambda context, method, path, body=None: (404, {}))
+    monkeypatch.setattr(
+        bridges,
+        "_appservice_request",
+        lambda context, method, path, body, token, bot, spec: (
+            200,
+            {"joined_rooms": [live_room]},
+        ),
+    )
+    monkeypatch.setattr(bridges, "_room_state", lambda context, room_id, token, bot, spec: state)
+    candidates = bridges.stale_portals(AgentContext(root))[0]["candidates"]
+    assert candidates[0]["room_id"] == live_room
+    assert candidates[0]["name"] == "Neighbours"
+    assert candidates[0]["members"] == 2
+    assert candidates[0]["admin_joined"] is True
+
+    reply = AgentService(AgentContext(root)).handle(
+        {
+            "op": "bridge.whatsapp.portal_mapping_repair",
+            "actor": "olga",
+            "params": {
+                "group_id": group_id,
+                "confirmation": "yes",
+                "room_id": live_room,
+            },
+        }
+    )
+
+    assert reply["ok"] is True, reply
+    assert reply["result"] == {"updated": 1, "attached": True}
+    with sqlite3.connect(root / "data" / "whatsapp_bridge" / "mautrix-whatsapp.db") as db:
+        assert db.execute("SELECT mxid FROM portal WHERE id = ?", (group_id,)).fetchone() == (
+            live_room,
+        )
 
 
 def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(project, monkeypatch):

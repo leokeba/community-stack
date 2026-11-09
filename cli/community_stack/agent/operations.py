@@ -286,7 +286,7 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
             + [re.escape(f"{LOGIN_COMMAND} {flow}") for flow in spec.login_flows]
         )
     )
-    room_pattern = re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}")
+    room_pattern = re.compile(r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}")
     operations = (
         Operation(
             f"bridge.{key}.status",
@@ -382,19 +382,23 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
                 summary="Remove a saved WhatsApp group record that has no Matrix room.",
             ),
             Operation(
-                "bridge.whatsapp.portal_mapping_reset",
+                "bridge.whatsapp.portal_mapping_repair",
                 CHANGE,
                 "system",
                 _bridge_call(
-                    lambda context, params: bridges.reset_stale_portal(
-                        context, params["group_id"], params["confirmation"]
+                    lambda context, params: bridges.repair_stale_portal(
+                        context,
+                        params["group_id"],
+                        params["confirmation"],
+                        params.get("room_id", ""),
                     )
                 ),
                 params=(
                     Param("group_id", bridges.GROUP_ID_PATTERN, required=True),
                     Param("confirmation", re.compile("yes"), required=True),
+                    Param("room_id", room_pattern),
                 ),
-                summary="Clear a deleted Matrix room mapping for one allowlisted WhatsApp group.",
+                summary="Repair a deleted Matrix room mapping for one allowlisted WhatsApp group.",
             ),
             Operation(
                 "bridge.whatsapp.group_disallow",
