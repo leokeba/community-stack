@@ -27,7 +27,6 @@ import yaml
 from community_stack import docker, provision
 from community_stack.agent import matrix_admin
 from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
-from community_stack.secrets import parse_env_file
 
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
 GROUP_ID_PATTERN = provision.WHATSAPP_GROUP_ID_PATTERN
@@ -127,15 +126,35 @@ def _room_name(context, room_id: str) -> str:
 
 
 def _appservice_token(context, spec: BridgeSpec) -> tuple[str, str]:
+    path = context.project_dir / "data" / spec.service / "registration.yaml"
     try:
-        secrets = parse_env_file(context.env_path)
-    except OSError as exc:
-        raise BridgeError(f"The {spec.name} appservice credentials cannot be read.") from exc
-    token = secrets.get(f"{spec.secret_prefix}_AS_TOKEN")
+        registration = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise BridgeError(f"The {spec.name} appservice registration cannot be read.") from exc
+    if not isinstance(registration, dict):
+        raise BridgeError(f"The {spec.name} appservice registration is invalid.")
+
+    token = registration.get("as_token")
     bot = f"@{spec.bot_localpart}:{_server_name(context)}"
-    if not spec.secret_prefix or not spec.bot_localpart or not token:
+    namespaces_config = registration.get("namespaces", {})
+    namespaces = namespaces_config.get("users", []) if isinstance(namespaces_config, dict) else []
+    authorized = False
+    if isinstance(namespaces, list):
+        for namespace in namespaces:
+            if not isinstance(namespace, dict) or namespace.get("exclusive") is not True:
+                continue
+            pattern = namespace.get("regex")
+            if not isinstance(pattern, str):
+                continue
+            try:
+                if re.fullmatch(pattern, bot):
+                    authorized = True
+                    break
+            except re.error:
+                continue
+    if not isinstance(token, str) or not token or not authorized:
         raise BridgeError(
-            f"The {spec.name} appservice token is missing from the server secrets file."
+            f"The {spec.name} registration does not authorize its configured bot identity."
         )
     return token, bot
 
