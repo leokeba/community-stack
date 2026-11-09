@@ -36,45 +36,49 @@
       <nav class="nav" id="console-nav" aria-label="Administration">
         <div class="nav-group">
           {{ nav_link("/admin", "Dashboard", exact=True) }}
+          {% if perms.system %}{{ nav_link("/admin/start", "Setup checklist") }}{% endif %}
         </div>
         <div class="nav-group">
           <p class="nav-heading">Publishing</p>
           {{ nav_link("/admin/announcements", "Announcements") }}
           {% if perms.edit %}{{ nav_link("/admin/templates", "Templates") }}{% endif %}
-        </div>
-        {% if perms.settings %}
-        <div class="nav-group">
-          <p class="nav-heading">Channels</p>
-          {{ nav_link("/admin/channels", "Channels", match=("/admin/channels", "/admin/whatsapp")) }}
+          {% if perms.settings %}
+          {{ nav_link("/admin/channels", "Channels") }}
           {{ nav_link("/admin/mirroring", "Mirrored rooms") }}
+          {{ nav_link("/admin/subscribers", "Subscribers") }}
           {{ nav_link("/admin/settings", "Publishing settings") }}
           {{ nav_link("/admin/community", "Community profile") }}
-          {{ nav_link("/admin/subscribers", "Subscribers") }}
-          {{ nav_link("/admin/continuity", "Continuity mode") }}
-          {{ nav_link("/admin/continuity/readiness", "Readiness and drills") }}
+          {% endif %}
+        </div>
+        {% if perms.system %}
+        <div class="nav-group">
+          <p class="nav-heading">Chat</p>
+          {{ nav_link("/admin/matrix-users", "Matrix users") }}
+          {{ nav_link("/admin/bridges", "Bridges", match=("/admin/bridges", "/admin/whatsapp")) }}
+          {{ nav_link("/admin/safe-mode", "Safe Mode") }}
         </div>
         {% endif %}
-        {% if perms.accounts or perms.system %}
+        {% if perms.settings %}
         <div class="nav-group">
-          <p class="nav-heading">People</p>
-          {% if perms.accounts %}{{ nav_link("/admin/accounts", "Console accounts") }}{% endif %}
-          {% if perms.system %}{{ nav_link("/admin/matrix-users", "Matrix users") }}{% endif %}
-          {% if perms.system %}{{ nav_link("/admin/vikunja-users", "Vikunja users") }}{% endif %}
-          {% if perms.system %}{{ nav_link("/admin/safe-mode", "Safe Mode") }}{% endif %}
+          <p class="nav-heading">Continuity</p>
+          {{ nav_link("/admin/continuity", "Continuity mode", exact=True) }}
+          {{ nav_link("/admin/continuity/readiness", "Readiness and drills") }}
         </div>
         {% endif %}
         {% if perms.system %}
         <div class="nav-group">
           <p class="nav-heading">Server</p>
-          {{ nav_link("/admin/health", "Health and logs") }}
           {{ nav_link("/admin/services", "Services and updates") }}
+          {{ nav_link("/admin/health", "Health and logs") }}
           {{ nav_link("/admin/backups", "Backups") }}
-          {{ nav_link("/admin/start", "Setup checklist") }}
         </div>
         {% endif %}
-        {% if perms.audit %}
+        {% if perms.accounts or perms.system or perms.audit %}
         <div class="nav-group">
-          {{ nav_link("/admin/audit", "Activity log") }}
+          <p class="nav-heading">Accounts</p>
+          {% if perms.accounts %}{{ nav_link("/admin/accounts", "Console accounts") }}{% endif %}
+          {% if perms.system %}{{ nav_link("/admin/vikunja-users", "Vikunja users") }}{% endif %}
+          {% if perms.audit %}{{ nav_link("/admin/audit", "Activity log") }}{% endif %}
         </div>
         {% endif %}
       </nav>
