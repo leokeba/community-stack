@@ -445,6 +445,31 @@ def set_service(context, service: str, running: bool) -> None:
             prepare_service(context.project_dir, service, config, context.env_path)
         except (OSError, ValueError, ProvisionError) as exc:
             raise SettingsError(str(exc)) from exc
+    if service in BRIDGE_SERVICES and running:
+        try:
+            result = docker.run_compose(
+                context.services_dir / service,
+                ["down"],
+                env_file=context.env_path,
+                capture_output=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SettingsError(f"Could not stop {service} before reloading Synapse.") from exc
+        if result.returncode != 0:
+            raise SettingsError(f"Docker could not stop {service} before reloading Synapse.")
+        wait_for(context, service, False)
+        try:
+            result = docker.run_compose(
+                context.services_dir / "matrix",
+                ["restart", "synapse"],
+                env_file=context.env_path,
+                capture_output=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SettingsError(f"Could not reload the {service} appservice registration.") from exc
+        if result.returncode != 0:
+            raise SettingsError(f"Synapse could not reload the {service} appservice registration.")
+        wait_for(context, "matrix", True)
     if running:
         args = ["up", "-d", "--remove-orphans"]
     else:
@@ -472,16 +497,6 @@ def set_service(context, service: str, running: bool) -> None:
                 raise SettingsError(f"Could not reload Caddy's {service} route.") from exc
             if result.returncode != 0:
                 raise SettingsError(f"Caddy could not reload the {service} route.")
-    if service in BRIDGE_SERVICES and running:
-        result = docker.run_compose(
-            context.services_dir / "matrix",
-            ["restart", "synapse"],
-            env_file=context.env_path,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            raise SettingsError(f"Synapse could not reload the {service} appservice registration.")
-        wait_for(context, "matrix", True)
 
 
 def apply_changes(context, raw_changes: Any) -> dict[str, Any]:

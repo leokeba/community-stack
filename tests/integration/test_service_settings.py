@@ -194,6 +194,18 @@ def test_whatsapp_cannot_be_enabled_without_matrix(project):
         agent_settings.build_plan(context(root), {"services.whatsapp_bridge.enabled": "true"})
 
 
+def test_bridge_starts_only_after_synapse_reloads_its_registration(project, monkeypatch):
+    root, fake = project
+    monkeypatch.setattr(agent_settings, "prepare_service", lambda *args: None)
+
+    agent_settings.set_service(context(root), "whatsapp_bridge", True)
+
+    bridge_down = fake.calls.index(("whatsapp_bridge", ["down"]))
+    synapse_restart = fake.calls.index(("matrix", ["restart", "synapse"]))
+    bridge_up = fake.calls.index(("whatsapp_bridge", ["up", "-d", "--remove-orphans"]))
+    assert bridge_down < synapse_restart < bridge_up
+
+
 def test_apply_backs_up_saves_and_stops_the_service(project):
     root, fake = project
 
