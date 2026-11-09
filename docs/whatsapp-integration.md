@@ -28,17 +28,33 @@ containers by hand.
    afterward if possible. Initial history sync is disabled. The allowlist is intended
    to restrict which chats get Matrix rooms, but it does not currently prevent all
    portal records or contact ghosts; see the privacy issue below.
-5. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
-   new portal room ID (starts with `!`) from **Bridged rooms**, save it as the
+5. In **Bridged rooms**, open the new portal in the self-hosted Element client.
+   The stack admin is automatically joined as a regular room member; it does not
+   need room-admin power. Use the room's **Invite** form to invite Matrix user IDs
+   such as `@person:example.org`. Invitees must accept the invitation in their
+   Matrix client.
+6. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
+   portal room ID (starts with `!`) from **Bridged rooms**, save it as the
    WhatsApp destination and press **Test connection**. Invite the announcements
-   account to the portal room. The test checks Matrix access, not phone linkage.
-6. To publish from an **existing Matrix room** to WhatsApp, open **Mirrored rooms**,
+   account using the same room-row invite form. The test checks Matrix access,
+   not phone linkage.
+7. To publish from an **existing Matrix room** to WhatsApp, open **Mirrored rooms**,
    add that source room, choose the WhatsApp destination, and select immediate
    publishing or review. Invite the announcements account to the source room first.
 
 The general command form only sends the allowlisted `help`, `list-logins`,
 `login qr`, and `cancel` commands. Group selection is a separate, validated
 admin operation; invite links are not written to the admin audit log.
+
+## Room access and invitations
+
+The **Bridged rooms** list is discovered from the bridge's saved portal records
+and Synapse room state, so it does not depend on the stack admin already being a
+room member. When an allowlisted portal appears, the console invites and joins
+`@community-stack-admin` as a regular member. The invite form uses the WhatsApp
+appservice bot's authorized Matrix identity; it does not grant the stack admin
+or the invitee room-admin power. Rooms that are no longer allowlisted remain
+visible for cleanup but cannot be used to invite additional accounts.
 
 ## Two operating models
 

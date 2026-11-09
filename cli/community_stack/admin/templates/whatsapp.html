@@ -115,20 +115,43 @@
     <input type="hidden" name="command" value="help">
     <button type="submit" class="secondary"{% if not agent_available %} disabled{% endif %}>Show bridge commands</button>
   </form>
-  <p>After adding a group, copy its Matrix room ID from the <strong>Bridged rooms</strong> table below. Save it as the WhatsApp destination on the <a href="/admin/channels">Channels page</a>, then invite the announcements account to the portal room.</p>
+  <p>Open a portal from <strong>Bridged rooms</strong> and invite Matrix accounts there. To forward announcements to WhatsApp, save the portal room ID as the destination on the <a href="/admin/channels">Channels page</a> and invite the announcements account from the same room row.</p>
   <p class="notice">Mautrix WhatsApp is an unofficial, bidirectional bridge: messages in a bridged group also appear in Matrix. Only bridge a group intended for this purpose, and tell its members first. Bridged messages are readable by the server operator, so do not claim end-to-end encryption across WhatsApp.</p>
 </section>
 
 <section class="panel" id="bridged-rooms">
   <h2>Bridged rooms</h2>
   {% if rooms %}
-  <p>These Matrix rooms were created by the bridge for allowlisted WhatsApp groups. Removing a portal also deletes its Matrix room and revokes the group’s allowlist entry.</p>
+  <p>The stack admin joins allowlisted portal rooms automatically. Invitees still need to accept the Matrix invitation. Older rooms that are no longer allowlisted remain visible for cleanup, but cannot invite more accounts.</p>
   <table>
-    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th><th>Remove</th></tr></thead>
+    <thead><tr><th>Name and access</th><th>Members</th><th>Matrix room</th><th>Invite a Matrix account</th><th>Relay</th><th>Remove</th></tr></thead>
     <tbody>
     {% for room in rooms %}
     <tr>
-      <td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td>
+      <td>
+        <strong>{{ room.name }}</strong><br>
+        {% if room.allowed %}<span>Allowlisted</span>{% else %}<span class="muted">Not allowlisted</span>{% endif %}
+        <br><span class="muted">Stack admin: {{ room.admin_access }}</span>
+        {% if room.access_error %}<br><span class="error" role="alert">{{ room.access_error }}</span>{% endif %}
+      </td>
+      <td>{{ room.members }}</td>
+      <td>
+        <a href="/app/#/room/{{ room.room_id }}?via={{ room.room_id.split(':', 1)[1] }}">Open in Element</a><br>
+        <code>{{ room.room_id }}</code>
+      </td>
+      <td>
+        {% if room.allowed %}
+        <form method="post" action="/admin/whatsapp/room-invite">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <label for="whatsapp-mxid-{{ loop.index }}">Matrix user ID</label>
+          <input id="whatsapp-mxid-{{ loop.index }}" name="user_id" type="text" placeholder="@person:matrix.example.org" autocapitalize="off" spellcheck="false" required>
+          <button type="submit"{% if not agent_available %} disabled{% endif %}>Invite</button>
+        </form>
+        {% else %}
+        <span class="muted">Allow this WhatsApp group before inviting.</span>
+        {% endif %}
+      </td>
       <td>
         <form method="post" action="/admin/whatsapp/room-relay" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

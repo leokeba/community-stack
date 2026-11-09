@@ -329,6 +329,21 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
             params=(Param("room_id", room_pattern, required=True),),
             summary=f"Let the linked account relay messages into one bridged {spec.name} room.",
         ),
+        Operation(
+            f"bridge.{key}.room_invite",
+            CHANGE,
+            "system",
+            _bridge_call(
+                lambda context, params: bridges.invite_portal_user(
+                    context, params["room_id"], params["user_id"], spec
+                )
+            ),
+            params=(
+                Param("room_id", room_pattern, required=True),
+                Param("user_id", matrix_admin.USER_ID, required=True),
+            ),
+            summary=f"Invite a Matrix account to one {spec.name} portal room.",
+        ),
     )
     if key == WHATSAPP.key:
         operations += (

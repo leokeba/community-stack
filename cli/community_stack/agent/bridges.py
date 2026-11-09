@@ -20,7 +20,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import yaml
 
@@ -123,6 +123,164 @@ def _room_name(context, room_id: str) -> str:
         context, "GET", f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.name"
     )
     return (state.get("name") or "") if status == 200 else ""
+
+
+def _appservice_token(context, spec: BridgeSpec) -> tuple[str, str]:
+    path = context.project_dir / "data" / spec.service / "registration.yaml"
+    try:
+        registration = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise BridgeError(f"The {spec.name} appservice registration cannot be read.") from exc
+    if not isinstance(registration, dict):
+        raise BridgeError(f"The {spec.name} appservice registration is invalid.")
+
+    token = registration.get("as_token")
+    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    namespaces_config = registration.get("namespaces", {})
+    namespaces = namespaces_config.get("users", []) if isinstance(namespaces_config, dict) else []
+    authorized = False
+    if isinstance(namespaces, list):
+        for namespace in namespaces:
+            if not isinstance(namespace, dict) or namespace.get("exclusive") is not True:
+                continue
+            pattern = namespace.get("regex")
+            if not isinstance(pattern, str):
+                continue
+            try:
+                if re.fullmatch(pattern, bot):
+                    authorized = True
+                    break
+            except re.error:
+                continue
+    if not isinstance(token, str) or not token or not authorized:
+        raise BridgeError(
+            f"The {spec.name} registration does not authorize its configured bot identity."
+        )
+    return token, bot
+
+
+def _appservice_request(
+    context,
+    method: str,
+    path: str,
+    body: Any,
+    token: str,
+    bot: str,
+    spec: BridgeSpec,
+) -> tuple[int, Any]:
+    separator = "&" if "?" in path else "?"
+    path = f"{path}{separator}{urlencode({'user_id': bot})}"
+    try:
+        return matrix_admin.synapse_request(method, path, body, token)
+    except matrix_admin.MatrixAdminError as exc:
+        raise BridgeError(str(exc)) from exc
+
+
+def _room_state(
+    context, room_id: str, token: str, bot: str, spec: BridgeSpec
+) -> list[dict[str, Any]] | None:
+    status, state = _appservice_request(
+        context,
+        "GET",
+        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state",
+        None,
+        token,
+        bot,
+        spec,
+    )
+    if status == 404:
+        return None
+    if (
+        status != 200
+        or not isinstance(state, list)
+        or not all(isinstance(event, dict) for event in state)
+    ):
+        detail = state.get("error", status) if isinstance(state, dict) else status
+        raise BridgeError(f"Synapse could not inspect bridged room {room_id}: {detail}")
+    return state
+
+
+def _invite_as_bot(context, room_id: str, user_id: str, spec: BridgeSpec) -> None:
+    token, bot = _appservice_token(context, spec)
+    status, reply = _appservice_request(
+        context,
+        "POST",
+        f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/invite",
+        {"user_id": user_id},
+        token,
+        bot,
+        spec,
+    )
+    if status != 200:
+        detail = reply.get("error", status) if isinstance(reply, dict) else status
+        raise BridgeError(f"Synapse could not invite {user_id} to the room: {detail}")
+
+
+def _ensure_stack_admin_joined(
+    context, room_id: str, membership: str | None, spec: BridgeSpec
+) -> tuple[str, str]:
+    if membership in {"join", "leave", "ban"}:
+        return membership, ""
+
+    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
+    try:
+        if membership != "invite":
+            _invite_as_bot(context, room_id, admin, spec)
+        status, reply = _matrix(
+            context,
+            "POST",
+            f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/join",
+        )
+        if status != 200:
+            detail = reply.get("error", status) if isinstance(reply, dict) else status
+            raise BridgeError(f"Synapse could not add the stack admin to the room: {detail}")
+        return "join", ""
+    except BridgeError as exc:
+        return membership or "not_joined", str(exc)
+
+
+def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
+    database = context.project_dir / "data" / spec.service / "mautrix-whatsapp.db"
+    if not database.is_file():
+        return {}
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+            records = db.execute(
+                "SELECT id, mxid FROM portal WHERE mxid IS NOT NULL AND id GLOB '[0-9]*@g.us'"
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise BridgeError("Could not read the WhatsApp bridge portal database.") from exc
+
+    config_path = context.project_dir / "data" / spec.service / "config.yaml"
+    if config_path.is_file():
+        try:
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise BridgeError("Could not read the WhatsApp bridge allowlist.") from exc
+    else:
+        config = {}
+    if not isinstance(config, dict):
+        raise BridgeError("The WhatsApp bridge configuration is invalid.")
+    bridge_config = config.get("bridge", {})
+    portal_filter = (
+        bridge_config.get("portal_create_filter", {}) if isinstance(bridge_config, dict) else {}
+    )
+    allowed = portal_filter.get("list", []) if isinstance(portal_filter, dict) else []
+    if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
+        raise BridgeError("The WhatsApp bridge portal allowlist is invalid.")
+    allowed_groups = set(allowed) if portal_filter.get("mode") == "allow" else set()
+
+    portal_access: dict[str, bool] = {}
+    for group_id, room_id in records:
+        if (
+            not isinstance(group_id, str)
+            or not GROUP_ID_PATTERN.fullmatch(group_id)
+            or not isinstance(room_id, str)
+            or not re.fullmatch(r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id)
+        ):
+            continue
+        portal_access[room_id] = group_id in allowed_groups
+    return portal_access
 
 
 def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
@@ -526,26 +684,86 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
 
 
 def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
-    """Rooms the bridge created for chats: rooms the bot is in, minus its command chat."""
-    bot = f"@{spec.bot_localpart}:{_server_name(context)}"
-    status, joined = _matrix(context, "GET", "/_matrix/client/v3/joined_rooms")
+    """List rooms joined by the bridge bot, independent of the stack admin's membership."""
+    token, bot = _appservice_token(context, spec)
+    status, joined = _appservice_request(
+        context, "GET", "/_matrix/client/v3/joined_rooms", None, token, bot, spec
+    )
     if status != 200:
-        raise BridgeError("Synapse did not list the rooms for the admin account.")
+        detail = joined.get("error", status) if isinstance(joined, dict) else status
+        raise BridgeError(f"Synapse did not list rooms for the {spec.name} bot: {detail}")
+    room_ids = joined.get("joined_rooms") if isinstance(joined, dict) else None
+    if not isinstance(room_ids, list):
+        raise BridgeError(f"Synapse returned an invalid room list for the {spec.name} bot.")
+
     command_room = _load_room(context, spec)
-    rooms = []
-    for room_id in joined.get("joined_rooms", []):
+    whatsapp_access = _whatsapp_portal_access(context, spec) if spec.key == WHATSAPP.key else {}
+    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
+    rooms: list[dict[str, Any]] = []
+    for room_id in room_ids:
+        if not isinstance(room_id, str) or not re.fullmatch(
+            r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id
+        ):
+            continue
         if room_id == command_room:
             continue
-        members = _joined(context, room_id) or set()
-        if bot not in members:
+        if spec.key == WHATSAPP.key and room_id not in whatsapp_access:
             continue
-        name = _room_name(context, room_id)
+        state = _room_state(context, room_id, token, bot, spec)
+        if state is None:
+            continue
+        memberships = {
+            event.get("state_key"): event.get("content", {}).get("membership")
+            for event in state
+            if event.get("type") == "m.room.member"
+        }
+        if memberships.get(bot) != "join":
+            continue
+        name_event = next((event for event in state if event.get("type") == "m.room.name"), {})
+        name = name_event.get("content", {}).get("name") or ""
         if name == command_chat_name(spec):
             continue
+        is_allowed = whatsapp_access.get(room_id, True)
+        access_error = ""
+        admin_membership = memberships.get(admin)
+        if spec.key == WHATSAPP.key and is_allowed:
+            admin_membership, access_error = _ensure_stack_admin_joined(
+                context, room_id, admin_membership, spec
+            )
+            if admin_membership == "join":
+                memberships[admin] = "join"
+        access_labels = {
+            "join": "Joined",
+            "invite": "Invite pending",
+            "leave": "Not joined",
+            "ban": "Banned",
+        }
         rooms.append(
-            {"room_id": room_id, "name": name or "(unnamed room)", "members": len(members)}
+            {
+                "room_id": room_id,
+                "name": name or "(unnamed room)",
+                "members": sum(value == "join" for value in memberships.values()),
+                "allowed": is_allowed,
+                "admin_access": access_labels.get(admin_membership, "Not joined"),
+                "access_error": access_error,
+            }
         )
     return sorted(rooms, key=lambda room: room["name"].lower())
+
+
+def invite_portal_user(
+    context, room_id: str, user_id: str, spec: BridgeSpec = WHATSAPP
+) -> dict[str, str]:
+    """Invite a Matrix account to one allowlisted WhatsApp portal through the bridge bot."""
+    if not matrix_admin.USER_ID.fullmatch(user_id):
+        raise BridgeError("Enter a valid Matrix user ID, such as @alice:example.org.")
+    room = next((item for item in portal_rooms(context, spec) if item["room_id"] == room_id), None)
+    if not room:
+        raise BridgeError(f"That room is not an active {spec.name} bridge portal.")
+    if not room.get("allowed"):
+        raise BridgeError("Only allowlisted WhatsApp rooms can invite new Matrix accounts.")
+    _invite_as_bot(context, room_id, user_id, spec)
+    return {"room_id": room_id, "user_id": user_id}
 
 
 def orphaned_portals(context) -> list[dict[str, str]]:

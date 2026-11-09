@@ -3,7 +3,7 @@
 import base64
 import json
 import sqlite3
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 import yaml
@@ -12,6 +12,7 @@ from community_stack.admin.store import AdminStore
 from community_stack.agent import bridges, matrix_admin, updates
 from community_stack.agent.operations import AgentContext
 from community_stack.agent.server import AgentService
+from community_stack.bridges.catalogue import SIGNAL
 
 SERVER = "community.test"
 BOT = f"@whatsappbot:{SERVER}"
@@ -29,18 +30,64 @@ class FakeMatrix:
         self.events = []  # chronological
         self.rooms_created = 0
         self.counter = 0
+        self.portal_members = {
+            BOT: "join",
+            f"@community-stack-admin:{SERVER}": "join",
+        }
+        self.portal_name = "Neighbours"
+        self.requests = []
 
     def __call__(self, method, path, body=None, token=None):
         self.calls.append((method, path))
+        self.requests.append((method, path, body, token))
         if path == "/_matrix/client/v3/createRoom":
             self.rooms_created += 1
             return 200, {"room_id": ROOM}
-        if path == "/_matrix/client/v3/joined_rooms":
+        parsed = urlsplit(path)
+        if parsed.path == "/_matrix/client/v3/joined_rooms":
             return 200, {"joined_rooms": [ROOM, PORTAL]}
+        if parsed.path.startswith("/_matrix/client/v3/rooms/") and parsed.path.endswith("/state"):
+            room_id = unquote(parsed.path.split("/rooms/", 1)[1].removesuffix("/state"))
+            if room_id != PORTAL:
+                return 404, {}
+            state = [
+                {
+                    "type": "m.room.name",
+                    "state_key": "",
+                    "content": {"name": self.portal_name},
+                }
+            ]
+            state.extend(
+                {
+                    "type": "m.room.member",
+                    "state_key": user_id,
+                    "content": {"membership": membership},
+                }
+                for user_id, membership in self.portal_members.items()
+            )
+            return 200, state
+        if parsed.path.endswith("/invite"):
+            inviter = parse_qs(parsed.query).get("user_id", [""])[0]
+            if not inviter.startswith("@") or not inviter.endswith(f":{SERVER}"):
+                return 403, {"error": "appservice may not impersonate that user"}
+            self.portal_members[body["user_id"]] = "invite"
+            return 200, {}
+        if parsed.path.endswith("/join") and "/rooms/" in parsed.path:
+            room_id = unquote(parsed.path.split("/rooms/", 1)[1].removesuffix("/join"))
+            if room_id != PORTAL:
+                return 404, {}
+            self.portal_members[f"@community-stack-admin:{SERVER}"] = "join"
+            return 200, {"room_id": room_id}
         if path.endswith("/state/m.room.name"):
             return (200, {"name": "Neighbours"}) if PORTAL in unquote(path) else (404, {})
         if path.endswith("/joined_members"):
-            return 200, {"joined": {BOT: {}, f"@community-stack-admin:{SERVER}": {}}}
+            return 200, {
+                "joined": {
+                    user_id: {}
+                    for user_id, membership in self.portal_members.items()
+                    if membership == "join"
+                }
+            }
         if "/redact/" in path:
             event_id = unquote(path.split("/redact/", 1)[1].split("/", 1)[0])
             for event in self.events:
@@ -118,6 +165,50 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setattr(bridges, "_sleep", lambda seconds: None)
     monkeypatch.setattr(docker, "is_docker_available", lambda: False)
     return root, fake
+
+
+def configure_portal(project, *, allowed=True, members=None):
+    root, fake = project
+    data_dir = root / "data" / "whatsapp_bridge"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    group_id = "123456789@g.us"
+    (data_dir / "config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "bridge": {
+                    "portal_create_filter": {
+                        "mode": "allow",
+                        "list": [group_id] if allowed else [],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "registration.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "whatsapp",
+                "as_token": "appservice-secret",
+                "namespaces": {
+                    "users": [
+                        {
+                            "exclusive": True,
+                            "regex": r"^@whatsappbot:community\.test$",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
+        db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
+        db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
+    fake.portal_members = members or {
+        BOT: "join",
+        f"@community-stack-admin:{SERVER}": "join",
+    }
 
 
 def test_login_qr_returns_the_bots_qr_image_and_its_text(project):
@@ -363,15 +454,138 @@ def test_the_whatsapp_page_has_no_inline_styles_for_the_strict_policy():
     html = Path("cli/community_stack/admin/templates/whatsapp.html").read_text(encoding="utf-8")
     assert "style=" not in html
     assert 'class="inline"' in html
+    assert 'action="/admin/whatsapp/room-invite"' in html
+    assert 'href="/app/#/room/{{ room.room_id }}?via=' in html
+    assert "Open in Element" in html
 
 
 def test_portal_rooms_list_bridged_chats_but_not_the_command_chat(project):
     root, _ = project
+    configure_portal(project)
     context = AgentContext(root)
     bridges.ensure_direct_room(context)  # creates the command chat and records it
-    # Make the bot a member of the portal room, as the bridge does for a bridged chat.
     rooms = bridges.portal_rooms(context)
-    assert rooms == [{"room_id": PORTAL, "name": "Neighbours", "members": 2}]
+    assert rooms == [
+        {
+            "room_id": PORTAL,
+            "name": "Neighbours",
+            "members": 2,
+            "allowed": True,
+            "admin_access": "Joined",
+            "access_error": "",
+        }
+    ]
+
+
+def test_portal_discovery_autojoins_stack_admin_without_relying_on_its_joined_rooms(project):
+    root, fake = project
+    configure_portal(project, members={BOT: "join"})
+    fake.portal_members = {BOT: "join"}
+
+    rooms = bridges.portal_rooms(AgentContext(root))
+
+    assert rooms[0]["admin_access"] == "Joined"
+    assert rooms[0]["members"] == 2
+    assert fake.portal_members[f"@community-stack-admin:{SERVER}"] == "join"
+    bot_rooms = next(
+        request
+        for request in fake.requests
+        if request[0] == "GET" and "/joined_rooms?" in request[1]
+    )
+    assert parse_qs(urlsplit(bot_rooms[1]).query)["user_id"] == [BOT]
+    assert bot_rooms[3] == "appservice-secret"
+    invite = next(
+        request for request in fake.requests if request[0] == "POST" and "/invite?" in request[1]
+    )
+    assert invite[2] == {"user_id": f"@community-stack-admin:{SERVER}"}
+    assert invite[3] == "appservice-secret"
+    assert parse_qs(urlsplit(invite[1]).query)["user_id"] == [BOT]
+
+
+def test_unallowlisted_portals_remain_visible_for_cleanup_but_cannot_invite(project):
+    root, _ = project
+    configure_portal(project, allowed=False, members={BOT: "join"})
+
+    rooms = bridges.portal_rooms(AgentContext(root))
+
+    assert rooms[0]["allowed"] is False
+    assert rooms[0]["admin_access"] == "Not joined"
+    with pytest.raises(bridges.BridgeError, match="Only allowlisted"):
+        bridges.invite_portal_user(AgentContext(root), PORTAL, "@alice:example.org")
+
+
+def test_room_invite_operation_uses_the_registered_bot_identity_and_validates_mxid(project):
+    root, fake = project
+    configure_portal(project)
+    service = AgentService(AgentContext(root))
+
+    reply = service.handle(
+        {
+            "op": "bridge.whatsapp.room_invite",
+            "actor": "olga",
+            "params": {"room_id": PORTAL, "user_id": "@alice:example.org"},
+        }
+    )
+    invalid = service.handle(
+        {
+            "op": "bridge.whatsapp.room_invite",
+            "actor": "olga",
+            "params": {"room_id": PORTAL, "user_id": "not-a-mxid"},
+        }
+    )
+
+    assert reply["ok"] is True
+    assert reply["result"] == {"room_id": PORTAL, "user_id": "@alice:example.org"}
+    assert invalid["ok"] is False
+    invite = next(
+        request for request in fake.requests if request[0] == "POST" and "/invite?" in request[1]
+    )
+    assert invite[2] == {"user_id": "@alice:example.org"}
+    assert invite[3] == "appservice-secret"
+    assert parse_qs(urlsplit(invite[1]).query)["user_id"] == [BOT]
+
+
+def test_generic_bridge_room_discovery_and_invites_use_the_bridge_bot(project):
+    root, fake = project
+    data_dir = root / "data" / "signal_bridge"
+    data_dir.mkdir(parents=True)
+    bot = f"@signalbot:{SERVER}"
+    (data_dir / "registration.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "signal",
+                "as_token": "signal-appservice-secret",
+                "namespaces": {
+                    "users": [{"exclusive": True, "regex": r"^@signalbot:community\.test$"}]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    fake.portal_members = {bot: "join"}
+
+    rooms = bridges.portal_rooms(AgentContext(root), SIGNAL)
+    result = bridges.invite_portal_user(AgentContext(root), PORTAL, "@alice:example.org", SIGNAL)
+
+    assert rooms[0]["room_id"] == PORTAL
+    assert rooms[0]["allowed"] is True
+    assert rooms[0]["admin_access"] == "Not joined"
+    assert rooms[0]["members"] == 1
+    assert result == {"room_id": PORTAL, "user_id": "@alice:example.org"}
+    bot_rooms = next(
+        request
+        for request in fake.requests
+        if request[0] == "GET" and "/joined_rooms?" in request[1]
+    )
+    assert parse_qs(urlsplit(bot_rooms[1]).query)["user_id"] == [bot]
+    invite = next(
+        request
+        for request in fake.requests
+        if request[0] == "POST" and request[2] == {"user_id": "@alice:example.org"}
+    )
+    assert invite[2] == {"user_id": "@alice:example.org"}
+    assert invite[3] == "signal-appservice-secret"
+    assert parse_qs(urlsplit(invite[1]).query)["user_id"] == [bot]
 
 
 def test_stale_group_portals_can_be_removed_only_while_bridge_is_stopped(project, monkeypatch):
@@ -432,6 +646,18 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
         ),
         encoding="utf-8",
     )
+    (data_dir / "registration.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "whatsapp",
+                "as_token": "appservice-secret",
+                "namespaces": {
+                    "users": [{"exclusive": True, "regex": r"^@whatsappbot:community\.test$"}]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     with sqlite3.connect(data_dir / "mautrix-whatsapp.db") as db:
         db.execute("CREATE TABLE portal (id TEXT, mxid TEXT, receiver TEXT, name TEXT)")
         db.execute("INSERT INTO portal VALUES (?, ?, 'account', 'Neighbours')", (group_id, PORTAL))
@@ -440,15 +666,21 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
 
     def fake_matrix(context, method, path, body=None):
         nonlocal removed
-        if path == "/_matrix/client/v3/joined_rooms":
-            return 200, {"joined_rooms": [ROOM, PORTAL]}
-        if path.endswith("/joined_members"):
-            members = {f"@community-stack-admin:{SERVER}": {}}
+        if path.startswith("/_synapse/admin/v1/rooms/") and path.endswith("/state"):
+            members = {f"@community-stack-admin:{SERVER}": "join"}
             if not removed:
-                members[BOT] = {}
-            return 200, {"joined": members}
-        if path.endswith("/state/m.room.name"):
-            return 200, {"name": "Neighbours"}
+                members[BOT] = "join"
+            return 200, [
+                {"type": "m.room.name", "state_key": "", "content": {"name": "Neighbours"}},
+                *[
+                    {
+                        "type": "m.room.member",
+                        "state_key": user_id,
+                        "content": {"membership": membership},
+                    }
+                    for user_id, membership in members.items()
+                ],
+            ]
         return 404, {}
 
     def fake_send(context, room_id, command):
@@ -474,6 +706,7 @@ def test_removing_a_bridged_room_revokes_its_allowlist_and_deletes_its_portal(pr
 
 def test_the_agent_lists_bridged_rooms_for_an_admin(project):
     root, _ = project
+    configure_portal(project)
     bridges.ensure_direct_room(AgentContext(root))
     reply = AgentService(AgentContext(root)).handle(
         {"op": "bridge.whatsapp.rooms", "actor": "olga", "params": {}}
@@ -606,6 +839,7 @@ def test_login_state_reads_the_bots_answer(project, monkeypatch):
 
 def test_room_relay_only_for_bridged_rooms(project):
     root, _ = project
+    configure_portal(project)
     context = AgentContext(root)
     bridges.ensure_direct_room(context)
     with pytest.raises(bridges.BridgeError, match="not a bridged"):

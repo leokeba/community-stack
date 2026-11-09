@@ -139,6 +139,43 @@ def register_whatsapp(
             replies={"command": "set-relay", **result},
         )
 
+    @app.post("/admin/whatsapp/room-invite")
+    async def whatsapp_room_invite(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        room_id = form.get("room_id", "")
+        user_id = form.get("user_id", "").strip()
+        try:
+            result = await run_in_threadpool(
+                agent.call,
+                "bridge.whatsapp.room_invite",
+                session["username"],
+                {"room_id": room_id, "user_id": user_id},
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "bridge.whatsapp.room_invite",
+                "WhatsApp portal room",
+                outcome="failed",
+            )
+            return await whatsapp_page(
+                request, session, flash(f"WhatsApp room invite: {exc}", "error"), status_code=400
+            )
+        audit(
+            request,
+            session["username"],
+            "bridge.whatsapp.room_invite",
+            room_id,
+            outcome="succeeded",
+            user_id=result["user_id"],
+        )
+        return await whatsapp_page(
+            request,
+            session,
+            flash(f"Invited {result['user_id']} to the WhatsApp portal room."),
+        )
+
     @app.post("/admin/whatsapp/command")
     async def whatsapp_command(request: Request) -> Response:
         session, form = await checked_form(request, "system")

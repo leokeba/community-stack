@@ -67,8 +67,13 @@ and continuity layer; it is not a guarantee against platform disruption.
 
 ## Operating a bridge
 
-Use the admin console's bridge page for linking, room discovery and relay. Use the CLI
-on the host for checks:
+Use the admin console's bridge page for linking, room discovery, opening portal rooms in
+the self-hosted Element client, inviting Matrix accounts, and relay. Room discovery is
+performed as each bridge's appservice bot, so it does not depend on the stack admin already
+being a room member. The console joins `@community-stack-admin` to discovered portal rooms
+as a regular member for explicitly allowlisted WhatsApp rooms. For other bridges, bot
+membership is enough to invite additional users through the bridge bot; the stack admin
+does not need to join. Neither flow grants room-admin power. Use the CLI on the host for checks:
 
 ```bash
 uv run community-stack bridge status      # what is installed, running and registered
@@ -100,7 +105,8 @@ rely on one (`community-stack restore`, with the restore drill on the Backups pa
 ## Known limitations
 
 - Linking an **existing** Matrix room to a chat is not supported by the bridge version in
-  use. Rooms are created by the bridge; the console lists them and can set relay on them.
+  use. Rooms are created by the bridge; the console lists them, invites Matrix accounts and
+  can set relay on them.
 - Removing a bridged portal is available in the WhatsApp console. The bridge's
   `delete-portal` command also removes its Matrix room.
 - Chats are bridged automatically only when listed in the bridge configuration

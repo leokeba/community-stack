@@ -736,6 +736,8 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
     assert "/admin/whatsapp/group-disallow" in route_paths
     assert "/admin/whatsapp/orphan-portal-remove" in route_paths
     assert "/admin/whatsapp/portal-remove" in route_paths
+    assert "/admin/whatsapp/room-invite" in route_paths
+    assert "/admin/bridges/{key}/room-invite" in route_paths
 
     saved_wa = client.post(
         "/admin/channels/whatsapp/save",

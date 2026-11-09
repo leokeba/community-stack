@@ -109,10 +109,15 @@ def test_only_listed_commands_and_named_flows_reach_a_bridge():
 
 def test_operations_exist_for_every_supported_bridge():
     for spec in SUPPORTED:
-        for action in ("status", "command", "rooms", "login_state", "room_relay"):
+        for action in ("status", "command", "rooms", "login_state", "room_relay", "room_invite"):
             assert f"bridge.{spec.key}.{action}" in CATALOG
     assert CATALOG["bridge.signal.command"].params[0].pattern.fullmatch("login")
     assert not CATALOG["bridge.signal.command"].params[0].pattern.fullmatch("logout")
+    from pathlib import Path
+
+    template = Path("cli/community_stack/admin/templates/bridge.html").read_text(encoding="utf-8")
+    assert 'action="/admin/bridges/{{ spec.key }}/room-invite"' in template
+    assert "Open in Element" in template
 
 
 def test_settings_offer_each_bridge_as_a_dangerous_switch():

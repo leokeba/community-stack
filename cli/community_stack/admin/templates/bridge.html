@@ -75,12 +75,31 @@
 <section class="panel" id="bridged-rooms">
   <h2>Bridged rooms</h2>
   {% if rooms %}
+  <p>The bridge bot sends invitations, so the stack admin does not need to join a room to invite Matrix accounts.</p>
   <table>
-    <thead><tr><th>Name</th><th>Members</th><th>Matrix room ID</th><th>Relay</th></tr></thead>
+    <thead><tr><th>Name</th><th>Members</th><th>Matrix room</th><th>Invite a Matrix account</th><th>Relay</th></tr></thead>
     <tbody>
     {% for room in rooms %}
     <tr>
-      <td>{{ room.name }}</td><td>{{ room.members }}</td><td><code>{{ room.room_id }}</code></td>
+      <td>
+        {{ room.name }}<br>
+        <span class="muted">Stack admin: {{ room.admin_access }}</span>
+        {% if room.access_error %}<br><span class="error" role="alert">{{ room.access_error }}</span>{% endif %}
+      </td>
+      <td>{{ room.members }}</td>
+      <td>
+        <a href="/app/#/room/{{ room.room_id }}?via={{ room.room_id.split(':', 1)[1] }}">Open in Element</a><br>
+        <code>{{ room.room_id }}</code>
+      </td>
+      <td>
+        <form method="post" action="/admin/bridges/{{ spec.key }}/room-invite">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="room_id" value="{{ room.room_id }}">
+          <label for="bridge-mxid-{{ loop.index }}">Matrix user ID</label>
+          <input id="bridge-mxid-{{ loop.index }}" name="user_id" type="text" placeholder="@person:matrix.example.org" autocapitalize="off" spellcheck="false" required>
+          <button type="submit"{% if not agent_available %} disabled{% endif %}>Invite</button>
+        </form>
+      </td>
       <td>
         <form method="post" action="/admin/bridges/{{ spec.key }}/room-relay" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
