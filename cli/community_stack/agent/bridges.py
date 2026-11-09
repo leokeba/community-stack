@@ -251,22 +251,7 @@ def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
     except sqlite3.Error as exc:
         raise BridgeError("Could not read the WhatsApp bridge portal database.") from exc
 
-    allowed_groups = set(_whatsapp_allowed_groups(context))
-    portal_access: dict[str, bool] = {}
-    for group_id, room_id in records:
-        canonical_room_id = _canonical_portal_room_id(context, room_id)
-        if (
-            not isinstance(group_id, str)
-            or not GROUP_ID_PATTERN.fullmatch(group_id)
-            or canonical_room_id is None
-        ):
-            continue
-        portal_access[canonical_room_id] = group_id in allowed_groups
-    return portal_access
-
-
-def _whatsapp_allowed_groups(context) -> list[str]:
-    config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
+    config_path = context.project_dir / "data" / spec.service / "config.yaml"
     if config_path.is_file():
         try:
             config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -283,29 +268,21 @@ def _whatsapp_allowed_groups(context) -> list[str]:
     allowed = portal_filter.get("list", []) if isinstance(portal_filter, dict) else []
     if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
         raise BridgeError("The WhatsApp bridge portal allowlist is invalid.")
-    return allowed if portal_filter.get("mode") == "allow" else []
+    allowed_groups = set(allowed) if portal_filter.get("mode") == "allow" else set()
 
-
-def _canonical_portal_room_id(context, room_id: Any) -> str | None:
-    if not isinstance(room_id, str):
-        return None
-    if room_id.startswith("!") and ":" not in room_id:
-        room_id = f"{room_id}:{_server_name(context)}"
-    if not re.fullmatch(r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id):
-        return None
-    return room_id
-
-
-def _matrix_room_admin_status(context, room_id: str) -> int:
-    try:
-        status, _ = matrix_admin._call(
-            context, "GET", f"/_synapse/admin/v1/rooms/{quote(room_id, safe='')}"
-        )
-    except matrix_admin.MatrixAdminError as exc:
-        raise BridgeError("Could not verify a WhatsApp portal's Matrix room.") from exc
-    if status not in (200, 404):
-        raise BridgeError("Could not verify a WhatsApp portal's Matrix room.")
-    return status
+    portal_access: dict[str, bool] = {}
+    for group_id, room_id in records:
+        if isinstance(room_id, str) and room_id.startswith("!") and ":" not in room_id:
+            room_id = f"{room_id}:{_server_name(context)}"
+        if (
+            not isinstance(group_id, str)
+            or not GROUP_ID_PATTERN.fullmatch(group_id)
+            or not isinstance(room_id, str)
+            or not re.fullmatch(r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id)
+        ):
+            continue
+        portal_access[room_id] = group_id in allowed_groups
+    return portal_access
 
 
 def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
@@ -813,120 +790,6 @@ def orphaned_portals(context) -> list[dict[str, str]]:
         for group_id, name in rows
         if GROUP_ID_PATTERN.fullmatch(group_id)
     ]
-
-
-def stale_portals(context) -> list[dict[str, str]]:
-    """List allowlisted groups whose saved Matrix room has been deleted."""
-    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
-    if not database.is_file():
-        return []
-    allowed_groups = set(_whatsapp_allowed_groups(context))
-    if not allowed_groups:
-        return []
-    try:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-            rows = db.execute(
-                "SELECT id, mxid, name FROM portal WHERE mxid IS NOT NULL AND id GLOB '[0-9]*@g.us'"
-            ).fetchall()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not read saved WhatsApp portal records.") from exc
-
-    states: dict[str, dict[str, Any]] = {}
-    for group_id, room_id, name in rows:
-        if not isinstance(group_id, str) or not GROUP_ID_PATTERN.fullmatch(group_id):
-            continue
-        if group_id not in allowed_groups:
-            continue
-        canonical_room_id = _canonical_portal_room_id(context, room_id)
-        if canonical_room_id is None:
-            raise BridgeError("A saved WhatsApp portal has an invalid Matrix room ID.")
-        status = _matrix_room_admin_status(context, canonical_room_id)
-        portal = states.setdefault(
-            group_id,
-            {
-                "name": name.strip()
-                if isinstance(name, str) and name.strip()
-                else "WhatsApp group",
-                "missing": 0,
-                "live": False,
-            },
-        )
-        if status == 404:
-            portal["missing"] += 1
-        else:
-            portal["live"] = True
-
-    return [
-        {"group_id": group_id, "name": portal["name"]}
-        for group_id, portal in states.items()
-        if portal["missing"] and not portal["live"]
-    ]
-
-
-def reset_stale_portal(context, group_id: str, confirmation: str) -> dict[str, int]:
-    """Clear deleted Matrix room references for one allowlisted group while its bridge is stopped."""
-    if confirmation != "yes":
-        raise BridgeError("Confirm resetting the stale Matrix room mapping.")
-    if not GROUP_ID_PATTERN.fullmatch(group_id):
-        raise BridgeError("That saved WhatsApp group record is invalid.")
-    if not docker.is_docker_available():
-        raise BridgeError(
-            "Docker is unavailable; stop the WhatsApp bridge before resetting this mapping."
-        )
-    container = next(
-        (
-            item
-            for item in docker.list_community_containers()
-            if item.get("name") == WHATSAPP.container
-        ),
-        None,
-    )
-    if container and container.get("state") == "running":
-        raise BridgeError("Stop the WhatsApp bridge from Services before resetting this mapping.")
-    if group_id not in _whatsapp_allowed_groups(context):
-        raise BridgeError("Only an allowlisted WhatsApp group can have its room mapping reset.")
-
-    database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
-    if not database.is_file():
-        raise BridgeError("The WhatsApp bridge database is missing.")
-    try:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-            mapped_rows = db.execute(
-                "SELECT receiver, mxid FROM portal "
-                "WHERE id = ? AND mxid IS NOT NULL ORDER BY receiver, mxid",
-                (group_id,),
-            ).fetchall()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not read the saved WhatsApp portal mapping.") from exc
-    if not mapped_rows:
-        raise BridgeError("That WhatsApp group has no saved Matrix room mapping.")
-
-    for _, room_id in mapped_rows:
-        canonical_room_id = _canonical_portal_room_id(context, room_id)
-        if canonical_room_id is None:
-            raise BridgeError("The saved WhatsApp portal has an invalid Matrix room ID.")
-        if _matrix_room_admin_status(context, canonical_room_id) != 404:
-            raise BridgeError("The saved Matrix room still exists; refusing to reset its mapping.")
-
-    try:
-        with sqlite3.connect(database, timeout=10) as db:
-            db.execute("BEGIN IMMEDIATE")
-            current_rows = db.execute(
-                "SELECT receiver, mxid FROM portal "
-                "WHERE id = ? AND mxid IS NOT NULL ORDER BY receiver, mxid",
-                (group_id,),
-            ).fetchall()
-            if current_rows != mapped_rows:
-                raise BridgeError("The saved portal mapping changed; refresh and try again.")
-            cursor = db.execute(
-                "UPDATE portal SET mxid = NULL WHERE id = ? AND mxid IS NOT NULL", (group_id,)
-            )
-            if cursor.rowcount != len(mapped_rows):
-                raise BridgeError("The saved portal mapping changed; refresh and try again.")
-            db.commit()
-    except sqlite3.Error as exc:
-        raise BridgeError("Could not reset the stale WhatsApp portal mapping.") from exc
-    return {"reset": len(mapped_rows)}
 
 
 def remove_orphaned_portal(context, group_id: str, confirmation: str) -> dict[str, str]:

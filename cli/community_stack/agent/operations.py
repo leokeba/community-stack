@@ -348,13 +348,6 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
     if key == WHATSAPP.key:
         operations += (
             Operation(
-                "bridge.whatsapp.stale_portals",
-                READ,
-                "system",
-                _bridge_call(lambda context, params: {"portals": bridges.stale_portals(context)}),
-                summary="List allowlisted WhatsApp groups whose saved Matrix portal rooms were deleted.",
-            ),
-            Operation(
                 "bridge.whatsapp.group_add",
                 CHANGE,
                 "system",
@@ -380,21 +373,6 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
                     Param("confirmation", re.compile("yes"), required=True),
                 ),
                 summary="Remove a saved WhatsApp group record that has no Matrix room.",
-            ),
-            Operation(
-                "bridge.whatsapp.portal_mapping_reset",
-                CHANGE,
-                "system",
-                _bridge_call(
-                    lambda context, params: bridges.reset_stale_portal(
-                        context, params["group_id"], params["confirmation"]
-                    )
-                ),
-                params=(
-                    Param("group_id", bridges.GROUP_ID_PATTERN, required=True),
-                    Param("confirmation", re.compile("yes"), required=True),
-                ),
-                summary="Clear a deleted Matrix room mapping for one allowlisted WhatsApp group.",
             ),
             Operation(
                 "bridge.whatsapp.group_disallow",

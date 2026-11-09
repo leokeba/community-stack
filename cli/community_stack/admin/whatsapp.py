@@ -61,17 +61,12 @@ def register_whatsapp(
             config = load_config(config_path) if Path(config_path).is_file() else {}
         except ConfigError:
             config = {}
-        bridge, error, rooms, stale_portals = None, None, [], []
+        bridge, error, rooms = None, None, []
         if agent.available():
             try:
                 bridge = await run_in_threadpool(
                     agent.call, "bridge.whatsapp.status", session["username"]
                 )
-                stale_portals = (
-                    await run_in_threadpool(
-                        agent.call, "bridge.whatsapp.stale_portals", session["username"]
-                    )
-                )["portals"]
                 if bridge.get("command_chat_created"):
                     rooms = (
                         await run_in_threadpool(
@@ -89,7 +84,6 @@ def register_whatsapp(
                 bridge=bridge,
                 bridge_error=error,
                 rooms=rooms,
-                stale_portals=stale_portals,
                 bridge_enabled=publisher.whatsapp_bridge_enabled,
                 matrix_connected=publisher.matrix_auth is not None,
                 channel_connected="whatsapp" in storage.list_connections(),
@@ -315,49 +309,6 @@ def register_whatsapp(
             outcome="succeeded",
         )
         return await whatsapp_page(request, session, flash("Saved WhatsApp group record removed."))
-
-    @app.post("/admin/whatsapp/stale-portal-reset")
-    async def whatsapp_stale_portal_reset(request: Request) -> Response:
-        session, form = await checked_form(request, "system")
-        try:
-            await run_in_threadpool(
-                agent.call,
-                "bridge.whatsapp.portal_mapping_reset",
-                session["username"],
-                {
-                    "group_id": form.get("group_id", ""),
-                    "confirmation": form.get("confirmation", ""),
-                },
-            )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(
-                request,
-                session["username"],
-                "bridge.whatsapp.portal_mapping_reset",
-                "stale WhatsApp portal mapping",
-                outcome="failed",
-            )
-            return await whatsapp_page(
-                request,
-                session,
-                flash(f"WhatsApp portal recovery: {exc}", "error"),
-                status_code=400,
-            )
-        audit(
-            request,
-            session["username"],
-            "bridge.whatsapp.portal_mapping_reset",
-            "stale WhatsApp portal mapping",
-            outcome="succeeded",
-        )
-        return await whatsapp_page(
-            request,
-            session,
-            flash(
-                "The stale Matrix room reference was cleared. Start the bridge and send a new "
-                "message in the WhatsApp group if its portal does not reappear."
-            ),
-        )
 
     @app.post("/admin/whatsapp/portal-remove")
     async def whatsapp_portal_remove(request: Request) -> Response:
