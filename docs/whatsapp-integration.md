@@ -90,6 +90,11 @@ visible for cleanup but cannot be used to invite additional accounts.
 - On the WhatsApp bridge page, remove stale saved group records that have no Matrix
   room, or remove a bridged portal. Removing a bridged portal also deletes its Matrix
   room and revokes that group's allowlist entry.
+- Matrix room IDs without a `:server` suffix, such as `!rYmCpUwG1PT34…`, are
+  complete room version 12 IDs. Synapse creates new rooms in that version. Never add a
+  server name to them, and never clear or rewrite a portal's `mxid` in the bridge
+  database: mautrix creates a fresh, empty room for a portal it cannot find, and
+  members are left behind in the old one.
 - The pinned mautrix-whatsapp v26 configuration stores history-sync settings under
   `network.history_sync` and member-sync limits under `network.max_member_sync`; the
   admin status check verifies both settings and the portal allowlist.

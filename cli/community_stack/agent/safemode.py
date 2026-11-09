@@ -16,13 +16,14 @@ from typing import Any
 
 import yaml
 
+from community_stack import matrix_ids
 from community_stack.config import ConfigError, load_config
 from community_stack.safemode.manager import AccessManager, GatewayError, SafeModeError
 from community_stack.safemode.store import Store
 
 CONTAINER = "community_safemode"
 USER_ID = re.compile(r"@[a-z0-9._=/-]{1,64}:[A-Za-z0-9.-]{1,253}(?::\d{1,5})?")
-ROOM_ID = re.compile(r"![A-Za-z0-9._~-]{1,255}:[A-Za-z0-9.-]{1,253}(?::\d{1,5})?")
+ROOM_ID = matrix_ids.ROOM_ID
 ROOM_NAME = re.compile(r"[^\n\r]{1,100}")
 
 

@@ -27,6 +27,7 @@ import yaml
 from community_stack import docker, provision
 from community_stack.agent import matrix_admin
 from community_stack.bridges.catalogue import LOGIN_COMMAND, WHATSAPP, BridgeSpec
+from community_stack.matrix_ids import ROOM_ID
 
 # Commands the console may send. Anything else, including logout, stays a CLI-only action.
 GROUP_ID_PATTERN = provision.WHATSAPP_GROUP_ID_PATTERN
@@ -219,7 +220,7 @@ def _invite_as_bot(context, room_id: str, user_id: str, spec: BridgeSpec) -> Non
 def _ensure_stack_admin_joined(
     context, room_id: str, membership: str | None, spec: BridgeSpec
 ) -> tuple[str, str]:
-    if membership in {"join", "leave", "ban"}:
+    if membership in {"join", "ban"}:
         return membership, ""
 
     admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
@@ -237,6 +238,26 @@ def _ensure_stack_admin_joined(
         return "join", ""
     except BridgeError as exc:
         return membership or "not_joined", str(exc)
+
+
+def _join_portal_as_admin(context, room_id: str, spec: BridgeSpec) -> None:
+    """Put the stack admin in a portal before it posts a bot command there."""
+    token, bot = _appservice_token(context, spec)
+    state = _room_state(context, room_id, token, bot, spec)
+    if state is None:
+        raise BridgeError("That bridged room no longer exists.")
+    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
+    membership = next(
+        (
+            event.get("content", {}).get("membership")
+            for event in state
+            if event.get("type") == "m.room.member" and event.get("state_key") == admin
+        ),
+        None,
+    )
+    membership, error = _ensure_stack_admin_joined(context, room_id, membership, spec)
+    if membership != "join":
+        raise BridgeError(error or "The stack admin is banned from that room.")
 
 
 def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
@@ -276,7 +297,7 @@ def _whatsapp_portal_access(context, spec: BridgeSpec) -> dict[str, bool]:
             not isinstance(group_id, str)
             or not GROUP_ID_PATTERN.fullmatch(group_id)
             or not isinstance(room_id, str)
-            or not re.fullmatch(r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id)
+            or not ROOM_ID.fullmatch(room_id)
         ):
             continue
         portal_access[room_id] = group_id in allowed_groups
@@ -684,7 +705,11 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
 
 
 def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
-    """List rooms joined by the bridge bot, independent of the stack admin's membership."""
+    """List rooms joined by the bridge bot, independent of the stack admin's membership.
+
+    Read-only: it reports whether the stack admin is in each room but never changes that.
+    Actions that post into a portal as the admin join it first (see _join_portal_as_admin).
+    """
     token, bot = _appservice_token(context, spec)
     status, joined = _appservice_request(
         context, "GET", "/_matrix/client/v3/joined_rooms", None, token, bot, spec
@@ -701,9 +726,7 @@ def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
     rooms: list[dict[str, Any]] = []
     for room_id in room_ids:
-        if not isinstance(room_id, str) or not re.fullmatch(
-            r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id
-        ):
+        if not isinstance(room_id, str) or not ROOM_ID.fullmatch(room_id):
             continue
         if room_id == command_room:
             continue
@@ -724,14 +747,7 @@ def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
         if name == command_chat_name(spec):
             continue
         is_allowed = whatsapp_access.get(room_id, True)
-        access_error = ""
         admin_membership = memberships.get(admin)
-        if spec.key == WHATSAPP.key and is_allowed:
-            admin_membership, access_error = _ensure_stack_admin_joined(
-                context, room_id, admin_membership, spec
-            )
-            if admin_membership == "join":
-                memberships[admin] = "join"
         access_labels = {
             "join": "Joined",
             "invite": "Invite pending",
@@ -745,7 +761,7 @@ def portal_rooms(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
                 "members": sum(value == "join" for value in memberships.values()),
                 "allowed": is_allowed,
                 "admin_access": access_labels.get(admin_membership, "Not joined"),
-                "access_error": access_error,
+                "access_error": "",
             }
         )
     return sorted(rooms, key=lambda room: room["name"].lower())
@@ -864,6 +880,7 @@ def remove_portal_room(context, room_id: str, confirmation: str) -> dict[str, st
         raise BridgeError("Could not safely identify the WhatsApp group for this room.")
 
     group_id = row[0]
+    _join_portal_as_admin(context, room_id, WHATSAPP)
     config_path = context.project_dir / "data" / WHATSAPP.service / "config.yaml"
     try:
         provision.disallow_whatsapp_group(config_path, group_id)
@@ -905,6 +922,7 @@ def set_room_relay(context, room_id: str, spec: BridgeSpec = WHATSAPP) -> dict[s
     if room_id not in {room["room_id"] for room in portal_rooms(context, spec)}:
         raise BridgeError(f"That room is not a bridged {spec.name} room.")
     bot = f"@{spec.bot_localpart}:{_server_name(context)}"
+    _join_portal_as_admin(context, room_id, spec)
     event_id = _send(context, room_id, "set-relay")
     replies = _collect_replies(context, room_id, event_id, bot, spec)
     return {

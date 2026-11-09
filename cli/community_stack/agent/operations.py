@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from community_stack import docker
+from community_stack import docker, matrix_ids
 from community_stack.agent import (
     backups,
     bridges,
@@ -286,7 +286,7 @@ def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
             + [re.escape(f"{LOGIN_COMMAND} {flow}") for flow in spec.login_flows]
         )
     )
-    room_pattern = re.compile(r"![A-Za-z0-9._=-]{1,255}:[A-Za-z0-9.:-]{1,255}")
+    room_pattern = matrix_ids.ROOM_ID
     operations = (
         Operation(
             f"bridge.{key}.status",

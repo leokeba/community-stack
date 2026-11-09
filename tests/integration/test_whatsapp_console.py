@@ -471,16 +471,16 @@ def test_portal_rooms_list_bridged_chats_but_not_the_command_chat(project):
     ]
 
 
-def test_portal_discovery_autojoins_stack_admin_without_relying_on_its_joined_rooms(project):
+def test_listing_portals_reads_membership_without_changing_it(project):
     root, fake = project
     configure_portal(project, members={BOT: "join"})
-    fake.portal_members = {BOT: "join"}
 
     rooms = bridges.portal_rooms(AgentContext(root))
 
-    assert rooms[0]["admin_access"] == "Joined"
-    assert rooms[0]["members"] == 2
-    assert fake.portal_members[f"@community-stack-admin:{SERVER}"] == "join"
+    assert rooms[0]["admin_access"] == "Not joined"
+    assert rooms[0]["members"] == 1
+    assert f"@community-stack-admin:{SERVER}" not in fake.portal_members
+    assert not any(method == "POST" for method, *_ in fake.requests)
     bot_rooms = next(
         request
         for request in fake.requests
@@ -488,12 +488,45 @@ def test_portal_discovery_autojoins_stack_admin_without_relying_on_its_joined_ro
     )
     assert parse_qs(urlsplit(bot_rooms[1]).query)["user_id"] == [BOT]
     assert bot_rooms[3] == "appservice-secret"
-    invite = next(
-        request for request in fake.requests if request[0] == "POST" and "/invite?" in request[1]
+
+
+def test_setting_relay_puts_the_stack_admin_in_the_portal_first(project):
+    root, fake = project
+    configure_portal(project, members={BOT: "join"})
+    context = AgentContext(root)
+
+    bridges.set_room_relay(context, PORTAL)
+
+    assert fake.portal_members[f"@community-stack-admin:{SERVER}"] == "join"
+    paths = [path for _, path, *_ in fake.requests]
+    invite = next(index for index, path in enumerate(paths) if "/invite?" in path)
+    join = next(index for index, path in enumerate(paths) if path.endswith("/join"))
+    send = next(index for index, path in enumerate(paths) if "/send/m.room.message/" in path)
+    assert invite < join < send
+    invite_request = fake.requests[invite]
+    assert invite_request[2] == {"user_id": f"@community-stack-admin:{SERVER}"}
+    assert invite_request[3] == "appservice-secret"
+    assert parse_qs(urlsplit(invite_request[1]).query)["user_id"] == [BOT]
+
+
+def test_room_version_12_ids_without_a_server_name_are_handled_as_is(project, monkeypatch):
+    # Synapse creates room version 12 rooms by default; their IDs have no ":server" part.
+    v12_room = "!rYmCpUwG1PT34NH83HMrUJVPHjXSJttm7DV2jm7Cjjw"
+    monkeypatch.setitem(globals(), "PORTAL", v12_room)
+    root, fake = project
+    configure_portal(project)
+    context = AgentContext(root)
+
+    rooms = bridges.portal_rooms(context)
+    reply = AgentService(context).handle(
+        {"op": "bridge.whatsapp.room_relay", "actor": "olga", "params": {"room_id": v12_room}}
     )
-    assert invite[2] == {"user_id": f"@community-stack-admin:{SERVER}"}
-    assert invite[3] == "appservice-secret"
-    assert parse_qs(urlsplit(invite[1]).query)["user_id"] == [BOT]
+
+    assert [room["room_id"] for room in rooms] == [v12_room]
+    assert reply["ok"] is True, reply
+    assert reply["result"]["room_id"] == v12_room
+    sent = next(path for _, path, *_ in fake.requests if "/send/m.room.message/" in path)
+    assert unquote(sent).startswith(f"/_matrix/client/v3/rooms/{v12_room}/send/")
 
 
 def test_unallowlisted_portals_remain_visible_for_cleanup_but_cannot_invite(project):
@@ -735,6 +768,7 @@ def test_group_setup_is_a_validated_admin_operation(project, monkeypatch):
     assert reply["ok"] is True
     assert reply["result"] == {"group_id": "123456789@g.us", "name": "Announcements"}
     assert invite not in json.dumps(reply)
+    assert invite not in AgentContext(root).audit_path.read_text(encoding="utf-8")
     assert refused["ok"] is False
     assert fake.calls == []
 
