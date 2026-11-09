@@ -15,6 +15,8 @@ SENSITIVE_KEY_PATTERNS = (
     "credential",
     "auth",
     "private",
+    # A WhatsApp group invite link lets anyone who reads it join the group.
+    "invite_link",
 )
 
 REDACTED_PLACEHOLDER = "[REDACTED]"
