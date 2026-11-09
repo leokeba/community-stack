@@ -381,7 +381,9 @@ def test_group_setup_is_a_validated_admin_operation(project, monkeypatch):
     assert fake.calls == []
 
 
-def test_adding_a_whatsapp_group_allows_only_that_group_and_redacts_the_invite(project, monkeypatch):
+def test_adding_a_whatsapp_group_allows_only_that_group_and_redacts_the_invite(
+    project, monkeypatch
+):
     root, fake = project
     config_path = root / "data" / "whatsapp_bridge" / "config.yaml"
     config_path.parent.mkdir(parents=True)

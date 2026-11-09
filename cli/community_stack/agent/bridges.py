@@ -330,9 +330,7 @@ def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
     resolved_text = "\n".join(
         reply["text"] for reply in resolved["replies"] if reply["kind"] == "text"
     )
-    match = re.search(
-        r"That invite link points at (.+?) \(`?(\d{5,30}@g\.us)`?\)", resolved_text
-    )
+    match = re.search(r"That invite link points at (.+?) \(`?(\d{5,30}@g\.us)`?\)", resolved_text)
     if not match:
         raise BridgeError("The bridge could not resolve that WhatsApp group invite link.")
     group_name, group_id = match.groups()
@@ -345,9 +343,7 @@ def add_whatsapp_group(context, invite_link: str) -> dict[str, str]:
         _restart_bridge(context, WHATSAPP)
 
     joined = run_command(context, f"join {invite_link}", redact_sensitive=True)
-    joined_text = "\n".join(
-        reply["text"] for reply in joined["replies"] if reply["kind"] == "text"
-    )
+    joined_text = "\n".join(reply["text"] for reply in joined["replies"] if reply["kind"] == "text")
     if f"Successfully joined group `{group_id}`" not in joined_text:
         raise BridgeError(
             f"{group_name} is allowlisted, but the bridge did not confirm joining it. "
@@ -417,9 +413,9 @@ def diagnose(context, spec: BridgeSpec = WHATSAPP) -> list[dict[str, Any]]:
     )
     if spec.key == WHATSAPP.key and has_config:
         try:
-            bridge_config = yaml.safe_load(
-                (data_dir / "config.yaml").read_text(encoding="utf-8")
-            ) or {}
+            bridge_config = (
+                yaml.safe_load((data_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+            )
             history_sync = bridge_config.get("history_sync", {})
             bridge_settings = bridge_config.get("bridge", {})
             portal_filter = bridge_settings.get("portal_create_filter", {})
