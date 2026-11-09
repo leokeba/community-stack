@@ -67,27 +67,41 @@ and continuity layer; it is not a guarantee against platform disruption.
 
 ## Operating a bridge
 
-Use the admin console's bridge page for linking, room discovery, opening portal rooms in
-the self-hosted Element client, inviting Matrix accounts, and relay. Room discovery is
-performed as each bridge's appservice bot, so it does not depend on the stack admin already
-being a room member. The console joins `@community-stack-admin` to discovered portal rooms
-as a regular member for explicitly allowlisted WhatsApp rooms. For other bridges, bot
-membership is enough to invite additional users through the bridge bot; the stack admin
-does not need to join. Neither flow grants room-admin power. Use the CLI on the host for checks:
+Every supported bridge has the same page in the admin console, under **Chat → Bridges**:
+link the account, link chats to new or existing Matrix rooms, move or unlink them, turn
+relay on or off, invite Matrix accounts, and repair links that broke. Only the
+WhatsApp-specific parts differ: QR linking and adding a group from its invite link. The
+step-by-step guide is in [whatsapp-integration.md](whatsapp-integration.md).
+
+How a chat and a room are linked:
+
+- Each bridge's own database records which remote chat belongs to which Matrix room. The
+  console reads it; links are changed only through the bridge bot's commands (`bridge`,
+  `unbridge`, `delete-portal`), so the bridge always agrees with what the page shows.
+- Each bridge's `portal_create_filter` allowlist only decides whether the bridge may
+  create a room by itself for a chat that has none. Linking a chat to an existing room
+  does not need it; unlinking removes the chat from it, so no replacement room appears.
+- Room discovery and invitations are done as each bridge's appservice bot, so they do not
+  depend on the stack admin being a room member. The stack admin joins a room only to send
+  the bot a command there; linking a chat to an existing room also gives the bridge bot
+  room-admin power in it.
+
+Use the CLI on the host for checks (`--bridge signal` or `--bridge messenger` for the
+other bridges):
 
 ```bash
 uv run community-stack bridge status      # what is installed, running and registered
 uv run community-stack bridge doctor      # each prerequisite, with the fix for failures
-uv run community-stack bridge rooms       # Matrix rooms the bridge created for chats
+uv run community-stack bridge rooms       # Matrix rooms linked to the bridge's chats
 uv run community-stack bridge logs --lines 200
 uv run community-stack bridge disable --confirm   # stop it; data and links are kept
 ```
 
 A container that is running is not the same as a linked account. Confirm linking on the
-console ("Check linked accounts").
+console ("Check the linked account").
 
 Lifecycle:
-- **Start, stop, restart, enable**: Services page.
+- **Start, stop, enable**: Services and updates. **Restart**: also on the bridge's own page.
 - **Upgrade**: change the pinned image in the bridge's compose file, then use the
   service update on the Services page. It takes a backup first and rolls back on failure.
 - **Disable**: stops the container and keeps data, credentials and room links.
@@ -147,7 +161,7 @@ settings, install, updates, health and console operations are driven from that d
 
 | Bridge | Image | Console page | Status |
 |---|---|---|---|
-| WhatsApp | mautrix-whatsapp v26.10 | /admin/whatsapp | Verified on a live server (linking, rooms, relay, two-way delivery). |
+| WhatsApp | mautrix-whatsapp v26.10 | /admin/bridges/whatsapp | Verified on a live server (linking, rooms, relay, two-way delivery). |
 | Signal | mautrix-signal v26.10 | /admin/bridges/signal | Built and provisioned in tests. The login flow and first-run settings are not yet verified on a live account. |
 | Facebook Messenger | mautrix-meta v26.10 | /admin/bridges/messenger | Built and provisioned in tests. Experimental. The login options are read from the bot. Not verified on a live account. |
 

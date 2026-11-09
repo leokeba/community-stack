@@ -9,63 +9,74 @@ public announcement feed do not depend on it.
 
 ## Set it up in the admin console
 
-Everything below is done from the admin console. You never edit bridge files or run
-containers by hand.
+Everything below is done from the admin console, under **Chat → Bridges → WhatsApp**
+(`/admin/bridges/whatsapp`). You never edit bridge files or run containers by hand.
 
-1. **Services**: turn on **WhatsApp bridge** and review the warning. The server
-   creates the bridge's private credentials, its configuration and its Matrix
-   registration, then starts the bridge. Initial conversation history sync is
-   disabled and no group is bridged until you explicitly select it.
-2. **WhatsApp bridge** page, step 1: press **Start QR linking**. The console asks the
-   bridge bot for a QR code and shows it. On your phone: WhatsApp &rarr; Settings
-   &rarr; Linked devices &rarr; Link a device, then scan the code. Codes expire quickly.
-3. Step 2: press **Check linked accounts**. It should list the linked account. Registered
-   and running is not the same as linked, so check this before going on.
-4. On the **WhatsApp bridge** page, paste an invite link for the one group you want
-   to bridge and press **Allow and join this group**. The console resolves the group,
-   adds only its ID to the allowlist, and joins it. The invite message is redacted
-   from the bridge command chat after processing; revoke the invite in WhatsApp
-   afterward if possible. Initial history sync is disabled. The allowlist is intended
-   to restrict which chats get Matrix rooms, but it does not currently prevent all
-   portal records or contact ghosts; see the privacy issue below.
-5. In **Bridged rooms**, open the new portal in the self-hosted Element client.
-   The stack admin is automatically joined as a regular room member; it does not
-   need room-admin power. Use the room's **Invite** form to invite Matrix user IDs
-   such as `@person:example.org`. Invitees must accept the invitation in their
-   Matrix client.
-6. **Channels**: connect a dedicated **Matrix announcements** account. Copy the
-   portal room ID (starts with `!`) from **Bridged rooms**, save it as the
-   WhatsApp destination and press **Test connection**. Invite the announcements
-   account using the same room-row invite form. The test checks Matrix access,
-   not phone linkage.
-7. To publish from an **existing Matrix room** to WhatsApp, open **Mirrored rooms**,
-   add that source room, choose the WhatsApp destination, and select immediate
-   publishing or review. Invite the announcements account to the source room first.
+1. **Services and updates**: turn on **WhatsApp bridge** and review the warning. The
+   server creates the bridge's private credentials, its configuration and its Matrix
+   registration, then starts the bridge. History backfill is off and no group is
+   bridged until you choose one.
+2. **Linked WhatsApp account**: press **Start linking**. The console asks the bridge
+   bot for a QR code and shows it. On the phone: WhatsApp &rarr; Settings &rarr; Linked
+   devices &rarr; Link a device, then scan the code. Codes expire quickly. Then press
+   **Check the linked account**; running is not the same as linked.
+3. **Add a group**: paste an invite link for the group and choose its Matrix room:
+   - **Create a new room for it**: the group is allowlisted and the bridge creates a
+     room named after it.
+   - **An existing room**: the group is bridged into that room instead. The stack admin
+     joins the room if needed (through Synapse's admin API), invites the bridge bot and
+     gives it room-admin power, which the bridge needs to manage the room. If nobody has
+     given the stack admin enough power in that room, the server's admin API makes it a
+     room admin first, and the page says so.
 
-The general command form only sends the allowlisted `help`, `list-logins`,
-`login qr`, and `cancel` commands. Group selection is a separate, validated
-admin operation; invite links are not written to the admin audit log.
+   In both cases the console turns **relay** on, so messages from every Matrix member
+   reach WhatsApp through the linked account. The invite link is redacted from the bot
+   chat after use and never written to the activity log; revoke it in WhatsApp
+   afterwards if you can.
+4. **Linked rooms**: open a room's row to invite Matrix accounts (the bridge bot sends
+   the invitation), turn relay on or off, refresh its name and members from WhatsApp,
+   or choose **Use for WhatsApp announcements** (see below).
+5. **Announcements to WhatsApp**: connect a dedicated **Matrix announcements** account
+   on the Channels page once. Then press **Use for WhatsApp announcements** in the
+   room's row: the bridge bot invites that account, the account joins, and the room is
+   saved as the WhatsApp channel's destination. Turn the channel on under Publishing
+   settings.
+6. To publish from another **Matrix room** to WhatsApp, open **Mirrored rooms**, add
+   that source room and choose the WhatsApp destination.
 
-## Room access and invitations
+Groups the bridge has seen but that have no room are listed under **Unlinked groups**.
+Each can be linked to an existing room or given a new one.
 
-The **Bridged rooms** list is discovered from the bridge's saved portal records
-and Synapse room state, so it does not depend on the stack admin already being a
-room member. When an allowlisted portal appears, the console invites and joins
-`@community-stack-admin` as a regular member. The invite form uses the WhatsApp
-appservice bot's authorized Matrix identity; it does not grant the stack admin
-or the invitee room-admin power. Rooms that are no longer allowlisted remain
-visible for cleanup but cannot be used to invite additional accounts.
+## Changing and repairing links
+
+Every link is changed through the bridge bot's own commands, never by editing the
+bridge's database:
+
+- **Move to another room** links the group to a different room. The old room is kept
+  for its Matrix members; WhatsApp members and the bot leave it.
+- **Unlink** stops bridging and keeps the room and its history. The group is also
+  removed from the allowlist: otherwise its next message would make the bridge create a
+  new room for it.
+- **Delete room** stops bridging and removes every member from the Matrix room.
+
+**Needs attention** lists what to fix:
+
+- *Broken links*: a group still linked to a room that was deleted, or that the bot has
+  left. **Forget link** clears it through the bot; then link the group again.
+- *Leftover rooms*: rooms the bot is in that no group is linked to, usually from an
+  earlier link. Link a group to one, or let the bot leave (the room is kept).
+
+Under **Status and maintenance**: the bridge's checks with how to fix each, **Restart the
+bridge**, **Open a new bot chat** if the bot stops answering, the bot's own command list,
+and a link to its logs. **Forget record** under an unlinked group deletes the bridge's
+record of it; stop the bridge first.
 
 ## Two operating models
 
-- **Shared relay (what this page sets up):** the linked session belongs to the
-  stack's own admin account (`@community-stack-admin`). It relays the group for the
-  community. The phone is a community-owned device, so it must stay charged and online.
-- **Announcements from an existing Matrix room:** this is one-way publishing from
-  the selected Matrix source room to the WhatsApp portal. Messages arriving from
-  WhatsApp appear in the bridge-created portal room, not in the original source room.
-  Two-way chat requires using that portal room; the bridge cannot attach an existing
-  Matrix room directly to a WhatsApp group.
+- **Shared relay (what the console sets up):** the linked session belongs to the
+  stack's own admin account (`@community-stack-admin`). It relays each linked group for
+  the community. The phone is a community-owned device, so it must stay charged and
+  online.
 - **Personal puppeting (not offered here):** a person links their own WhatsApp and
   reaches their chats through their own Matrix account. Do not mix the two in one
   session.
@@ -87,9 +98,6 @@ visible for cleanup but cannot be used to invite additional accounts.
   `max_member_sync: 0` setting disables eager non-admin member sync in every group;
   admins may still sync, and non-admins can appear as they participate. It is not
   a per-group allowlist and does not stop standalone contact/profile events.
-- On the WhatsApp bridge page, remove stale saved group records that have no Matrix
-  room, or remove a bridged portal. Removing a bridged portal also deletes its Matrix
-  room and revokes that group's allowlist entry.
 - Matrix room IDs without a `:server` suffix, such as `!rYmCpUwG1PT34…`, are
   complete room version 12 IDs. Synapse creates new rooms in that version. Never add a
   server name to them, and never clear or rewrite a portal's `mxid` in the bridge

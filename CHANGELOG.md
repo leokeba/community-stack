@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Bridges: link a chat to an existing Matrix room instead of letting the bridge create one, move a chat to another room, unlink a room (keeping it for its Matrix members), create a room for a chat the bridge has seen, turn relay on or off, and refresh a room from the remote network. Works the same for WhatsApp, Signal and Messenger.
+- Bridges: a **Needs attention** list with repairs for links to deleted rooms and rooms the bot is still in but no chat uses; restart the bridge and open a new bot chat from its page.
+- WhatsApp: add a group from its invite link straight into an existing room; relay is turned on automatically; **Use for WhatsApp announcements** sets up the announcements destination in one step.
+- `community-stack bridge --bridge signal|messenger …` for the other bridges.
+
+### Changed
+- One console page for every bridge at `/admin/bridges/<name>`, and a **Bridges** overview under a new **Chat** menu section. `/admin/whatsapp` redirects to the new page. The menu is regrouped into Publishing, Chat, Continuity, Server and Accounts.
+- The chat allowlist, required settings and command prefix are handled by shared code for every bridge (`community_stack.bridges.config`); per-bridge differences are data in the catalogue.
+- The WhatsApp announcements adapter moved to `community_stack.announcements.adapters.whatsapp`.
+
+### Removed
+- The unused `WhatsAppBridgeManager` (`mode`, `mapped_rooms`).
+
+### Fixed
+- Matrix room version 12 IDs (no `:server` part) are accepted everywhere: bridges, Safe Mode, the access CLI, Matrix and WhatsApp announcement channels, and mirrored rooms.
+- Bot commands sent in a bridged room carry the bridge's command prefix, so relay and room deletion reach the bot.
+- Unlinking or deleting a bridged room also removes its chat from the allowlist, so the bridge no longer creates a replacement room on the next message.
 - Safe Mode (off by default): members message the Safe Mode bot in a direct chat (`!safe on`, `!safe status`, `!safe off <recovery code>`, `!safe help`) to suspend their access to protected rooms across all devices, and restore it with a one-time recovery code. Works from any ordinary Matrix client. `community-stack access` manages protected rooms, enrolment and recovery codes. See `docs/safe-mode.md` for what it does and does not protect.
 - Signal bridge (`mautrix-signal` v26.10) and Facebook Messenger bridge (`mautrix-meta` v26.10), both off by default. Switched on from the Services page, set up on /admin/bridges/<name>, and provisioned through the same generic path as WhatsApp.
 - Generic bridge operations (`bridge.<name>.status | command | rooms | login_state | room_relay`), generated from the catalogue.
