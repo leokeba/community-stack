@@ -107,42 +107,25 @@
   {% endif %}
   {% if stale_portals %}
   <h3>Groups pointing to deleted Matrix rooms</h3>
-  <p>These allowlisted groups still have a saved room reference, but Synapse no longer has that room. Stop the WhatsApp bridge from Services before repairing a mapping. The group and its allowlist are preserved.</p>
-  {% for portal in stale_portals %}
-  <h4>{{ portal.name }}</h4>
-  {% if portal.candidates %}
-  <p>Live rooms below advertise this exact WhatsApp group. Choose the room you want the bridge to use.</p>
+  <p>These allowlisted groups still have a saved room reference, but Synapse no longer has that room. Stop the WhatsApp bridge from Services, reset the stale reference here, then start the bridge. This preserves the group and its allowlist; send a new group message if the portal does not reappear.</p>
   <table>
-    <thead><tr><th>Candidate room</th><th>Room details</th><th>Action</th></tr></thead>
+    <thead><tr><th>Group</th><th>Action</th></tr></thead>
     <tbody>
-    {% for candidate in portal.candidates %}
+    {% for portal in stale_portals %}
     <tr>
-      <td><a href="/app/#/room/{{ candidate.room_id }}?via={{ candidate.room_id.split(':', 1)[1] }}">Open {{ candidate.name }} in Element</a><br><code>{{ candidate.room_id }}</code></td>
-      <td>Created {{ candidate.created_at }}; {{ candidate.members }} members; stack admin {% if candidate.admin_joined %}joined{% else %}not joined{% endif %}</td>
+      <td>{{ portal.name }}</td>
       <td>
-        <form method="post" action="/admin/whatsapp/stale-portal-repair">
+        <form method="post" action="/admin/whatsapp/stale-portal-reset">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="group_id" value="{{ portal.group_id }}">
-          <input type="hidden" name="room_id" value="{{ candidate.room_id }}">
-          <label><input type="checkbox" name="confirmation" value="yes" required> Use this room</label>
-          <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state == "running" %} disabled{% endif %}>Attach portal</button>
+          <label><input type="checkbox" name="confirmation" value="yes" required> Clear only the deleted Matrix room reference</label>
+          <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state == "running" %} disabled{% endif %}>Reset stale mapping</button>
         </form>
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <p>No live room for this group was found. Clear only the stale reference, restart the bridge, and send a new group message to trigger a fresh portal.</p>
-  <form method="post" action="/admin/whatsapp/stale-portal-repair">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="group_id" value="{{ portal.group_id }}">
-    <input type="hidden" name="room_id" value="">
-    <label><input type="checkbox" name="confirmation" value="yes" required> Clear only the deleted Matrix room reference</label>
-    <button type="submit" class="secondary"{% if not agent_available or not bridge or bridge.container_state == "running" %} disabled{% endif %}>Clear stale mapping</button>
-  </form>
-  {% endif %}
-  {% endfor %}
   {% endif %}
   <form method="post" action="/admin/whatsapp/command" class="inline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

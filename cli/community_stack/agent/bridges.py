@@ -308,80 +308,6 @@ def _matrix_room_admin_status(context, room_id: str) -> int:
     return status
 
 
-def _whatsapp_portal_candidates(context, group_id: str) -> list[dict[str, Any]]:
-    token, bot = _appservice_token(context, WHATSAPP)
-    status, response = _appservice_request(
-        context, "GET", "/_matrix/client/v3/joined_rooms", None, token, bot, WHATSAPP
-    )
-    if status != 200:
-        raise BridgeError("Synapse could not list rooms for the WhatsApp bot.")
-    room_ids = response.get("joined_rooms") if isinstance(response, dict) else None
-    if not isinstance(room_ids, list):
-        raise BridgeError("Synapse returned an invalid room list for the WhatsApp bot.")
-
-    admin = f"@{matrix_admin.ADMIN_LOCALPART}:{_server_name(context)}"
-    candidates: list[tuple[int, dict[str, Any]]] = []
-    for room_id in room_ids:
-        if not isinstance(room_id, str) or not re.fullmatch(
-            r"![A-Za-z0-9._=~-]{1,255}:[A-Za-z0-9.:-]{1,255}", room_id
-        ):
-            continue
-        state = _room_state(context, room_id, token, bot, WHATSAPP)
-        if state is None:
-            continue
-        memberships = {
-            event.get("state_key"): event.get("content", {}).get("membership")
-            for event in state
-            if event.get("type") == "m.room.member"
-        }
-        if memberships.get(bot) != "join":
-            continue
-        matches_group = any(
-            event.get("type") in {"m.bridge", "uk.half-shot.bridge"}
-            and isinstance(event.get("content"), dict)
-            and event["content"].get("bridgebot") == bot
-            and isinstance(event["content"].get("protocol"), dict)
-            and event["content"]["protocol"].get("id") == WHATSAPP.key
-            and isinstance(event["content"].get("channel"), dict)
-            and event["content"]["channel"].get("id") == group_id
-            for event in state
-        )
-        if not matches_group:
-            continue
-        created_ts = next(
-            (
-                event.get("origin_server_ts")
-                for event in state
-                if event.get("type") == "m.room.create"
-                and isinstance(event.get("origin_server_ts"), int)
-            ),
-            0,
-        )
-        created_at = (
-            datetime.fromtimestamp(created_ts / 1000, tz=timezone.utc).strftime(
-                "%Y-%m-%d %H:%M UTC"
-            )
-            if created_ts
-            else "Unknown"
-        )
-        name_event = next((event for event in state if event.get("type") == "m.room.name"), {})
-        candidates.append(
-            (
-                created_ts,
-                {
-                    "room_id": room_id,
-                    "name": name_event.get("content", {}).get("name") or "(unnamed room)",
-                    "created_at": created_at,
-                    "members": sum(value == "join" for value in memberships.values()),
-                    "admin_joined": memberships.get(admin) == "join",
-                },
-            )
-        )
-    return [
-        candidate for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True)
-    ]
-
-
 def ensure_direct_room(context, spec: BridgeSpec = WHATSAPP) -> str:
     """The admin's direct chat with the bridge bot, created once and then reused."""
     bot = f"@{spec.bot_localpart}:{_server_name(context)}"
@@ -889,7 +815,7 @@ def orphaned_portals(context) -> list[dict[str, str]]:
     ]
 
 
-def stale_portals(context) -> list[dict[str, Any]]:
+def stale_portals(context) -> list[dict[str, str]]:
     """List allowlisted groups whose saved Matrix room has been deleted."""
     database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
     if not database.is_file():
@@ -931,27 +857,21 @@ def stale_portals(context) -> list[dict[str, Any]]:
             portal["live"] = True
 
     return [
-        {
-            "group_id": group_id,
-            "name": portal["name"],
-            "candidates": _whatsapp_portal_candidates(context, group_id),
-        }
+        {"group_id": group_id, "name": portal["name"]}
         for group_id, portal in states.items()
         if portal["missing"] and not portal["live"]
     ]
 
 
-def repair_stale_portal(
-    context, group_id: str, confirmation: str, room_id: str = ""
-) -> dict[str, Any]:
-    """Repair a deleted Matrix room reference while the WhatsApp bridge is stopped."""
+def reset_stale_portal(context, group_id: str, confirmation: str) -> dict[str, int]:
+    """Clear deleted Matrix room references for one allowlisted group while its bridge is stopped."""
     if confirmation != "yes":
-        raise BridgeError("Confirm repairing the stale Matrix room mapping.")
+        raise BridgeError("Confirm resetting the stale Matrix room mapping.")
     if not GROUP_ID_PATTERN.fullmatch(group_id):
         raise BridgeError("That saved WhatsApp group record is invalid.")
     if not docker.is_docker_available():
         raise BridgeError(
-            "Docker is unavailable; stop the WhatsApp bridge before repairing this mapping."
+            "Docker is unavailable; stop the WhatsApp bridge before resetting this mapping."
         )
     container = next(
         (
@@ -962,9 +882,9 @@ def repair_stale_portal(
         None,
     )
     if container and container.get("state") == "running":
-        raise BridgeError("Stop the WhatsApp bridge from Services before repairing this mapping.")
+        raise BridgeError("Stop the WhatsApp bridge from Services before resetting this mapping.")
     if group_id not in _whatsapp_allowed_groups(context):
-        raise BridgeError("Only an allowlisted WhatsApp group can have its room mapping repaired.")
+        raise BridgeError("Only an allowlisted WhatsApp group can have its room mapping reset.")
 
     database = context.project_dir / "data" / WHATSAPP.service / "mautrix-whatsapp.db"
     if not database.is_file():
@@ -981,36 +901,12 @@ def repair_stale_portal(
     if not mapped_rows:
         raise BridgeError("That WhatsApp group has no saved Matrix room mapping.")
 
-    for _, mapped_room_id in mapped_rows:
-        canonical_room_id = _canonical_portal_room_id(context, mapped_room_id)
+    for _, room_id in mapped_rows:
+        canonical_room_id = _canonical_portal_room_id(context, room_id)
         if canonical_room_id is None:
             raise BridgeError("The saved WhatsApp portal has an invalid Matrix room ID.")
         if _matrix_room_admin_status(context, canonical_room_id) != 404:
-            raise BridgeError("The saved Matrix room still exists; refusing to repair its mapping.")
-
-    if room_id:
-        candidate = next(
-            (
-                item
-                for item in _whatsapp_portal_candidates(context, group_id)
-                if item["room_id"] == room_id
-            ),
-            None,
-        )
-        if not candidate:
-            raise BridgeError(
-                "That room is not a live portal for this WhatsApp group; refresh and try again."
-            )
-        try:
-            with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
-                existing = db.execute(
-                    "SELECT 1 FROM portal WHERE mxid = ? AND id != ? LIMIT 1",
-                    (room_id, group_id),
-                ).fetchone()
-        except sqlite3.Error as exc:
-            raise BridgeError("Could not verify the selected Matrix room mapping.") from exc
-        if existing:
-            raise BridgeError("That Matrix room is already mapped to another bridge portal.")
+            raise BridgeError("The saved Matrix room still exists; refusing to reset its mapping.")
 
     try:
         with sqlite3.connect(database, timeout=10) as db:
@@ -1023,15 +919,14 @@ def repair_stale_portal(
             if current_rows != mapped_rows:
                 raise BridgeError("The saved portal mapping changed; refresh and try again.")
             cursor = db.execute(
-                "UPDATE portal SET mxid = ? WHERE id = ? AND mxid IS NOT NULL",
-                (room_id or None, group_id),
+                "UPDATE portal SET mxid = NULL WHERE id = ? AND mxid IS NOT NULL", (group_id,)
             )
             if cursor.rowcount != len(mapped_rows):
                 raise BridgeError("The saved portal mapping changed; refresh and try again.")
             db.commit()
     except sqlite3.Error as exc:
-        raise BridgeError("Could not repair the stale WhatsApp portal mapping.") from exc
-    return {"updated": len(mapped_rows), "attached": bool(room_id)}
+        raise BridgeError("Could not reset the stale WhatsApp portal mapping.") from exc
+    return {"reset": len(mapped_rows)}
 
 
 def remove_orphaned_portal(context, group_id: str, confirmation: str) -> dict[str, str]:

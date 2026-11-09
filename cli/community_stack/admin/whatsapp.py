@@ -316,25 +316,24 @@ def register_whatsapp(
         )
         return await whatsapp_page(request, session, flash("Saved WhatsApp group record removed."))
 
-    @app.post("/admin/whatsapp/stale-portal-repair")
-    async def whatsapp_stale_portal_repair(request: Request) -> Response:
+    @app.post("/admin/whatsapp/stale-portal-reset")
+    async def whatsapp_stale_portal_reset(request: Request) -> Response:
         session, form = await checked_form(request, "system")
         try:
-            result = await run_in_threadpool(
+            await run_in_threadpool(
                 agent.call,
-                "bridge.whatsapp.portal_mapping_repair",
+                "bridge.whatsapp.portal_mapping_reset",
                 session["username"],
                 {
                     "group_id": form.get("group_id", ""),
                     "confirmation": form.get("confirmation", ""),
-                    "room_id": form.get("room_id", ""),
                 },
             )
         except (AgentUnavailable, AgentRefused) as exc:
             audit(
                 request,
                 session["username"],
-                "bridge.whatsapp.portal_mapping_repair",
+                "bridge.whatsapp.portal_mapping_reset",
                 "stale WhatsApp portal mapping",
                 outcome="failed",
             )
@@ -347,20 +346,17 @@ def register_whatsapp(
         audit(
             request,
             session["username"],
-            "bridge.whatsapp.portal_mapping_repair",
+            "bridge.whatsapp.portal_mapping_reset",
             "stale WhatsApp portal mapping",
             outcome="succeeded",
-        )
-        message = (
-            "The stale Matrix room reference was linked to the selected live portal."
-            if result.get("attached")
-            else "The stale Matrix room reference was cleared. Start the bridge and send a new "
-            "message in the WhatsApp group if its portal does not reappear."
         )
         return await whatsapp_page(
             request,
             session,
-            flash(message),
+            flash(
+                "The stale Matrix room reference was cleared. Start the bridge and send a new "
+                "message in the WhatsApp group if its portal does not reappear."
+            ),
         )
 
     @app.post("/admin/whatsapp/portal-remove")
