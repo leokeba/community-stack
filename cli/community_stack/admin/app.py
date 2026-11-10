@@ -46,6 +46,7 @@ from community_stack.admin.continuity import register_continuity
 from community_stack.admin.dashboard import register_dashboard
 from community_stack.admin.matrix_users import register_matrix_users
 from community_stack.admin.mirroring import register_mirroring
+from community_stack.admin.request_limits import RequestBodyLimitMiddleware
 from community_stack.admin.safemode import register_safemode
 from community_stack.admin.services import register_services
 from community_stack.admin.settings import register_settings
@@ -146,6 +147,7 @@ def create_app(
     app = FastAPI(
         title="Community Announcements Admin", docs_url=None, redoc_url=None, lifespan=lifespan
     )
+    app.add_middleware(RequestBodyLimitMiddleware)
     app.mount("/admin/static", StaticFiles(directory=STATIC_DIR), name="admin-static")
     app.state.storage = storage
     app.state.auth_store = auth_store

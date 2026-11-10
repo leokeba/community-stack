@@ -137,13 +137,23 @@ def register_auth(
         form = await submitted_form(request)
         csrf_token = preauth_csrf_or_forbidden(request, form)
         pending = request.cookies.get(SECOND_STEP_COOKIE)
-        username = auth_store.pending_login(pending)
+        username = auth_store.pending_login(pending, count=False)
         if not username:
+            return login_redirect()
+        if auth_store.is_second_step_rate_limited(username):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many second-step failures for this account. Try again later.",
+            )
+        if not auth_store.pending_login(pending):
             return login_redirect()
         used = auth_store.verify_second_factor(username, form.get("code", ""))
         if not used:
             auth_store.record_failed_attempt(client_host(request), ANY_USERNAME)
+            auth_store.record_second_step_failure(username)
             audit(request, None, "login.second_step_failed", username)
+            if auth_store.is_second_step_rate_limited(username):
+                audit(request, None, "login.second_step_rate_limited", username, window="1h")
             return render(
                 request,
                 "login_verify.html",
@@ -151,6 +161,7 @@ def register_auth(
                 status_code=401,
             )
         auth_store.end_pending_login(pending)
+        auth_store.clear_second_step_failures(username)
         audit(request, username, "login.succeeded", second_step=used)
         return signed_in_response(request, username)
 

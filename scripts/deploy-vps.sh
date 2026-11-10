@@ -246,19 +246,36 @@ import sys
 project_dir = Path(sys.argv[1])
 path = project_dir / "services/proxy/Caddyfile"
 text = path.read_text(encoding="utf-8")
-routes = [
-    "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
-    "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n"
-    "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n\n",
-    "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n\n",
-]
+routes = {
+    "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n":
+    "    handle /admin* {\n        request_body {\n            max_size 12MB\n        }\n"
+    "        reverse_proxy community_announcements:8080\n    }\n",
+    "    handle /ap/* {\n        reverse_proxy community_announcements:8080\n    }\n":
+    "    handle /ap/* {\n        request_body {\n            max_size 256KB\n        }\n"
+    "        reverse_proxy community_announcements:8080\n    }\n",
+    "    handle /.well-known/webfinger {\n        reverse_proxy community_announcements:8080\n    }\n":
+    "    handle /.well-known/webfinger {\n        request_body {\n            max_size 256KB\n        }\n"
+    "        reverse_proxy community_announcements:8080\n    }\n",
+    "    handle /subscribe* {\n        reverse_proxy community_announcements:8080\n    }\n":
+    "    handle /subscribe* {\n        request_body {\n            max_size 1MB\n        }\n"
+    "        reverse_proxy community_announcements:8080\n    }\n",
+}
 backup = project_dir / "backups" / f"Caddyfile.before-{sys.argv[2]}"
 backup.parent.mkdir(parents=True, exist_ok=True)
 if backup.exists():
     raise SystemExit(f"Refusing to overwrite rollback file {backup}.")
 shutil.copy2(path, backup)
 backup.chmod(0o600)
-missing = [route for route in routes if route not in text]
+missing = []
+for original, limited in routes.items():
+    if limited in text:
+        continue
+    if original in text:
+        text = text.replace(original, limited)
+    elif original.splitlines()[0] in text:
+        raise SystemExit(f"Cannot safely add the body limit to {original.splitlines()[0]}.")
+    else:
+        missing.append(limited)
 if missing:
     anchor = "    handle /feed* {\n        reverse_proxy community_landing:80\n    }\n"
     if text.count(anchor) != 1:

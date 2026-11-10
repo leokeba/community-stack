@@ -145,9 +145,11 @@ room, then add the room with three choices: whose messages count (room
 moderators and admins, or everyone), whether a message is published right away
 or becomes a draft for review, and which channels it goes to. From then on, a
 new message's first line becomes the announcement title and the rest its
-message; editing the message in Matrix updates the announcement, and deleting
-it withdraws the announcement. Only messages sent after the room was added are
-mirrored, at most ten announcements per room per hour, and the announcements
+message; only its original sender can edit it. With review enabled, edits to
+unpublished announcements return them to review, while edits to already
+published messages are ignored; post a new message for a correction. Deleting a
+message withdraws its announcement. Only messages sent after the room was added
+are mirrored, at most ten announcements per room per hour, and the announcements
 account's own posts are never mirrored back. When review before publishing is
 on, mirrored messages always wait for review, submitted by `matrix:@sender`.
 

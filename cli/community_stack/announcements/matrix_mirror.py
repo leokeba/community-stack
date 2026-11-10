@@ -1,9 +1,9 @@
 """Mirror chosen Matrix rooms into announcements on other channels.
 
 The stack's Matrix announcements account follows the rooms. A message from someone with
-enough power in the room becomes an announcement; editing it updates the announcement,
-and deleting it withdraws the announcement. Messages from the account itself are
-ignored, so the account's own posts are never mirrored back.
+enough power in the room becomes an announcement; its original sender can edit it, and
+deleting it withdraws the announcement. Messages from the account itself are ignored, so
+the account's own posts are never mirrored back.
 """
 
 from __future__ import annotations
@@ -22,8 +22,14 @@ logger = logging.getLogger(__name__)
 
 MODERATOR_POWER = 50
 MAX_PER_ROOM_PER_HOUR = 10
+BACKFILL_PAGE_SIZE = 100
+MAX_BACKFILL_PAGES = 20
 TITLE_LENGTH = 120
 TEXT_TYPES = ("m.text", "m.notice")
+
+
+class MatrixTimelineGap(RuntimeError):
+    """The limited timeline could not be backfilled to the last processed event."""
 
 
 def split_message(text: str) -> tuple[str, str]:
@@ -61,8 +67,16 @@ class MatrixMirror:
                     announcement_id TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS mirror_room_cursors (
+                    room_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL
+                );
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(mirror_events)")}
+            if "sender" not in columns:
+                conn.execute("ALTER TABLE mirror_events ADD COLUMN sender TEXT")
+        self._room_create_cache: dict[str, dict[str, Any]] = {}
 
     # Matrix calls go through the announcements adapter, with its token and transport.
 
@@ -168,8 +182,12 @@ class MatrixMirror:
         if status != 200 or "next_batch" not in body:
             logger.warning("Matrix sync for mirroring failed: %s", body.get("error", status))
             return 0
-        self.storage.set_setting("mirror_sync_token", body["next_batch"])
         if not since:
+            for room_id, joined in (body.get("rooms", {}).get("join") or {}).items():
+                events = (joined.get("timeline") or {}).get("events") or []
+                if events and events[-1].get("event_id"):
+                    self._set_room_cursor(room_id, events[-1]["event_id"])
+            self.storage.set_setting("mirror_sync_token", body["next_batch"])
             return 0
         bot = self.bot_user()
         acted = 0
@@ -177,22 +195,130 @@ class MatrixMirror:
             room = rooms.get(room_id)
             if room is None:
                 continue
-            for event in (joined.get("timeline") or {}).get("events") or []:
+            timeline = joined.get("timeline") or {}
+            try:
+                events = self._timeline_events(room_id, timeline, self._room_cursor(room_id))
+            except MatrixTimelineGap as exc:
+                logger.warning(
+                    "Matrix timeline gap for room %s; sync token was not advanced: %s",
+                    room_id,
+                    exc,
+                )
+                return 0
+            for event in events:
                 if event.get("sender") == bot:
                     continue
                 try:
                     acted += self._handle(room, event)
                 except (ValueError, KeyError, ModelValidationError) as exc:
                     logger.warning("Could not mirror %s: %s", event.get("event_id"), exc)
+            if events and events[-1].get("event_id"):
+                self._set_room_cursor(room_id, events[-1]["event_id"])
+        self.storage.set_setting("mirror_sync_token", body["next_batch"])
         return acted
 
-    def _power(self, room_id: str, user: str) -> int:
+    def _room_cursor(self, room_id: str) -> str | None:
+        with self.storage._get_connection() as conn:
+            row = conn.execute(
+                "SELECT event_id FROM mirror_room_cursors WHERE room_id = ?", (room_id,)
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT event_id FROM mirror_events WHERE room_id = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (room_id,),
+                ).fetchone()
+        return row["event_id"] if row else None
+
+    def _set_room_cursor(self, room_id: str, event_id: str) -> None:
+        with self.storage._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO mirror_room_cursors (room_id, event_id) VALUES (?, ?)
+                ON CONFLICT(room_id) DO UPDATE SET event_id=excluded.event_id
+                """,
+                (room_id, event_id),
+            )
+
+    def _timeline_events(
+        self, room_id: str, timeline: dict, cursor: str | None
+    ) -> list[dict[str, Any]]:
+        events = timeline.get("events") or []
+        if cursor:
+            cursor_index = next(
+                (
+                    index
+                    for index in range(len(events) - 1, -1, -1)
+                    if events[index].get("event_id") == cursor
+                ),
+                None,
+            )
+            if cursor_index is not None:
+                return events[cursor_index + 1 :]
+        if not timeline.get("limited") or not cursor:
+            return events
+
+        token = timeline.get("prev_batch")
+        if not isinstance(token, str) or not token:
+            raise MatrixTimelineGap("the limited timeline did not include a prev_batch token")
+        pages = []
+        for _ in range(MAX_BACKFILL_PAGES):
+            path = (
+                f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/messages"
+                f"?from={quote(token)}&dir=b&limit={BACKFILL_PAGE_SIZE}"
+            )
+            status, body = self._call("GET", path)
+            if status != 200 or not isinstance(body.get("chunk"), list):
+                raise MatrixTimelineGap(f"history pagination failed with status {status}")
+            chunk = body["chunk"]
+            cursor_index = next(
+                (index for index, event in enumerate(chunk) if event.get("event_id") == cursor),
+                None,
+            )
+            if cursor_index is not None:
+                result = list(reversed(chunk[:cursor_index]))
+                for page in reversed(pages):
+                    result.extend(reversed(page))
+                return result + events
+            pages.append(chunk)
+            next_token = body.get("end")
+            if (
+                not chunk
+                or not isinstance(next_token, str)
+                or not next_token
+                or next_token == token
+            ):
+                break
+            token = next_token
+        raise MatrixTimelineGap(
+            f"could not find the previous event within {MAX_BACKFILL_PAGES} history pages"
+        )
+
+    def _power(self, room_id: str, user: str) -> float:
+        create = self._room_create_cache.get(room_id)
+        if create is None:
+            status, event = self._call(
+                "GET",
+                f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.create",
+            )
+            if status == 200 and isinstance(event, dict):
+                create = event
+                self._room_create_cache[room_id] = create
+        content = (create or {}).get("content") or {}
+        creators = {create.get("sender"), content.get("creator")} | set(
+            content.get("additional_creators") or []
+        )
+        if str(content.get("room_version", "1")) == "12" and user in creators:
+            return float("inf")
+
         status, levels = self._call(
             "GET",
             f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/state/m.room.power_levels",
         )
         if status != 200:
-            return 0
+            return 100 if status == 404 and user in creators else 0
+        if not levels:
+            return 100 if user in creators else 0
         return int((levels.get("users") or {}).get(user, levels.get("users_default", 0)))
 
     def _mapped(self, event_id: str) -> str | None:
@@ -201,6 +327,13 @@ class MatrixMirror:
                 "SELECT announcement_id FROM mirror_events WHERE event_id = ?", (event_id,)
             ).fetchone()
         return row["announcement_id"] if row else None
+
+    def _mapped_sender(self, event_id: str) -> str | None:
+        with self.storage._get_connection() as conn:
+            row = conn.execute(
+                "SELECT sender FROM mirror_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return row["sender"] if row else None
 
     def _recent_count(self, room_id: str) -> int:
         since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -226,10 +359,40 @@ class MatrixMirror:
         content = event.get("content") or {}
         relation = content.get("m.relates_to") or {}
         if relation.get("rel_type") == "m.replace":
-            announcement_id = self._mapped(relation.get("event_id", ""))
+            original_event_id = relation.get("event_id", "")
+            announcement_id = self._mapped(original_event_id)
             new = content.get("m.new_content") or {}
-            if not announcement_id or new.get("msgtype") not in TEXT_TYPES:
+            if (
+                not announcement_id
+                or sender != self._mapped_sender(original_event_id)
+                or new.get("msgtype") not in TEXT_TYPES
+            ):
                 return 0
+            announcement = self.publisher.preview(announcement_id)
+            if announcement.status == AnnouncementStatus.WITHDRAWN:
+                return 0
+            needs_review = room["mode"] == "review" or self.review_required()
+            if needs_review:
+                if announcement.status in (
+                    AnnouncementStatus.PUBLISHED,
+                    AnnouncementStatus.UPDATED,
+                ):
+                    logger.info(
+                        "Ignoring Matrix edit %s because announcement %s is already published "
+                        "and review is required.",
+                        event.get("event_id"),
+                        announcement_id,
+                    )
+                    return 0
+                if announcement.status in (
+                    AnnouncementStatus.APPROVED,
+                    AnnouncementStatus.SCHEDULED,
+                ):
+                    self.publisher.set_review_status(
+                        announcement_id,
+                        (announcement.status,),
+                        AnnouncementStatus.IN_REVIEW,
+                    )
             title, body = split_message(new.get("body", ""))
             self.publisher.update(announcement_id, title=title, body=body)
             return 1
@@ -247,13 +410,14 @@ class MatrixMirror:
         self.storage.save_announcement(draft)
         with self.storage._get_connection() as conn:
             conn.execute(
-                "INSERT INTO mirror_events (event_id, room_id, announcement_id, created_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO mirror_events (event_id, room_id, announcement_id, created_at, sender) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     event["event_id"],
                     room["room_id"],
                     draft.id,
                     datetime.now(timezone.utc).isoformat(),
+                    sender,
                 ),
             )
         if room["mode"] == "review" or self.review_required():

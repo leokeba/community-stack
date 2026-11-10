@@ -18,6 +18,8 @@ PENDING_LOGIN_TTL = timedelta(minutes=5)
 PENDING_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_LIMIT = 5
+SECOND_STEP_LOGIN_WINDOW = timedelta(hours=1)
+SECOND_STEP_LOGIN_LIMIT = 10
 PASSWORD_ITERATIONS = 310_000
 AUDIT_RETENTION = timedelta(days=400)
 
@@ -116,6 +118,12 @@ class AdminStore:
                 );
                 CREATE INDEX IF NOT EXISTS admin_login_attempts_idx
                     ON admin_login_attempts (attempt_key, attempted_at);
+                CREATE TABLE IF NOT EXISTS admin_second_step_attempts (
+                    username TEXT NOT NULL,
+                    attempted_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS admin_second_step_attempts_idx
+                    ON admin_second_step_attempts (username, attempted_at);
                 CREATE TABLE IF NOT EXISTS admin_audit_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     occurred_at TEXT NOT NULL,
@@ -548,6 +556,34 @@ class AdminStore:
                 "DELETE FROM admin_login_attempts WHERE attempt_key = ?",
                 (self._attempt_key(client_host, username),),
             )
+
+    def is_second_step_rate_limited(self, username: str) -> bool:
+        now = _now()
+        since = (now - SECOND_STEP_LOGIN_WINDOW).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM admin_second_step_attempts WHERE attempted_at < ?",
+                ((now - timedelta(days=1)).isoformat(),),
+            )
+            attempts = conn.execute(
+                """
+                SELECT COUNT(*) FROM admin_second_step_attempts
+                WHERE username = ? AND attempted_at >= ?
+                """,
+                (username, since),
+            ).fetchone()[0]
+        return attempts >= SECOND_STEP_LOGIN_LIMIT
+
+    def record_second_step_failure(self, username: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO admin_second_step_attempts (username, attempted_at) VALUES (?, ?)",
+                (username, _now().isoformat()),
+            )
+
+    def clear_second_step_failures(self, username: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM admin_second_step_attempts WHERE username = ?", (username,))
 
     # Audit log
 

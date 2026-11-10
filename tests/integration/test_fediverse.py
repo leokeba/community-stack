@@ -234,3 +234,6 @@ def test_public_endpoints_exist_only_once_the_account_is_connected(console):
 
     unsigned = client.post("/ap/inbox", content=b'{"type": "Follow"}')
     assert unsigned.status_code == 401
+    for _ in range(9):
+        assert client.post("/ap/inbox", content=b'{"type": "Follow"}').status_code == 401
+    assert client.post("/ap/inbox", content=b'{"type": "Follow"}').status_code == 429

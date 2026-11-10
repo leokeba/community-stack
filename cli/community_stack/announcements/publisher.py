@@ -370,7 +370,7 @@ class AnnouncementPublisher:
         ):
             raise ValueError("The announcement changed meanwhile; reload the page.")
         ann = self.preview(announcement_id)
-        if to == AnnouncementStatus.DRAFT and ann.scheduled_at:
+        if to != AnnouncementStatus.SCHEDULED and ann.scheduled_at:
             ann.scheduled_at = None
             self.storage.save_announcement(ann)
         return ann

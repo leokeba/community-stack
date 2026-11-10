@@ -150,6 +150,9 @@ def test_caddyfile_exists_and_contains_routes():
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content
     assert "reverse_proxy community_announcements:8080" in content
+    assert "max_size 12MB" in content
+    assert "max_size 256KB" in content
+    assert "max_size 1MB" in content
     landing = Path("services/landing/html/index.html").read_text(encoding="utf-8")
     assert 'href="/app/"' in landing
 

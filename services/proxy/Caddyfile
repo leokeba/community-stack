@@ -19,19 +19,31 @@
 
     # Authenticated announcement publishing interface
     handle /admin* {
+        request_body {
+            max_size 12MB
+        }
         reverse_proxy community_announcements:8080
     }
 
     # The community's own fediverse account (ActivityPub)
     handle /ap/* {
+        request_body {
+            max_size 256KB
+        }
         reverse_proxy community_announcements:8080
     }
     handle /.well-known/webfinger {
+        request_body {
+            max_size 256KB
+        }
         reverse_proxy community_announcements:8080
     }
 
     # Public sign-up for text alerts
     handle /subscribe* {
+        request_body {
+            max_size 1MB
+        }
         reverse_proxy community_announcements:8080
     }
 
@@ -96,6 +108,9 @@ http://localhost, http://127.0.0.1 {
     }
 
     handle /admin* {
+        request_body {
+            max_size 12MB
+        }
         reverse_proxy community_announcements:8080
     }
 

@@ -8,7 +8,11 @@ from argparse import Namespace
 import pytest
 from community_stack.admin import totp
 from community_stack.admin.app import create_app
-from community_stack.admin.store import PENDING_LOGIN_ATTEMPTS, AdminStore
+from community_stack.admin.store import (
+    PENDING_LOGIN_ATTEMPTS,
+    SECOND_STEP_LOGIN_LIMIT,
+    AdminStore,
+)
 from community_stack.commands import admin_cmd
 from fastapi.testclient import TestClient
 
@@ -156,6 +160,38 @@ def test_second_step_attempts_are_limited(app, store):
     )
     assert exhausted.status_code == 303
     assert exhausted.headers["location"] == "/admin/login"
+
+
+def test_second_step_failures_are_limited_per_account_and_audited(app, store):
+    secret, _ = enable(store, "olga")
+    for _ in range(SECOND_STEP_LOGIN_LIMIT - 1):
+        store.record_second_step_failure("olga")
+    client = client_for(app)
+    password_step(client)
+    verify = client.get("/admin/login/verify")
+
+    failed = client.post(
+        "/admin/login/verify", data={"csrf_token": csrf(verify), "code": "not-a-code"}
+    )
+    blocked = client.post(
+        "/admin/login/verify",
+        data={"csrf_token": csrf(verify), "code": totp.code_at(secret, totp.current_step() + 1)},
+    )
+
+    assert failed.status_code == 401
+    assert blocked.status_code == 429
+    actions = [event["action"] for event in store.list_events()]
+    assert "login.second_step_rate_limited" in actions
+
+
+def test_second_step_account_limit_can_be_cleared_after_success(store):
+    for _ in range(SECOND_STEP_LOGIN_LIMIT):
+        store.record_second_step_failure("olga")
+    assert store.is_second_step_rate_limited("olga")
+
+    store.clear_second_step_failures("olga")
+
+    assert not store.is_second_step_rate_limited("olga")
 
 
 def test_admins_can_turn_off_two_step_for_someone_who_lost_their_phone(app, store):

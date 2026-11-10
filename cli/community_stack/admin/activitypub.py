@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from collections import OrderedDict, deque
 from collections.abc import Callable
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +19,10 @@ from community_stack.announcements.models import Announcement, AnnouncementStatu
 from community_stack.announcements.publisher import AnnouncementPublisher
 from community_stack.announcements.storage import AnnouncementStorage
 
-MAX_INBOX_BYTES = 256 * 1024
+INBOX_RATE_WINDOW_SECONDS = 60
+INBOX_RATE_LIMIT = 10
+INBOX_MAX_RATE_LIMIT_CLIENTS = 4096
+INBOX_MAX_IN_FLIGHT = 4
 
 
 def register_activitypub(
@@ -25,6 +32,24 @@ def register_activitypub(
     publisher: AnnouncementPublisher,
     community_name: Callable[[], str],
 ) -> None:
+    inbox_requests: OrderedDict[str, deque[float]] = OrderedDict()
+    inbox_lock = Lock()
+    inbox_semaphore = asyncio.Semaphore(INBOX_MAX_IN_FLIGHT)
+
+    def inbox_rate_limited(client_host: str) -> bool:
+        now = time.monotonic()
+        with inbox_lock:
+            attempts = inbox_requests.setdefault(client_host, deque())
+            while attempts and now - attempts[0] >= INBOX_RATE_WINDOW_SECONDS:
+                attempts.popleft()
+            inbox_requests.move_to_end(client_host)
+            if len(attempts) >= INBOX_RATE_LIMIT:
+                return True
+            attempts.append(now)
+            while len(inbox_requests) > INBOX_MAX_RATE_LIMIT_CLIENTS:
+                inbox_requests.popitem(last=False)
+            return False
+
     def fediverse():
         adapter = next((a for a in publisher.adapters if isinstance(a, FediverseAdapter)), None)
         if adapter is None:
@@ -97,12 +122,14 @@ def register_activitypub(
     @app.post("/ap/inbox")
     async def ap_inbox(request: Request) -> Response:
         account = fediverse()
-        if int(request.headers.get("content-length") or 0) > MAX_INBOX_BYTES:
-            raise HTTPException(status_code=413)
+        client_host = request.client.host if request.client else "unknown"
+        if inbox_rate_limited(client_host):
+            raise HTTPException(status_code=429, detail="Too many inbox requests.")
         body = await request.body()
-        if len(body) > MAX_INBOX_BYTES:
-            raise HTTPException(status_code=413)
-        status, message = await run_in_threadpool(
-            account.handle_inbox, request.url.path, dict(request.headers), body, http.send
-        )
+        if inbox_semaphore.locked():
+            raise HTTPException(status_code=503, detail="The inbox is busy; retry later.")
+        async with inbox_semaphore:
+            status, message = await run_in_threadpool(
+                account.handle_inbox, request.url.path, dict(request.headers), body, http.send
+            )
         return JSONResponse({"result": message}, status_code=status)
