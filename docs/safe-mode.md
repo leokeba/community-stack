@@ -2,32 +2,35 @@
 
 Safe Mode lets a member temporarily remove their own access to designated sensitive Matrix
 rooms, for example before a protest or before entering a place where a phone may be
-searched. It works from an ordinary Matrix client, including Element X, with no custom app.
+searched. It works from an ordinary Matrix client, in a direct chat with the Safe Mode bot,
+with no custom app. The chat must not be end-to-end encrypted: the bot cannot read
+encrypted messages (see [Clients](#clients)).
 
-Read the limits first. Safe Mode stops **server-side** access. It does not erase anything
-already on a device.
+Read the limits first. Safe Mode stops a suspended account from reading **new** messages in
+protected rooms. It does not erase anything, and a phone that stays signed in can still
+fetch the room's earlier messages from the server.
 
 ## What it does and does not protect
 
 | | Protected | Not protected |
 |---|---|---|
-| New events in protected rooms | Yes, once Safe Mode is on and confirmed | |
+| Messages sent in protected rooms while Safe Mode is on | Yes, hidden from the account, also after a restore | |
 | Access from every device on the account | Yes, the membership is removed for the account | |
+| Being let back in while Safe Mode is on | Yes, the bot removes the account again within about a second | |
+| Messages sent **before** Safe Mode was turned on | | Still fetchable from the server by any device that stays signed in. Decrypting them needs keys the device holds or can get from key backup. |
 | Messages and media already downloaded to a phone | | Still there. Clear them in the client yourself. |
-| Encryption keys already held on a device | | Still usable. No key revocation is claimed. |
+| The room list, member list up to the removal, and the chat with the bot | | Visible on a signed-in phone. Room members see "removed by safemode: Safe Mode". |
 | Anyone who can unlock the phone and read it | | Safe Mode does not stop this. |
 | Normal community rooms | Unaffected | |
 
-Historical messages: after a restore the member receives new messages. Whether a member can
-read earlier history depends on the room's history setting (`joined`) and on the keys their
-devices already hold. Community Stack does not promise that earlier messages stay hidden.
-
-Before relying on Safe Mode, test the room behaviour on your own server (see
-[Verification still required](#verification-still-required)).
+The second row from the top is the one that matters most: if a phone may be inspected while
+it is still signed in, signing that session out (from another device, or by an
+administrator) protects far more than Safe Mode does. Removing room membership was verified
+not to block reading earlier history (Synapse 1.163.2, 2026-11-10).
 
 ## Using it (members)
 
-Open a direct chat with the Safe Mode bot. Send these as plain messages:
+Open a direct chat with the Safe Mode bot, with encryption off. Send these as plain messages:
 
 ```text
 !safe on              suspend access to protected rooms
@@ -42,7 +45,8 @@ Open a direct chat with the Safe Mode bot. Send these as plain messages:
   is still being restored.
 - `!safe off` needs your **recovery code**. An administrator issues it once and you keep it
   separately from your phone, for example on paper. The bot does not accept a turn-off
-  without it.
+  without it. After a restore you rejoin by accepting the invitations; messages sent while
+  Safe Mode was on stay hidden from you.
 - Replies and quoted or forwarded messages are refused, so copying an old command does not
   repeat it.
 - The bot does not answer accounts that are not enrolled.
@@ -52,6 +56,14 @@ confirms the change, do not assume access has been suspended.
 
 Messages you send to the bot are stored in your Matrix conversation with it. Do not send a
 recovery code you have not yet kept safely, and remember that a used code is spent.
+
+### Clients
+
+The bot has no encryption keys. If the direct chat is encrypted, it replies that it cannot
+read your message and that Safe Mode has **not** changed. Which clients can start an
+unencrypted direct chat has not been tested here (Element Web is expected to when the other
+account has no encryption keys, as the bot has none; Element X may always encrypt). Check on
+the clients your members use before relying on Safe Mode.
 
 ## Setting it up (administrators)
 
@@ -64,27 +76,26 @@ recovery code you have not yet kept safely, and remember that a used code is spe
    ```
 
 2. Run `uv run community-stack install`. This creates the bot's tokens in `.env`, its
-   configuration under `data/safemode/`, and the Synapse appservice registration.
+   configuration under `data/safemode/`, and the Synapse appservice registration. The bot
+   creates its database when it first starts; the `access` commands and the console only
+   work after that.
 
-3. Create each protected room **through the service account**, not a person. Then invite
-   the people who need it. Make the room:
-   - end-to-end encrypted,
-   - invite-only,
-   - with history visibility set to `joined`,
-   - with the service account able to invite and remove members.
-
-   Room version 12 gives a room creator infinite power, so a room created by a person cannot
-   be managed by the bot. The bot refuses such rooms.
-
-4. Protect the room:
+3. Create each protected room through the bot, inviting the people who need it:
 
    ```bash
-   uv run community-stack access protect '!roomid:example.org' --name "Organising group"
+   uv run community-stack access create-room --name "Organising group" \
+       --invite @organiser:example.org --invite @member:example.org
    uv run community-stack access rooms
    uv run community-stack access doctor       # checks every protected room now
    ```
 
-5. Enrol a member and issue their recovery code:
+   The room is end-to-end encrypted, invite-only, with `joined` history and no guest access,
+   and the bot is its creator. In room version 12 a creator cannot be removed, so the bot
+   can always remove and re-invite members. Members can invite others. A room created by a
+   person cannot be protected, because the bot could not manage it; `access protect
+   '<room id>' --name …` only accepts rooms the bot created.
+
+4. Enrol a member and issue their recovery code:
 
    ```bash
    uv run community-stack access enroll @member:example.org
@@ -115,29 +126,44 @@ action with no message content.
 - The bot is a Matrix application service. Synapse pushes events to it; it does not sync.
   It acts only in direct chats with exactly two members, and only for enrolled accounts.
 - The sender comes from the event Synapse delivers, never from message text.
-- On `!safe on` the bot records each account's current protected memberships **before**
-  removing any. Retries never overwrite that record. If the service restarts midway, it
-  finishes the job when it starts again.
+- A command is recorded in the bot's database before Synapse is told it was received; the
+  removals, invitations and the reply follow on worker threads. A recorded `!safe on` is
+  finished even if the bot restarts before replying.
+- On `!safe on` the bot records each account's protected memberships **before** removing
+  any. Retries never overwrite that record. A room it cannot read is retried, never skipped.
 - On `!safe off` the bot checks the recovery code, marks it spent, and re-invites the member
   only to rooms they had joined. Invitations they never accepted are not restored. The member
   must accept each invitation in their client.
+- The newest command always wins: `!safe on` stops an unfinished restore, and the
+  administrative restore is carried out by the bot itself, so two changes to one account
+  never run at once.
+- While an account is suspended, the bot removes it again from any protected room it is
+  invited to or joins.
 - The bot never logs message content. Its database holds only operational state: the
   protected-room registry, enrolled accounts, state, the membership snapshot and hashed
   recovery codes. It keeps no activation timestamps.
 - The bot's database is part of the encrypted backup. The bot holds no homeserver admin
   credentials.
 
-## Verification still required
+## Verification
 
-These were not verified against a running server when this was written. Test them on your
-own homeserver before you tell members that Safe Mode works:
+Verified on a test homeserver (Synapse 1.163.2, room version 12, 2026-11-10), with the bot
+image built from this repository:
 
-- The bot can kick members from a room that a service account created on your Synapse
-  version, and that a person cannot remove the service account from it.
-- After a member rejoins, they cannot read earlier messages through normal history requests.
-- Element X and Element Web behave as expected for key backup and cross-signing after a
-  restore.
-- Turning Safe Mode on and off works from Element X with the bot in a direct chat.
+- The bot creates protected rooms, and a member with power level 100 cannot remove it; the
+  bot can remove that member.
+- `!safe on` and `!safe off` work end to end in an unencrypted direct chat; the reply arrives
+  within a second.
+- A suspended account cannot read messages sent while it is out, also after it rejoins.
+  It **can** still read earlier messages from the server, before and after a restore.
+- A suspended account re-invited by another member is removed again.
+- Administrative restore re-invites the member, and the rejoin is left alone.
+- In an encrypted direct chat the bot cannot read commands, and says so.
+
+Still to verify on the clients your members use:
+
+- Whether Element X can start an unencrypted direct chat with the bot.
+- Element X and Element Web behaviour for key backup and cross-signing after a restore.
 
 Element local-storage behaviour (clearing a room's cache or keys) is out of scope for this
 version. Do not describe it as possible unless it has been tested on the devices you support.

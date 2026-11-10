@@ -11,11 +11,12 @@ import yaml
 
 from community_stack import matrix_ids
 from community_stack.safemode.manager import AccessManager, GatewayError, SafeModeError
-from community_stack.safemode.store import Store
+from community_stack.safemode.store import Store, StoreMissing
 
 CONTAINER = "community_safemode"
 USER_ID = re.compile(r"^@[a-z0-9._=/-]{1,64}:[A-Za-z0-9.-]{1,253}(:\d{1,5})?$")
 ROOM_ID = matrix_ids.ROOM_ID
+ROOM_NAME = re.compile(r"[^\n\r]{1,100}")
 
 
 class _OfflineGateway:
@@ -33,14 +34,14 @@ def run_access(args: argparse.Namespace) -> int:
     action = getattr(args, "access_action", None)
     if not action:
         print(
-            "Usage: community-stack access {rooms,protect,unprotect,enroll,recovery-code,status,restore,doctor,bot,logs}"
+            "Usage: community-stack access {rooms,create-room,protect,unprotect,enroll,recovery-code,status,restore,doctor,bot,logs}"
         )
         return 1
     if action == "bot":
         return _bot_status(project)
     if action == "logs":
         return _run(["docker", "logs", "--tail", str(args.lines), CONTAINER])
-    if action in ("protect", "restore", "doctor"):
+    if action in ("create-room", "protect", "restore", "doctor"):
         try:
             return _admin_exec(project, args)
         except SafeModeError as exc:
@@ -121,6 +122,12 @@ def _admin_exec(project: Path, args: argparse.Namespace) -> int:
     if args.access_action == "protect":
         _check(args.room_id, ROOM_ID, "room ID")
         command += ["protect", args.room_id, "--name", args.name]
+    elif args.access_action == "create-room":
+        _check(args.name, ROOM_NAME, "room name")
+        command += ["create-room", "--name", args.name]
+        for user_id in args.invite:
+            _check(user_id, USER_ID, "Matrix user ID")
+            command += ["--invite", user_id]
     elif args.access_action == "restore":
         _check(args.user_id, USER_ID, "Matrix user ID")
         if not args.confirm:
@@ -156,7 +163,12 @@ def _open(project: Path) -> tuple[Store, AccessManager]:
             "Safe Mode is not set up. Enable it in community-stack.yaml and run install."
         )
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    store = Store(db_path)
+    try:
+        store = Store(db_path, create=False)  # the bot creates it, owned by its own account
+    except StoreMissing as exc:
+        raise SafeModeError(
+            "The Safe Mode database does not exist yet. Start the Safe Mode service first."
+        ) from exc
     return store, AccessManager(store, _OfflineGateway(), str(config.get("bot_user_id", "")))
 
 

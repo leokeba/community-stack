@@ -143,6 +143,42 @@ class SynapseGateway:
             as_user=self.bot_user_id,
         )
 
+    def create_room(self, name: str, invite: list[str]) -> str:
+        """Create a room the bot owns, already compatible with Safe Mode: end-to-end encrypted,
+        invite-only, ``joined`` history and no guests. The bot is its creator, so in room
+        version 12 nobody can remove it. Returns the room ID."""
+        reply = self.request(
+            "POST",
+            "/_matrix/client/v3/createRoom",
+            {
+                "preset": "private_chat",
+                "name": name,
+                "invite": invite,
+                "initial_state": [
+                    {
+                        "type": "m.room.encryption",
+                        "state_key": "",
+                        "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+                    },
+                    {
+                        "type": "m.room.history_visibility",
+                        "state_key": "",
+                        "content": {"history_visibility": "joined"},
+                    },
+                    {
+                        "type": "m.room.guest_access",
+                        "state_key": "",
+                        "content": {"guest_access": "forbidden"},
+                    },
+                ],
+            },
+            as_user=self.bot_user_id,
+        )
+        room_id = reply.get("room_id")
+        if not isinstance(room_id, str) or not room_id:
+            raise GatewayError("Matrix did not return a room ID")
+        return room_id
+
     # Bot messaging ---------------------------------------------------------
 
     def joined_members(self, room_id: str) -> list[str]:

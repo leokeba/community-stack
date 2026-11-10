@@ -12,11 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bridges: a **Needs attention** list with repairs for links to deleted rooms and rooms the bot is still in but no chat uses; restart the bridge and open a new bot chat from its page.
 - WhatsApp: add a group from its invite link straight into an existing room; relay is turned on automatically; **Use for WhatsApp announcements** sets up the announcements destination in one step.
 - `community-stack bridge --bridge signal|messenger …` for the other bridges.
+- Safe Mode: `community-stack access create-room` (and **Create a protected room** on the console) creates a protected room owned by the bot, already encrypted, invite-only, with `joined` history and no guests.
+- Safe Mode: a suspended account that is invited back or rejoins a protected room is removed again.
+- Safe Mode: the bot says when it cannot read an encrypted message, and that Safe Mode has not changed, instead of staying silent.
 
 ### Changed
 - One console page for every bridge at `/admin/bridges/<name>`, and a **Bridges** overview under a new **Chat** menu section. `/admin/whatsapp` redirects to the new page. The menu is regrouped into Publishing, Chat, Continuity, Server and Accounts.
 - The chat allowlist, required settings and command prefix are handled by shared code for every bridge (`community_stack.bridges.config`); per-bridge differences are data in the catalogue.
 - The WhatsApp announcements adapter moved to `community_stack.announcements.adapters.whatsapp`.
+- Safe Mode: the bot records a command and acknowledges Synapse at once; removals, invitations and replies run on worker threads, one account at a time, so one slow `!safe on` no longer holds up everyone else's. Administrative restore is recorded by the operator command and carried out by the bot.
+- Safe Mode: the reply to `!safe off` says that messages sent while Safe Mode was on stay hidden. The previous wording suggested earlier history might be hidden, which a live test showed it is not. `docs/safe-mode.md` now records what was verified on Synapse 1.163.2, including that a signed-in device can still fetch messages from before the suspension.
 
 ### Removed
 - The unused `WhatsAppBridgeManager` (`mode`, `mapped_rooms`).
@@ -24,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Safe Mode: a protected room whose membership cannot be read when Safe Mode is turned on is kept and retried, so the account is reported PARTIAL instead of fully suspended while still in that room.
 - Safe Mode: `!safe on` works while a restore is unfinished, instead of being refused until every invitation succeeds.
+- Safe Mode: the database's multi-step writes were not transactions (SQLite autocommit mode), so a crash could leave a half-written snapshot. Each change is now one transaction, and a newer operation for an account always wins over an older one still running, including across the bot and operator processes.
+- Safe Mode: the control agent and `access` command no longer create the bot's database. As root, they could leave a file the bot could not write to.
 - Matrix room version 12 IDs (no `:server` part) are accepted everywhere: bridges, Safe Mode, the access CLI, Matrix and WhatsApp announcement channels, and mirrored rooms.
 - Bot commands sent in a bridged room carry the bridge's command prefix, so relay and room deletion reach the bot.
 - Unlinking or deleting a bridged room also removes its chat from the allowlist, so the bridge no longer creates a replacement room on the next message.

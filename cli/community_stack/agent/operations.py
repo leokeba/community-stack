@@ -658,6 +658,17 @@ CATALOG: dict[str, Operation] = {
             summary="Protect a Matrix room if it is compatible.",
         ),
         Operation(
+            "safemode.create_room",
+            CHANGE,
+            "system",
+            _safemode_call(safemode_ops.create_room),
+            params=(
+                Param("name", safemode_ops.ROOM_NAME, required=True),
+                Param("invite", safemode_ops.INVITES),
+            ),
+            summary="Create a protected room owned by the Safe Mode bot.",
+        ),
+        Operation(
             "safemode.unprotect",
             CHANGE,
             "system",

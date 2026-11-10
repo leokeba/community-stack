@@ -223,3 +223,22 @@ def test_bot_registration_surfaces_other_failures(fake, gateway):
     fake.route("POST", "/_matrix/client/v3/register", 403, {"errcode": "M_FORBIDDEN"})
     with pytest.raises(GatewayError):
         gateway.register_bot()
+
+
+def test_created_rooms_are_owned_by_the_bot_and_compatible(fake, gateway):
+    fake.route("POST", "/_matrix/client/v3/createRoom", 200, {"room_id": "!new"})
+    assert gateway.create_room("Organising", [ALICE]) == "!new"
+    request = fake.requests[-1]
+    assert request["query"]["user_id"] == BOT
+    body = request["body"]
+    assert body["preset"] == "private_chat" and body["invite"] == [ALICE]
+    state = {event["type"]: event["content"] for event in body["initial_state"]}
+    assert state["m.room.encryption"]["algorithm"] == "m.megolm.v1.aes-sha2"
+    assert state["m.room.history_visibility"] == {"history_visibility": "joined"}
+    assert state["m.room.guest_access"] == {"guest_access": "forbidden"}
+
+
+def test_a_create_room_reply_without_an_id_is_an_error(fake, gateway):
+    fake.route("POST", "/_matrix/client/v3/createRoom", 200, {})
+    with pytest.raises(GatewayError):
+        gateway.create_room("Organising", [])

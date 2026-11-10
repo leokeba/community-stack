@@ -146,7 +146,7 @@ def test_unknown_room_ids_are_refused_by_the_agent_before_any_write(console, pro
 
 def test_every_safe_mode_operation_is_system_permission_and_restore_is_dangerous():
     names = [name for name in CATALOG if name.startswith("safemode.")]
-    assert len(names) == 8
+    assert len(names) == 9
     assert all(CATALOG[name].permission == "system" for name in names)
     assert CATALOG["safemode.restore"].risk == "dangerous"
     assert CATALOG["safemode.overview"].risk == "read"
@@ -163,6 +163,41 @@ def test_overview_reports_not_set_up_without_creating_a_database(tmp_path):
     (tmp_path / "community-stack.yaml").write_text(
         Path("config/example.yaml").read_text(encoding="utf-8"), encoding="utf-8"
     )
+    result = safemode_ops.overview(AgentContext(tmp_path), {})
+    assert result["set_up"] is False
+    assert not (tmp_path / "data" / "safemode" / "safemode.db").exists()
+
+
+def test_creating_a_room_runs_in_the_container_and_shows_its_id(console, monkeypatch):
+    client, _ = console
+    calls = []
+
+    def fake_container(args):
+        calls.append(args)
+        return 0, "Created and protected !new:matrix.ourtown.org\nInvited 2 account(s)."
+
+    monkeypatch.setattr(safemode_ops, "_container", fake_container)
+    token, _ = _token(client, "/admin/safe-mode")
+    page = client.post(
+        "/admin/safe-mode/create-room",
+        data={"csrf_token": token, "name": "Organisers", "invite": f"{MEMBER}, {BOT}"},
+    )
+    assert calls == [["create-room", "--name", "Organisers", "--invite", MEMBER, "--invite", BOT]]
+    assert "!new:matrix.ourtown.org" in page.text
+
+
+def test_the_catalogue_rejects_malformed_invites():
+    with pytest.raises(OperationError):
+        CATALOG["safemode.create_room"].validate({"name": "Ops", "invite": "@a:b; rm -rf /"})
+    CATALOG["safemode.create_room"].validate({"name": "Ops", "invite": f"{MEMBER}, {BOT}"})
+
+
+def test_overview_never_creates_the_database_when_only_the_config_exists(tmp_path):
+    (tmp_path / "community-stack.yaml").write_text(
+        Path("config/example.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "data" / "safemode").mkdir(parents=True)
+    (tmp_path / "data" / "safemode" / "config.yaml").write_text("bot_user_id: x\n")
     result = safemode_ops.overview(AgentContext(tmp_path), {})
     assert result["set_up"] is False
     assert not (tmp_path / "data" / "safemode" / "safemode.db").exists()

@@ -41,9 +41,20 @@
     {% endfor %}
     </tbody>
   </table>
-  <p>Create the room through the service account, invite the people who need it, and then protect it here. The room must be end-to-end encrypted, invite-only and set to <code>joined</code> history. A room created by a person is refused.</p>
-  <form class="card" method="post" action="/admin/safe-mode/protect">
-    <h2>Protect a room</h2>
+  <form class="card" method="post" action="/admin/safe-mode/create-room">
+    <h2>Create a protected room</h2>
+    <p>The Safe Mode bot creates the room, so nobody can remove it, and sets it up correctly: end-to-end encrypted, invite-only, <code>joined</code> history. Invited people accept in their own client; members can then invite others.</p>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="sm-new-name">Room name (members see it)</label>
+    <input id="sm-new-name" name="name" type="text" maxlength="100" required>
+    <label for="sm-new-invite">Invite (Matrix user IDs, separated by commas; optional)</label>
+    <input id="sm-new-invite" name="invite" type="text" maxlength="2000" placeholder="@organiser:example.org">
+    <p><button type="submit">Create room</button></p>
+  </form>
+  <details class="card">
+    <summary>Protect an existing room</summary>
+    <p>Only rooms the Safe Mode bot created can be protected. The room must be end-to-end encrypted, invite-only and set to <code>joined</code> history. A room created by a person is refused.</p>
+  <form method="post" action="/admin/safe-mode/protect">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="sm-room">Room ID</label>
     <input id="sm-room" name="room_id" type="text" maxlength="260" placeholder="!roomid:example.org" required>
@@ -51,6 +62,7 @@
     <input id="sm-name" name="name" type="text" maxlength="100" required>
     <p><button type="submit">Protect room</button></p>
   </form>
+  </details>
   <form class="card" method="post" action="/admin/safe-mode/doctor">
     <h2>Check protected rooms</h2>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

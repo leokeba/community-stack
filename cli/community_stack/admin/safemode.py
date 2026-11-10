@@ -146,6 +146,16 @@ def register_safemode(
             request, "safemode.protect", "Room protected", ("room_id", "name")
         )
 
+    @app.post("/admin/safe-mode/create-room")
+    async def create_room(request: Request) -> Response:
+        return await safemode_action(
+            request,
+            "safemode.create_room",
+            "Protected room created",
+            ("name", "invite"),
+            message_from="room_id",
+        )
+
     @app.post("/admin/safe-mode/unprotect")
     async def unprotect(request: Request) -> Response:
         return await safemode_action(

@@ -63,6 +63,28 @@ class FakeBotGateway:
         self.room_members.setdefault(room_id, {})[user_id] = "invite"
 
 
+class InlineExecutor:
+    """Runs the bot's background work at once, so tests can assert right after a transaction."""
+
+    def submit(self, fn, *args):
+        fn(*args)
+
+
+class DeferredExecutor:
+    """Holds background work until the test runs it."""
+
+    def __init__(self) -> None:
+        self.tasks = []
+
+    def submit(self, fn, *args):
+        self.tasks.append((fn, args))
+
+    def run(self):
+        while self.tasks:
+            fn, args = self.tasks.pop(0)
+            fn(*args)
+
+
 class Clock:
     def __init__(self) -> None:
         self.now = 100.0
@@ -79,7 +101,7 @@ def setup(tmp_path):
     store.upsert_room(ProtectedRoom(ROOM_A, "Room A", True, True, "joined", "11"))
     manager.enroll(ALICE)
     clock = Clock()
-    bot = SafetyBot(manager, gateway, clock=clock)
+    bot = SafetyBot(manager, gateway, clock=clock, executor=InlineExecutor())
     yield bot, gateway, manager, clock
     store.close()
 
@@ -118,6 +140,80 @@ def test_on_suspends_and_replies_with_the_outcome(setup):
     bot.handle_transaction("t1", [message("!safe on")])
     assert gateway.kicks == [(ROOM_A, ALICE)]
     assert "Safe Mode activated" in gateway.sent[-1][1]
+
+
+def test_on_is_recorded_before_acknowledging_and_the_kicks_run_afterwards(setup):
+    _, gateway, manager, clock = setup
+    deferred = DeferredExecutor()
+    bot = SafetyBot(manager, gateway, clock=clock, executor=deferred)
+    bot.handle_transaction("t1", [message("!safe on")])
+    # The transaction returns with the suspension recorded but no Matrix change made yet.
+    assert manager.store.state(ALICE)[0] == "SUSPENDING"
+    assert gateway.kicks == [] and gateway.sent == []
+    deferred.run()
+    assert gateway.kicks == [(ROOM_A, ALICE)]
+    assert "Safe Mode activated" in gateway.sent[-1][1]
+
+
+def test_a_recorded_on_is_finished_by_reconcile_if_the_worker_never_ran(setup):
+    _, gateway, manager, clock = setup
+    bot = SafetyBot(manager, gateway, clock=clock, executor=DeferredExecutor())
+    bot.handle_transaction("t1", [message("!safe on")])  # the bot then stops; tasks are lost
+    assert bot.reconcile() == [ALICE]
+    assert gateway.kicks == [(ROOM_A, ALICE)]
+
+
+def member_event(target, membership, sender=None, room=ROOM_A):
+    return {
+        "type": "m.room.member",
+        "sender": sender or target,
+        "room_id": room,
+        "state_key": target,
+        "content": {"membership": membership},
+    }
+
+
+def test_a_suspended_account_let_back_into_a_protected_room_is_removed_again(setup):
+    bot, gateway, manager, _ = setup
+    bot.handle_transaction("t1", [message("!safe on")])
+    gateway.room_members[ROOM_A][ALICE] = "invite"
+    bot.handle_transaction("t2", [member_event(ALICE, "invite", sender=MALLORY)])
+    assert gateway.kicks == [(ROOM_A, ALICE), (ROOM_A, ALICE)]
+    assert manager.store.state(ALICE)[0] == "SUSPENDED"
+    # Restore still brings back only what was joined before suspension.
+    assert {m.room_id: m.previous for m in manager.store.memberships(ALICE)} == {ROOM_A: "join"}
+
+
+def test_joins_to_unprotected_rooms_and_by_active_accounts_are_left_alone(setup):
+    bot, gateway, _, _ = setup
+    bot.handle_transaction("t1", [member_event(ALICE, "join")])  # Alice is not suspended
+    bot.handle_transaction("t2", [message("!safe on")])
+    gateway.room_members[GROUP] = {ALICE: "join"}
+    bot.handle_transaction("t3", [member_event(ALICE, "join", room=GROUP)])  # not protected
+    assert gateway.kicks == [(ROOM_A, ALICE)]
+
+
+def encrypted(sender=ALICE, room=DM):
+    return {
+        "type": "m.room.encrypted",
+        "sender": sender,
+        "room_id": room,
+        "content": {"algorithm": "m.megolm.v1.aes-sha2", "ciphertext": "AwgA"},
+    }
+
+
+def test_an_encrypted_message_gets_a_clear_warning_and_changes_nothing(setup):
+    bot, gateway, manager, _ = setup
+    bot.handle_transaction("t1", [encrypted()])
+    assert "NOT changed" in gateway.sent[-1][1]
+    assert manager.store.state(ALICE) is None and gateway.kicks == []
+
+
+def test_encrypted_messages_from_unknown_accounts_or_groups_get_no_reply(setup):
+    bot, gateway, _, _ = setup
+    bot.handle_transaction("t1", [encrypted(sender=MALLORY)])
+    bot.handle_transaction("t2", [encrypted(room=GROUP)])
+    assert gateway.sent == []
 
 
 def test_unknown_senders_get_no_reply_and_no_action(setup):
@@ -279,6 +375,40 @@ def test_unknown_paths_are_not_found(server):
     base, _ = server
     status, _ = _put(base, "/_matrix/app/v1/users/anything", {})
     assert status == 404
+
+
+def _post(base, path, payload, token=HS_TOKEN):
+    request = urllib.request.Request(
+        base + path,
+        data=json.dumps(payload).encode(),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            **({"Authorization": f"Bearer {token}"} if token else {}),
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
+def test_operator_drive_requests_need_the_homeserver_token(server):
+    base, _ = server
+    status, _ = _post(base, "/_safemode/v1/drive", {"user_id": ALICE}, token="nope")
+    assert status == 403
+
+
+def test_an_administrative_restore_is_carried_out_by_the_bot(setup, server):
+    _, _, manager, _ = setup
+    base, gateway = server
+    manager.activate(ALICE)
+    assert manager.start_admin_restore(ALICE) is None  # recorded only; no Matrix call yet
+    assert gateway.room_members[ROOM_A][ALICE] == "leave"
+    status, body = _post(base, "/_safemode/v1/drive", {"user_id": ALICE})
+    assert status == 200 and "off" in body["text"]
+    assert gateway.room_members[ROOM_A][ALICE] == "invite"
 
 
 def test_health_is_open_without_a_token(server):

@@ -19,12 +19,14 @@ import yaml
 from community_stack import matrix_ids
 from community_stack.config import ConfigError, load_config
 from community_stack.safemode.manager import AccessManager, GatewayError, SafeModeError
-from community_stack.safemode.store import Store
+from community_stack.safemode.store import Store, StoreMissing
 
 CONTAINER = "community_safemode"
 USER_ID = re.compile(r"@[a-z0-9._=/-]{1,64}:[A-Za-z0-9.-]{1,253}(?::\d{1,5})?")
 ROOM_ID = matrix_ids.ROOM_ID
 ROOM_NAME = re.compile(r"[^\n\r]{1,100}")
+# Up to 20 Matrix IDs, separated by commas or spaces.
+INVITES = re.compile(rf"{USER_ID.pattern}(?:[ ,]+{USER_ID.pattern}){{0,19}}")
 
 
 class SafeModeOperationError(Exception):
@@ -60,7 +62,14 @@ def _open(project_dir: Path) -> tuple[Store, AccessManager]:
         )
     except (OSError, yaml.YAMLError) as exc:
         raise SafeModeOperationError("Safe Mode configuration cannot be read.") from exc
-    store = Store(db_path)
+    try:
+        # Never create the file: the agent runs as root, and the bot could not write to a
+        # database root created. The bot creates it when it first starts.
+        store = Store(db_path, create=False)
+    except StoreMissing as exc:
+        raise SafeModeOperationError(
+            "The Safe Mode database does not exist yet. Start the Safe Mode service first."
+        ) from exc
     return store, AccessManager(store, _HostGateway(), bot_user)
 
 
@@ -113,11 +122,12 @@ def overview(context, params: dict[str, str]) -> dict[str, Any]:
             "enabled": enabled,
             "bot_status": _bot_status(),
             "rooms": [{"room_id": r.room_id, "name": r.name} for r in rooms],
-            "enrolled_count": _count(store),
+            "enrolled_count": store.enrolled_count(),
             "states": states,
         }
 
-    if not _paths(context.project_dir)[0].is_file():
+    config_path, db_path = _paths(context.project_dir)
+    if not config_path.is_file() or not db_path.is_file():
         return {
             "enabled": enabled,
             "bot_status": _bot_status(),
@@ -129,11 +139,6 @@ def overview(context, params: dict[str, str]) -> dict[str, Any]:
     result = _in_store(context.project_dir, read)
     result["set_up"] = True
     return result
-
-
-def _count(store: Store) -> int:
-    row = store.conn.execute("SELECT COUNT(*) AS n FROM enrolled_users").fetchone()
-    return int(row["n"])
 
 
 def status(context, params: dict[str, str]) -> dict[str, Any]:
@@ -183,6 +188,18 @@ def protect(context, params: dict[str, str]) -> dict[str, Any]:
     if code != 0:
         raise SafeModeOperationError(output or "The room could not be protected.")
     return {"room_id": params["room_id"], "name": params["name"], "protected": True}
+
+
+def create_room(context, params: dict[str, str]) -> dict[str, Any]:
+    args = ["create-room", "--name", params["name"]]
+    for user_id in re.split(r"[ ,]+", params.get("invite", "").strip()):
+        if user_id:
+            args += ["--invite", user_id]
+    code, output = _container(args)
+    match = re.search(r"Created and protected (\S+)", output)
+    if code != 0 or not match:
+        raise SafeModeOperationError(output or "The room could not be created.")
+    return {"room_id": match.group(1), "name": params["name"], "protected": True}
 
 
 def doctor(context, params: dict[str, str]) -> dict[str, Any]:

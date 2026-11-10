@@ -332,7 +332,7 @@ def test_correct_code_restores_only_rooms_joined_before_suspension(manager, gate
     reply = manager.restore(ALICE, code.lower().replace("-", " "))
     assert manager.store.state(ALICE) is None  # ACTIVE
     assert sorted(room for room, _ in gateway.invites) == ["!a:example.org", "!b:example.org"]
-    assert "Historical messages" in reply.text()
+    assert "stay hidden" in reply.text()
 
 
 def test_code_is_one_time(manager):
@@ -382,7 +382,11 @@ def test_activation_wins_over_an_unfinished_restore(manager, gateway):
     assert gateway.membership("!a:example.org", ALICE) == "leave"  # the new invite is revoked
     # The original snapshot survives, so a later restore brings back both rooms.
     previous = {m.room_id: m.previous for m in manager.store.memberships(ALICE)}
-    assert previous == {"!a:example.org": "join", "!b:example.org": "join"}
+    assert previous == {
+        "!a:example.org": "join",
+        "!b:example.org": "join",
+        "!c:example.org": "none",
+    }
     # The used code is spent; the reply says a new one is needed.
     assert report.needs_new_code and "new one" in report.text()
 
@@ -431,7 +435,7 @@ def test_administrative_restore_brings_back_rooms_without_a_member_code(manager,
     manager.activate(ALICE)
     message = manager.admin_restore(ALICE, confirmed=True)
     assert manager.store.state(ALICE) is None
-    assert "Historical messages" in message
+    assert "stay hidden" in message
     assert sorted(room for room, _ in gateway.invites) == ["!a:example.org", "!b:example.org"]
 
 
@@ -446,3 +450,94 @@ def test_administrative_restore_invalidates_an_outstanding_member_code(manager):
 
 def test_administrative_restore_of_an_active_account_is_a_no_op(manager):
     assert manager.admin_restore(ALICE, confirmed=True) == "Safe Mode is not on for this account."
+
+
+# Concurrency and atomicity -----------------------------------------------
+
+
+def test_store_transactions_roll_back_completely(db_path):
+    store = Store(db_path)
+    with pytest.raises(RuntimeError), store.transaction() as conn:
+        conn.execute(
+            "INSERT INTO access_state (user_id, state, operation_id) VALUES (?, ?, ?)",
+            (ALICE, s.SUSPENDING, "op"),
+        )
+        raise RuntimeError("crash between two writes")
+    assert store.state(ALICE) is None
+    store.close()
+
+
+def test_a_superseded_restore_stops_and_the_newer_suspension_wins(manager, gateway):
+    code = issue(manager)
+    manager.activate(ALICE)
+    old_restore = manager.submit(ALICE, parse(f"!safe off {code}")).operation_id
+    new_suspension = manager.submit(ALICE, parse("!safe on")).operation_id
+    # The restore's drive runs late (it was queued first): it must do nothing.
+    assert manager.drive(ALICE, old_restore) is False
+    assert gateway.invites == []
+    assert manager.drive(ALICE, new_suspension) is True
+    assert manager.store.state(ALICE)[0] == s.SUSPENDED
+
+
+def test_a_suspension_replaced_mid_drive_stops_at_the_next_room(manager, gateway):
+    code = issue(manager)
+    gateway.failing_kicks.add("!b:example.org")
+    manager.activate(ALICE)  # PARTIAL: the reconciler will retry room B
+    retry = manager.store.state(ALICE)[1]
+    gateway.failing_kicks.clear()
+    original_kick = gateway.kick
+
+    def kick_while_a_restore_is_recorded(room_id, user_id):
+        original_kick(room_id, user_id)
+        assert manager.submit(ALICE, parse(f"!safe off {code}")).operation_id
+
+    gateway.kick = kick_while_a_restore_is_recorded
+    assert manager.drive(ALICE, retry) is False  # its result is not written over the restore
+    assert manager.store.state(ALICE)[0] == s.RESTORING
+    gateway.kick = original_kick
+    manager.drive(ALICE)  # the restore runs after, so the late kick is undone
+    assert manager.store.state(ALICE) is None
+    assert gateway.membership("!b:example.org", ALICE) == "invite"
+
+
+def test_a_code_reissued_between_check_and_spend_is_not_deleted(manager):
+    issue(manager)
+    manager.activate(ALICE)
+    old_hash = bytes(manager.store.recovery_code(ALICE)["code_hash"])
+    issue(manager)  # an administrator issues a new code meanwhile
+    with pytest.raises(s.StateConflict):
+        manager.store.start_restore(ALICE, "op", code_hash=old_hash)
+    assert manager.store.recovery_code(ALICE) is not None
+    assert manager.store.state(ALICE)[0] == s.SUSPENDED
+
+
+def test_administrative_restore_can_be_recorded_without_any_matrix_call(manager, gateway):
+    manager.activate(ALICE)
+    assert manager.start_admin_restore(ALICE) is None
+    assert manager.store.state(ALICE)[0] == s.RESTORING
+    assert gateway.invites == []
+    assert manager.reconcile() == [ALICE]
+    assert manager.store.state(ALICE) is None
+
+
+def test_activation_picks_up_rooms_protected_since_the_last_one(manager, gateway):
+    manager.activate(ALICE)
+    gateway.add_room("!d:example.org", {ALICE: "join"})
+    assert manager.protect_room("!d:example.org", "Room D") == []
+    assert manager.activate(ALICE).state == s.SUSPENDED
+    assert gateway.membership("!d:example.org", ALICE) == "leave"
+
+
+def test_the_host_never_creates_the_database(tmp_path):
+    missing = tmp_path / "safemode" / "safemode.db"
+    with pytest.raises(s.StoreMissing):
+        Store(missing, create=False)
+    assert not missing.exists() and not missing.parent.exists()
+
+
+def test_the_host_can_use_an_existing_database(db_path):
+    Store(db_path).close()
+    host = Store(db_path, create=False)
+    host.enroll(ALICE)
+    assert host.is_enrolled(ALICE)
+    host.close()

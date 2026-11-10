@@ -140,6 +140,7 @@ def _config(project):
     (cfg / "config.yaml").write_text(
         yaml.safe_dump({"bot_user_id": "@safemode:matrix.example.org"})
     )
+    Store(cfg / "safemode.db").close()  # the bot creates the database when it first starts
     return cfg / "safemode.db"
 
 
@@ -227,3 +228,15 @@ def test_matrix_commands_run_inside_the_bot_container(project, monkeypatch):
     assert seen[0][:4] == ["docker", "exec", "community_safemode", "python"]
     assert seen[0][-1] == "doctor"
     assert seen[1][-4:] == ["protect", "!a:matrix.example.org", "--name", "Ops"]
+
+
+def test_the_access_command_never_creates_the_database(project, capsys, monkeypatch):
+    monkeypatch.chdir(project)
+    db = _config(project)
+    db.unlink()
+    assert (
+        access_cmd.run_access(args(access_action="enroll", user_id="@alice:matrix.example.org"))
+        == 1
+    )
+    assert "does not exist yet" in capsys.readouterr().out
+    assert not db.exists()

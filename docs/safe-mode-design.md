@@ -1,16 +1,17 @@
 # Safe Mode: design and limits
 
-Status: implemented, not yet deployed or verified against a live homeserver. Member and operator guide: [`docs/safe-mode.md`](safe-mode.md).
+Status: implemented and tested against a local Synapse 1.163.2 (2026-11-10); not yet deployed. Member and operator guide: [`docs/safe-mode.md`](safe-mode.md).
 
 Safe Mode temporarily removes a person's Matrix membership in designated protected rooms,
 across all their devices, and restores it later after an independent confirmation.
 
 ## What is protected, and what is not
 
-Server-side access is suspended: the account is removed from protected rooms and cannot
-read new events there. This does not erase anything already on a device. Messages and
-media downloaded earlier, and any encryption keys already held, stay on the phone.
-Safe Mode is not protection against inspection of an unlocked phone. The local-data part
+The account is removed from protected rooms and cannot read events sent while it is out,
+including after it rejoins. It **can** still fetch events from before its removal: Synapse
+lets a user who left read history up to their leave event (verified, see below). Nothing on a
+device is erased, and encryption keys already held, or in key backup, still work.
+Safe Mode is not protection against inspection of an unlocked, signed-in phone. The local-data part
 (Phase 4) is unverified and is not claimed anywhere.
 
 ## Audit findings (repository)
@@ -26,7 +27,7 @@ Safe Mode is not protection against inspection of an unlocked phone. The local-d
   not reuse that admin account: the plan forbids unrestricted homeserver admin for the bot.
 - The project has no Matrix SDK dependency. `httpx` is a dev-only dependency. Adding
   `mautrix-python` would be a new dependency and needs a decision (see below).
-- Room creation and ownership: nothing in the repo creates protected rooms yet.
+- Room creation and ownership: `access create-room` creates protected rooms as the bot.
 
 ## Matrix findings (verified upstream, 2026-11)
 
@@ -37,17 +38,28 @@ the creator power-level guide, <https://matrix.org/docs/spec-guides/creator-powe
   `m.room.power_levels`, cannot be changed after creation, and cannot be demoted.
 - Kick is allowed only when the sender's power level is at least the kick level and the
   target's is lower than the sender's. A creator's infinite level therefore cannot be
-  kicked by someone else. The spec does not state "creators cannot be kicked" in those
-  words; this is an inference from the rule, and it should be confirmed with a live test.
+  kicked by someone else. Confirmed on Synapse 1.163.2: a power-level-100 member gets
+  `M_FORBIDDEN` kicking the creator bot, and the bot can kick that member.
 - Consequence: a protected room created by a member cannot be managed by the service
   account. Protected rooms must be created by the service account. Rooms created by a
   person are refused, and the code reports this as a compatibility problem.
 - Version 12 adds `additional_creators`. Not used here.
 
-Not yet verified (must be tested on a live homeserver before enabling):
+Verified on Synapse 1.163.2 with `joined` history (2026-11-10):
 
-- History visibility `joined` behaviour: that a user who rejoins cannot fetch events from
-  an earlier membership period through `/messages` or `/context`.
+- A kicked user can still `/messages` events from before the kick, and `/members`.
+- Events sent while the user was out stay invisible to them after they rejoin; events from
+  their earlier membership are visible again.
+- After the user calls `/forget`, `/messages` returns `M_FORBIDDEN`. Forgetting needs the
+  user's own access token; Synapse has no admin endpoint for it. This is the only server
+  mechanism found that hides pre-suspension history from a signed-in device. Using it would
+  need the bot to act as members (a non-exclusive user namespace, or the admin login API),
+  which the "no unrestricted admin" rule excludes for now.
+- Another member can re-invite a suspended account and it can rejoin. The bot now removes it
+  again on the membership event (measured: well under a second), but it is briefly back in.
+
+Not yet verified:
+
 - Megolm key behaviour: whether a kicked member's already-received session keys are still
   usable, and whether the room rotates keys after a leave. Element's behaviour here is not
   established, and this design does not claim any key-revocation guarantee.
@@ -65,13 +77,21 @@ Not yet verified (must be tested on a live homeserver before enabling):
   membership snapshot, salted recovery-code hashes. No activation timestamps.
 - `manager.py`: the Access Manager. It talks to Matrix only through a `RoomGateway`
   protocol.
-  - Activation writes the state and the membership snapshot in one transaction before any
-    kick. Retries never overwrite the snapshot.
-  - A room whose membership cannot be read is recorded as `unknown`, never dropped. It is read
-    again before any kick, and the account stays `PARTIAL` until that succeeds.
+  - Commands run in two steps. `submit` records the change in one `BEGIN IMMEDIATE`
+    transaction (state, a new operation id, snapshot rows, spent code) without calling Matrix;
+    the bot does this before acknowledging the homeserver transaction. `drive` does the Matrix
+    work, one drive at a time per account, on a worker pool. Writes made by a drive apply only
+    while its operation id is current, so a newer command always wins.
+  - Until 2026-11-10 the store ran in SQLite autocommit mode, so its "transactions" committed
+    statement by statement. All writes now go through `Store.transaction()`.
+  - Activation adds every protected room to the snapshot as `unknown` and records the real
+    membership just before the kick. Retries never overwrite a known value.
+  - A room whose membership cannot be read stays outstanding, and the account `PARTIAL`,
+    until a later attempt reads it.
   - Each room is recorded as `pending`, `done` or `failed`. The account is `SUSPENDED`
     only when every room is `done`, and `PARTIAL` otherwise.
-  - Restore needs a one-time recovery code, which is consumed before any Matrix call.
+  - Restore needs a one-time recovery code, which is consumed before any Matrix call. Only the
+    code that was checked is spent; one reissued in between is left alone.
     Five wrong codes lock restore until an administrator issues a new code.
   - Restore re-invites only rooms the account was joined to before suspension. Invited but
     never-joined rooms are not restored. Disabled rooms are skipped.
@@ -80,10 +100,15 @@ Not yet verified (must be tested on a live homeserver before enabling):
   - `!safe on` always works, including during an unfinished restore: it suspends the account
     again from the original snapshot. The spent code is not revived; the reply says a new one
     is needed.
+  - While an account is suspended, a membership event inviting or joining it to a protected
+    room puts that room back on its outstanding list and the bot removes it again.
+  - Administrative restore is recorded by the operator command, then carried out by the
+    running bot (`POST /_safemode/v1/drive`, homeserver-token authenticated), so every
+    membership change for an account comes from one process.
+  - The host tools open the database with `mode=rw` and never create it; the control agent
+    runs as root and a root-owned file would lock the bot out.
   - Replies never include room names or other people's state.
 
-Tests: `tests/unit/test_safemode.py` (36 tests, fake gateway). The full suite passes
-(748 passed, 8 skipped).
 
 ## Decisions
 
@@ -104,14 +129,13 @@ Tests: `tests/unit/test_safemode.py` (36 tests, fake gateway). The full suite pa
 
 Built: the bot (appservice) with a Synapse gateway, the operator commands and host CLI,
 provisioning into `install`, the Dockerfile and compose service on `bridge_net`, a backup
-snapshot of the bot database, and tests (84 Safe Mode tests; the full suite passes).
+snapshot of the bot database, and unit tests with fake gateways.
 
-Not verified here: the Docker image has not been built, and nothing has run against a real
-Synapse. Docker was not running on the development machine. The items under
-[Verification still required](safe-mode.md#verification-still-required) must be tested on a
-staging server before anyone relies on Safe Mode.
+The image was built and run against a local Synapse 1.163.2; what that showed is listed under
+[Verification](safe-mode.md#verification). Client behaviour (Element X direct chats, key
+backup after restore) is still untested.
 
-Also built: an admin-console page at `/admin/safe-mode`, backed by eight control-agent operations
+Also built: an admin-console page at `/admin/safe-mode`, backed by nine control-agent operations
 (`safemode.*`). Changes are limited to the system permission, and administrative restore needs
 the admin's password.
 

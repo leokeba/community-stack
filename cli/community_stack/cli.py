@@ -307,6 +307,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
     p_a_protect.add_argument("room_id")
     p_a_protect.add_argument("--name", required=True, help="Human-readable room name")
+    p_a_create = access_subs.add_parser(
+        "create-room",
+        help="Create a room owned by the Safe Mode bot and protect it (runs in the container)",
+    )
+    p_a_create.add_argument("--name", required=True, help="Room name, visible to members")
+    p_a_create.add_argument(
+        "--invite", action="append", default=[], metavar="USER_ID", help="Invite (repeatable)"
+    )
     p_a_unprotect = access_subs.add_parser("unprotect", help="Stop protecting a room")
     p_a_unprotect.add_argument("room_id")
     p_a_enroll = access_subs.add_parser("enroll", help="Enroll an account in Safe Mode")
