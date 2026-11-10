@@ -89,6 +89,48 @@ def test_default_transport_will_not_contact_private_addresses(monkeypatch):
     assert "private network" in body["error"]
 
 
+def test_default_transport_pins_dns_and_does_not_follow_redirects_or_read_unbounded_bodies(
+    monkeypatch,
+):
+    resolved = []
+    connections = []
+
+    def resolve(host):
+        resolved.append(host)
+        return ["93.184.216.34"]
+
+    class Response:
+        status = 302
+
+        def read(self, size):
+            assert size == http.MAX_RESPONSE_BYTES + 1
+            return b"x" * size
+
+    class Connection:
+        def __init__(self, host, address, port, timeout):
+            connections.append((host, address, port, timeout))
+
+        def request(self, method, target, body, headers):
+            assert method == "GET"
+            assert target == "/actor"
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(http, "resolve", resolve)
+    monkeypatch.setattr(http, "_PinnedHTTPSConnection", Connection)
+
+    status, body = http.send("GET", "https://social.example/actor", {}, None)
+
+    assert status == 302
+    assert body == {"raw": "x" * 500}
+    assert resolved == ["social.example"]
+    assert connections == [("social.example", "93.184.216.34", 443, http.TIMEOUT_SECONDS)]
+
+
 def test_mastodon_posts_edits_and_deletes_with_the_saved_status_id():
     transport = FakeTransport(
         [

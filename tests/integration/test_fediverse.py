@@ -118,6 +118,40 @@ def test_forged_tampered_stale_or_unsigned_requests_are_refused(ours, remote, tm
     assert ours.follower_count() == 0
 
 
+def test_signing_key_document_must_identify_the_fetched_actor(ours, remote):
+    victim_id = "https://social.example/users/victim"
+    activity = {"type": "Follow", "actor": victim_id, "object": ours.actor_id}
+    body = json.dumps(activity).encode()
+    headers = remote.sign("POST", f"{ours.base_url}/ap/inbox", body)
+
+    def transport(method, url, headers, payload):
+        actor = remote.actor("Alice", "")
+        actor["id"] = victim_id
+        return 200, actor
+
+    assert ours.handle_inbox("/ap/inbox", headers, body, transport)[0] == 401
+    assert ours.follower_count() == 0
+
+
+def test_follow_inbox_must_share_the_actor_host(ours, remote):
+    network = Network(remote)
+    actor = remote.actor("Alice", "")
+    actor["inbox"] = "https://evil.example/inbox"
+    headers, body = signed_follow(remote, ours)
+
+    def transport(method, url, headers, payload):
+        if method == "GET":
+            return 200, actor
+        network.posts.append((url, headers, payload.content))
+        return 202, {}
+
+    status, _ = ours.handle_inbox("/ap/inbox", headers, body, transport)
+
+    assert status == 400
+    assert ours.follower_count() == 0
+    assert network.posts == []
+
+
 def test_publication_reaches_each_server_once_and_failures_are_retryable(ours, tmp_path):
     ours.add_follower(
         "https://a.example/users/1", "https://a.example/users/1/inbox", "https://a.example/inbox"

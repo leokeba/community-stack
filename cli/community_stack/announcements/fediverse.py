@@ -40,6 +40,31 @@ MAX_CLOCK_SKEW = timedelta(hours=12)
 USERNAME = re.compile(r"^[a-z0-9_]{1,30}$")
 
 
+def _is_actor_endpoint(actor_id: Any, endpoint: Any) -> bool:
+    if not isinstance(actor_id, str) or not isinstance(endpoint, str):
+        return False
+    try:
+        actor_url = urlsplit(actor_id)
+        endpoint_url = urlsplit(endpoint)
+        actor_port = actor_url.port
+        endpoint_port = endpoint_url.port
+        return (
+            actor_url.scheme == "https"
+            and endpoint_url.scheme == "https"
+            and actor_url.hostname is not None
+            and endpoint_url.hostname is not None
+            and actor_url.hostname.lower() == endpoint_url.hostname.lower()
+            and not actor_url.username
+            and not actor_url.password
+            and not endpoint_url.username
+            and not endpoint_url.password
+            and (actor_port is None or 1 <= actor_port <= 65535)
+            and (endpoint_port is None or 1 <= endpoint_port <= 65535)
+        )
+    except ValueError:
+        return False
+
+
 class SignatureError(ValueError):
     """An inbox request whose signature could not be verified."""
 
@@ -276,7 +301,12 @@ class Fediverse:
         actor_url = fields["keyId"].split("#", 1)[0]
         actor = self.fetch(actor_url, transport)
         key = (actor or {}).get("publicKey") or {}
-        if not actor or key.get("id") != fields["keyId"] or not key.get("publicKeyPem"):
+        if (
+            not actor
+            or actor.get("id") != actor_url
+            or key.get("id") != fields["keyId"]
+            or not isinstance(key.get("publicKeyPem"), str)
+        ):
             raise SignatureError("Could not fetch the signing key.")
         lines = []
         for name in signed:
@@ -320,10 +350,13 @@ class Fediverse:
         target = activity.get("object")
         if kind == "Follow" and target == self.actor_id:
             inbox = actor.get("inbox")
-            if not isinstance(inbox, str) or not inbox.startswith("https://"):
-                return 400, "The follower has no inbox."
-            shared = (actor.get("endpoints") or {}).get("sharedInbox")
-            self.add_follower(actor["id"], inbox, shared if isinstance(shared, str) else None)
+            if not _is_actor_endpoint(actor.get("id"), inbox):
+                return 400, "The follower has no valid inbox on its own host."
+            endpoints = actor.get("endpoints")
+            shared = endpoints.get("sharedInbox") if isinstance(endpoints, dict) else None
+            if not _is_actor_endpoint(actor["id"], shared):
+                shared = None
+            self.add_follower(actor["id"], inbox, shared)
             accept = {
                 "@context": CONTEXT,
                 "id": f"{self.actor_id}/accept/{hashlib.sha256(str(activity.get('id')).encode()).hexdigest()[:24]}",

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import json
 import secrets
 import socket
-import urllib.error
-import urllib.request
+import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import SplitResult, urlencode, urlsplit
 
 from community_stack.announcements.formatting import to_plain_text
 from community_stack.announcements.models import Announcement
@@ -20,6 +20,7 @@ from community_stack.announcements.models import Announcement
 Transport = Callable[[str, str, dict[str, str], Any], tuple[int, Any]]
 
 TIMEOUT_SECONDS = 15
+MAX_RESPONSE_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,18 @@ def assert_public_https(url: str, allowed_hosts: set[str] | None = None) -> str:
     could be pointed at services that are only meant to be reachable inside
     the server, such as Synapse or other containers.
     """
-    parts = urlsplit(url)
+    _parts, _addresses = _validated_public_url(url, allowed_hosts)
+    return url
+
+
+def _validated_public_url(
+    url: str, allowed_hosts: set[str] | None = None
+) -> tuple[SplitResult, list[str]]:
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError as exc:
+        raise UnsafeURLError("Use a valid https:// address.") from exc
     if parts.scheme != "https" or not parts.hostname:
         raise UnsafeURLError("Use an https:// address.")
     if parts.username or parts.password:
@@ -87,27 +99,49 @@ def assert_public_https(url: str, allowed_hosts: set[str] | None = None) -> str:
     host = parts.hostname.lower()
     if allowed_hosts is not None and host not in allowed_hosts:
         raise UnsafeURLError(f"Use an address on {', '.join(sorted(allowed_hosts))}.")
-    assert_public_host(host)
-    return url
+    if port is not None and not 1 <= port <= 65535:
+        raise UnsafeURLError("Use a valid https:// address.")
+    return parts, _public_addresses(host)
 
 
-def assert_public_host(host: str) -> None:
-    """Raise UnsafeURLError unless every address the host resolves to is public."""
-    host = host.lower()
+def _public_addresses(host: str) -> list[str]:
     try:
         addresses = resolve(host)
     except OSError as exc:
         raise UnsafeURLError(f"Could not find the server {host}.") from exc
+    if not addresses:
+        raise UnsafeURLError(f"Could not find the server {host}.")
     for address in addresses:
-        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        try:
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError as exc:
+            raise UnsafeURLError(f"{host} resolved to an invalid address.") from exc
         if not ip.is_global:
             raise UnsafeURLError(f"{host} points to a private network address.")
+    return addresses
+
+
+def assert_public_host(host: str) -> None:
+    """Raise UnsafeURLError unless every address the host resolves to is public."""
+    _public_addresses(host.lower())
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection that connects to an already validated address."""
+
+    def __init__(self, host: str, address: str, port: int, timeout: int):
+        super().__init__(host, port=port, timeout=timeout, context=ssl.create_default_context())
+        self._address = address
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._address, self.port), self.timeout, self.source_address)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
 def send(method: str, url: str, headers: dict[str, str], payload: Any) -> tuple[int, Any]:
     """Default transport: HTTPS to public addresses only."""
     try:
-        assert_public_https(url)
+        parts, addresses = _validated_public_url(url)
     except UnsafeURLError as exc:
         return 0, {"error": str(exc)}
     request_headers = {"User-Agent": "community-stack", **headers}
@@ -120,14 +154,20 @@ def send(method: str, url: str, headers: dict[str, str], payload: Any) -> tuple[
         request_headers.setdefault("Content-Type", "application/json")
     else:
         data = None
-    request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+    host = parts.hostname
+    port = parts.port or 443
+    target = parts.path or "/"
+    if parts.query:
+        target += f"?{parts.query}"
+    connection = _PinnedHTTPSConnection(host, addresses[0], port, TIMEOUT_SECONDS)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            return response.status, _decode(response.read())
-    except urllib.error.HTTPError as exc:
-        return exc.code, _decode(exc.read())
-    except (urllib.error.URLError, OSError) as exc:
+        connection.request(method, target, body=data, headers=request_headers)
+        response = connection.getresponse()
+        return response.status, _decode(response.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES])
+    except (http.client.HTTPException, OSError, ValueError) as exc:
         return 0, {"error": f"Network error: {getattr(exc, 'reason', exc)}"}
+    finally:
+        connection.close()
 
 
 def _decode(raw: bytes) -> Any:

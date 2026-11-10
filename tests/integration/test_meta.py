@@ -64,23 +64,31 @@ def test_http_transport_sends_form_encoded_meta_requests(monkeypatch):
     class Response:
         status = 200
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
-        def read(self):
+        def read(self, size):
+            assert size == http.MAX_RESPONSE_BYTES + 1
             return b'{"id":"post-1"}'
 
-    def open_request(request, timeout):
-        assert timeout == http.TIMEOUT_SECONDS
-        assert request.get_header("Content-type") == "application/x-www-form-urlencoded"
-        assert request.data == b"message=Hello+world"
-        return Response()
+    class Connection:
+        def __init__(self, host, address, port, timeout):
+            assert host == "graph.facebook.com"
+            assert address == "93.184.216.34"
+            assert port == 443
+            assert timeout == http.TIMEOUT_SECONDS
 
-    monkeypatch.setattr(http, "assert_public_https", lambda url: url)
-    monkeypatch.setattr(http.urllib.request, "urlopen", open_request)
+        def request(self, method, target, body, headers):
+            assert method == "POST"
+            assert target == "/v26.0/123/feed"
+            assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+            assert body == b"message=Hello+world"
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(http, "resolve", lambda host: ["93.184.216.34"])
+    monkeypatch.setattr(http, "_PinnedHTTPSConnection", Connection)
 
     status, body = http.send(
         "POST",
