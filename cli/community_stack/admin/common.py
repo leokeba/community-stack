@@ -14,7 +14,7 @@ PREFERENCE_TOPICS: dict[str, list[str]] = {"all": [], "important": ["important"]
 
 
 SESSION_COOKIE = "community_admin_session"
-PREAUTH_CSRF_COOKIE = "community_admin_csrf"
+PREAUTH_CSRF_COOKIE = "__Host-community_admin_csrf"
 SECOND_STEP_COOKIE = "community_admin_second_step"
 LOGIN_IP_LIMIT = 20
 ANY_USERNAME = "\0any"

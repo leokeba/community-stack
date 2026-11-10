@@ -204,8 +204,12 @@ def create_app(
         return response
 
     def set_cookie(
-        response: Response, token: str, name: str = SESSION_COOKIE, path: str = "/admin"
+        response: Response, token: str, name: str = SESSION_COOKIE, path: str | None = None
     ) -> None:
+        if name == PREAUTH_CSRF_COOKIE:
+            path = "/"
+        elif path is None:
+            path = "/admin"
         response.set_cookie(
             name,
             token,

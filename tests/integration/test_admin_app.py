@@ -388,6 +388,10 @@ def test_console_pages_load_nothing_from_other_sites(tmp_path):
     client, _feed_dir = make_client(tmp_path)
     login = client.get("/admin/login")
     assert "default-src 'self'" in login.headers["content-security-policy"]
+    csrf_cookie = login.headers["set-cookie"]
+    assert "__Host-community_admin_csrf=" in csrf_cookie
+    assert "path=/" in csrf_cookie.lower()
+    assert "secure" in csrf_cookie.lower()
     assert "style=" not in login.text
     setup_admin(client)
     dashboard = client.get("/admin")

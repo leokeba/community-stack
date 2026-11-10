@@ -80,7 +80,7 @@ def register_subscriptions(
             },
             status_code=status_code,
         )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/")
         return response
 
     @app.get("/subscribe")
@@ -174,7 +174,7 @@ def register_subscriptions(
             },
             status_code=status_code,
         )
-        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/subscribe")
+        set_cookie(response, csrf_token, PREAUTH_CSRF_COOKIE, path="/")
         return response
 
     def unsubscribe_secret_bytes() -> bytes | None:

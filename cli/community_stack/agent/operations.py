@@ -267,16 +267,6 @@ def _bridge_call(handler):
     return run
 
 
-def _bridge_call(handler):
-    def run(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return handler(context, params)
-        except bridges.BridgeError as exc:
-            raise OperationError(str(exc)) from exc
-
-    return run
-
-
 def _bridge_operations(spec: BridgeSpec) -> tuple[Operation, ...]:
     """The console's operations for one bridge; every name is the bridge key, then the action.
 

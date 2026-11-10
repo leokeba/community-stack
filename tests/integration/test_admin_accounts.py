@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 from community_stack.admin.app import create_app
-from community_stack.admin.store import AdminStore
+from community_stack.admin.store import PASSWORD_ITERATIONS, AdminStore, password_hash
 from fastapi.testclient import TestClient
 
 PASSWORD = "a-long-safe-test-password"
@@ -63,6 +63,33 @@ def test_account_created_before_roles_existed_becomes_owner(tmp_path):
         )
         conn.execute("INSERT INTO admin_users VALUES ('legacy', '00', '00', '2026-01-01')")
     assert AdminStore(db_path).get_account("legacy")["role"] == "owner"
+
+
+def test_legacy_password_hash_upgrades_after_successful_login(tmp_path):
+    db_path = tmp_path / "announcements.db"
+    salt = b"legacy-salt-12345"
+    legacy_hash = password_hash(PASSWORD, salt, 310_000)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE admin_users (username TEXT PRIMARY KEY, password_salt TEXT NOT NULL,"
+            " password_hash TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO admin_users VALUES (?, ?, ?, ?)",
+            ("legacy", salt.hex(), legacy_hash, "2026-01-01"),
+        )
+
+    store = AdminStore(db_path)
+    assert store.verify_password("legacy", PASSWORD)
+    with sqlite3.connect(db_path) as conn:
+        password_salt, stored_hash, iterations = conn.execute(
+            "SELECT password_salt, password_hash, password_iterations "
+            "FROM admin_users WHERE username = 'legacy'"
+        ).fetchone()
+
+    assert iterations == PASSWORD_ITERATIONS
+    assert stored_hash == password_hash(PASSWORD, bytes.fromhex(password_salt))
+    assert store.verify_password("legacy", PASSWORD)
 
 
 def test_reviewer_can_read_but_not_change_anything(app):

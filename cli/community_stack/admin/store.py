@@ -20,7 +20,8 @@ LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_LIMIT = 5
 SECOND_STEP_LOGIN_WINDOW = timedelta(hours=1)
 SECOND_STEP_LOGIN_LIMIT = 10
-PASSWORD_ITERATIONS = 310_000
+PASSWORD_ITERATIONS = 600_000
+LEGACY_PASSWORD_ITERATIONS = 310_000
 AUDIT_RETENTION = timedelta(days=400)
 
 ROLES = ("owner", "admin", "publisher", "reviewer")
@@ -51,8 +52,8 @@ def tokens_match(expected: str | None, actual: str | None) -> bool:
     )
 
 
-def password_hash(password: str, salt: bytes) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS).hex()
+def password_hash(password: str, salt: bytes, iterations: int = PASSWORD_ITERATIONS) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations).hex()
 
 
 def read_account(db_path: Path | str, username: str) -> dict[str, Any] | None:
@@ -67,8 +68,11 @@ def read_account(db_path: Path | str, username: str) -> dict[str, Any] | None:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(admin_users)")}
+        iterations = ", password_iterations" if "password_iterations" in columns else ""
         row = conn.execute(
-            "SELECT username, role, password_salt, password_hash FROM admin_users "
+            "SELECT username, role, password_salt, password_hash"
+            f"{iterations} FROM admin_users "
             "WHERE username = ? AND disabled_at IS NULL",
             (username,),
         ).fetchone()
@@ -76,14 +80,19 @@ def read_account(db_path: Path | str, username: str) -> dict[str, Any] | None:
         return None
     finally:
         conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    account = dict(row)
+    account.setdefault("password_iterations", LEGACY_PASSWORD_ITERATIONS)
+    return account
 
 
 def account_password_matches(account: dict[str, Any] | None, password: str) -> bool:
     if len(password) > 1024:
         return False
     salt = bytes.fromhex(account["password_salt"]) if account else bytes(16)
-    actual = password_hash(password, salt)
+    iterations = account.get("password_iterations", LEGACY_PASSWORD_ITERATIONS) if account else None
+    actual = password_hash(password, salt, iterations or PASSWORD_ITERATIONS)
     expected = account["password_hash"] if account else "0" * 64
     return hmac.compare_digest(actual, expected) and account is not None
 
@@ -104,6 +113,7 @@ class AdminStore:
                     username TEXT PRIMARY KEY,
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
+                    password_iterations INTEGER NOT NULL DEFAULT 600000,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -149,6 +159,11 @@ class AdminStore:
                 );
             """)
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(admin_users)")}
+            if "password_iterations" not in columns:
+                conn.execute(
+                    "ALTER TABLE admin_users ADD COLUMN password_iterations "
+                    f"INTEGER NOT NULL DEFAULT {LEGACY_PASSWORD_ITERATIONS}"
+                )
             # Accounts created before roles existed were the single administrator.
             if "role" not in columns:
                 conn.execute(
@@ -177,8 +192,8 @@ class AdminStore:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _password_hash(password: str, salt: bytes) -> str:
-        return password_hash(password, salt)
+    def _password_hash(password: str, salt: bytes, iterations: int = PASSWORD_ITERATIONS) -> str:
+        return password_hash(password, salt, iterations)
 
     @staticmethod
     def _validate_password(password: str) -> None:
@@ -226,10 +241,19 @@ class AdminStore:
                 raise ValueError("That username is already taken.")
             conn.execute(
                 """
-                INSERT INTO admin_users (username, password_salt, password_hash, created_at, role)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO admin_users (
+                    username, password_salt, password_hash, password_iterations, created_at, role
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (normalized, salt.hex(), password_hash, _now().isoformat(), role),
+                (
+                    normalized,
+                    salt.hex(),
+                    password_hash,
+                    PASSWORD_ITERATIONS,
+                    _now().isoformat(),
+                    role,
+                ),
             )
 
     def get_account(self, username: str) -> dict[str, Any] | None:
@@ -280,8 +304,9 @@ class AdminStore:
         keep_hash = self._token_hash(keep_token) if keep_token else ""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE admin_users SET password_salt = ?, password_hash = ? WHERE username = ?",
-                (salt.hex(), password_hash, username),
+                "UPDATE admin_users SET password_salt = ?, password_hash = ?, "
+                "password_iterations = ? WHERE username = ?",
+                (salt.hex(), password_hash, PASSWORD_ITERATIONS, username),
             )
             conn.execute(
                 "DELETE FROM admin_sessions WHERE username = ? AND token_hash != ?",
@@ -293,15 +318,29 @@ class AdminStore:
             return False
         with self._connect() as conn:
             user = conn.execute(
-                "SELECT password_salt, password_hash FROM admin_users "
+                "SELECT password_salt, password_hash, password_iterations FROM admin_users "
                 "WHERE username = ? AND disabled_at IS NULL",
                 (username.strip(),),
             ).fetchone()
-        # Hash even for unknown users so timing does not reveal which usernames exist.
-        salt = bytes.fromhex(user["password_salt"]) if user else bytes(16)
-        actual = self._password_hash(password, salt)
-        expected = user["password_hash"] if user else "0" * 64
-        return hmac.compare_digest(actual, expected) and user is not None
+            # Hash even for unknown users so timing does not reveal which usernames exist.
+            salt = bytes.fromhex(user["password_salt"]) if user else bytes(16)
+            iterations = user["password_iterations"] if user else PASSWORD_ITERATIONS
+            actual = self._password_hash(password, salt, iterations)
+            expected = user["password_hash"] if user else "0" * 64
+            matched = hmac.compare_digest(actual, expected) and user is not None
+            if matched and iterations < PASSWORD_ITERATIONS:
+                salt = secrets.token_bytes(16)
+                conn.execute(
+                    "UPDATE admin_users SET password_salt = ?, password_hash = ?, "
+                    "password_iterations = ? WHERE username = ?",
+                    (
+                        salt.hex(),
+                        self._password_hash(password, salt),
+                        PASSWORD_ITERATIONS,
+                        username.strip(),
+                    ),
+                )
+            return matched
 
     # Two-step login
 
