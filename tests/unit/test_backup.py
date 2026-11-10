@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+import community_stack.backup as backup_module
 import pytest
 from community_stack.backup import BackupEngine, BackupError, is_restic_available
 
@@ -115,6 +116,39 @@ def test_restore_to_isolated_target(test_env, tmp_path):
     if os.name == "posix":
         mode = (restore_target / ".env").stat().st_mode & 0o777
         assert mode == 0o600
+
+
+def test_restore_refuses_to_extract_without_data_filter(test_env, tmp_path, monkeypatch):
+    _project_dir, config_file, env_file = test_env
+    engine = BackupEngine(config_path=config_file, env_path=env_file)
+    engine.create_snapshot()
+    monkeypatch.delattr(backup_module.tarfile, "data_filter", raising=False)
+
+    with pytest.raises(BackupError, match="Safe archive extraction is unavailable"):
+        engine.restore_to_target(tmp_path / "isolated_restore", confirm=True)
+
+
+def test_snapshot_opens_live_sqlite_databases_read_only(test_env, monkeypatch):
+    project_dir, config_file, env_file = test_env
+    source_db = project_dir / "data/announcements/announcements.db"
+    source_db.parent.mkdir(parents=True)
+    source_db.touch()
+    original_connect = backup_module.sqlite3.connect
+    opened_sources = []
+
+    def connect(database, *args, **kwargs):
+        if "announcements.db" in str(database) and kwargs.get("uri"):
+            opened_sources.append((database, kwargs))
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(backup_module.sqlite3, "connect", connect)
+    BackupEngine(config_path=config_file, env_path=env_file).create_snapshot()
+
+    assert len(opened_sources) == 1
+    database, kwargs = opened_sources[0]
+    assert str(database).startswith("file:")
+    assert str(database).endswith("?mode=ro")
+    assert kwargs["uri"] is True
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions only")

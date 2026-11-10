@@ -60,6 +60,15 @@ def is_restic_available() -> bool:
     return shutil.which("restic") is not None
 
 
+def _extract_tar_safely(archive: tarfile.TarFile, target: Path) -> None:
+    if not hasattr(tarfile, "data_filter"):
+        raise BackupError(
+            "Safe archive extraction is unavailable in this Python version. "
+            "Upgrade Python before restoring this backup."
+        )
+    archive.extractall(path=target, filter="data")
+
+
 def dump_postgres_database(
     target_file: Path,
     env_file: Path,
@@ -388,7 +397,9 @@ class BackupEngine:
                     snapshot = staging_dir / (Path(relative).name + ".snapshot")
                     try:
                         with (
-                            sqlite3.connect(source_db) as source,
+                            sqlite3.connect(
+                                f"{source_db.resolve().as_uri()}?mode=ro", uri=True
+                            ) as source,
                             sqlite3.connect(snapshot) as destination,
                         ):
                             source.backup(destination)
@@ -691,10 +702,8 @@ class BackupEngine:
 
         target_path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-        extract_kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-
         with tarfile.open(target_archive, "r:gz") as tar:
-            tar.extractall(path=target_path, **extract_kwargs)
+            _extract_tar_safely(tar, target_path)
 
         # Inside target_path, find the extracted folder
         extracted_dirs = [
@@ -707,13 +716,11 @@ class BackupEngine:
 
     def _finish_restore(self, snap_content: Path, target_path: Path) -> bool:
         """Unpack a snapshot directory's data, config, secrets and dump into the target."""
-        extract_kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-
         # Extract nested data.tar.gz if present
         data_tar = snap_content / "data.tar.gz"
         if data_tar.is_file():
             with tarfile.open(data_tar, "r:gz") as tar:
-                tar.extractall(path=target_path, **extract_kwargs)
+                _extract_tar_safely(tar, target_path)
 
         # Copy config and env to target_path root
         if (snap_content / "community-stack.yaml").is_file():
