@@ -34,6 +34,11 @@ web-feed adapter is enabled by default. Matrix delivery requires explicit
 configuration; ActivityPub/email adapter classes are prototypes and have not
 been verified against live services.
 
+For local development only, run the proxy with
+`docker compose -f services/proxy/docker-compose.yml -f services/proxy/docker-compose.dev.yml up -d caddy`.
+The development config provides the `http://localhost` routes; the production
+Caddyfile intentionally does not serve admin or Matrix routes over plaintext HTTP.
+
 Organizers each get their own account. The first account, created at
 `/admin/setup`, is an **owner**. Owners and admins add accounts on the
 Accounts page with one of four roles:

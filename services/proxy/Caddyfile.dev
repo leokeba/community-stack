@@ -1,0 +1,61 @@
+{
+    admin 127.0.0.1:2019
+}
+
+http://localhost, http://127.0.0.1 {
+    encode zstd gzip
+
+    handle_path /app* {
+        reverse_proxy community_element:80
+    }
+
+    handle /admin* {
+        request_body {
+            max_size 12MB
+        }
+        reverse_proxy community_announcements:8080
+    }
+
+    handle /ap/* {
+        request_body {
+            max_size 256KB
+        }
+        reverse_proxy community_announcements:8080
+    }
+
+    handle /.well-known/webfinger {
+        request_body {
+            max_size 256KB
+        }
+        reverse_proxy community_announcements:8080
+    }
+
+    handle /subscribe* {
+        request_body {
+            max_size 1MB
+        }
+        reverse_proxy community_announcements:8080
+    }
+
+    handle /feed* {
+        reverse_proxy community_landing:80
+    }
+
+    handle /_matrix/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    handle /_synapse/client/* {
+        reverse_proxy community_synapse:8008
+    }
+
+    handle /.well-known/matrix/client {
+        header Access-Control-Allow-Origin "*"
+        header Content-Type "application/json"
+        respond `{"m.homeserver":{"base_url":"http://localhost"}}` 200
+    }
+
+    handle {
+        reverse_proxy community_landing:80
+    }
+}

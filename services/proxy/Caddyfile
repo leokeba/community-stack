@@ -2,14 +2,19 @@
 # Ingress routing with automated ACME TLS
 
 {
-    admin off
+    admin 127.0.0.1:2019
     email {$ACME_EMAIL:admin@example.org}
+}
+
+(security_headers) {
+    header Strict-Transport-Security "max-age=31536000"
 }
 
 # ------------------------------------------------------------------------------
 # Public Community Web Portal & Element Web Client
 # ------------------------------------------------------------------------------
 {$WEB_DOMAIN:community.example.org} {
+    import security_headers
     encode zstd gzip
 
     # Element Web Matrix Client
@@ -62,6 +67,7 @@
 # Matrix Homeserver (Synapse) & Delegation Endpoints
 # ------------------------------------------------------------------------------
 {$MATRIX_DOMAIN:matrix.example.org} {
+    import security_headers
     encode zstd gzip
 
     # Matrix Client-Server API
@@ -95,51 +101,6 @@
 
 import /etc/caddy/vikunja.caddy
 import /etc/caddy/facilmap.caddy
-
-# ------------------------------------------------------------------------------
-# Local Development & Testing Ingress (http://localhost)
-# ------------------------------------------------------------------------------
-http://localhost, http://127.0.0.1 {
-    encode zstd gzip
-
-    # Element Web Matrix Client
-    handle_path /app* {
-        reverse_proxy community_element:80
-    }
-
-    handle /admin* {
-        request_body {
-            max_size 12MB
-        }
-        reverse_proxy community_announcements:8080
-    }
-
-    # Public Announcements Feed
-    handle /feed* {
-        reverse_proxy community_landing:80
-    }
-
-    # Matrix Client-Server API
-    handle /_matrix/* {
-        reverse_proxy community_synapse:8008
-    }
-
-    handle /_synapse/client/* {
-        reverse_proxy community_synapse:8008
-    }
-
-    # Matrix Client Delegation (.well-known/matrix/client)
-    handle /.well-known/matrix/client {
-        header Access-Control-Allow-Origin "*"
-        header Content-Type "application/json"
-        respond `{"m.homeserver":{"base_url":"http://localhost"}}` 200
-    }
-
-    # Default: Public Landing Page and Service Directory
-    handle {
-        reverse_proxy community_landing:80
-    }
-}
 
 # Federation is served on 443 via /.well-known/matrix/server delegation. Do not
 # add a bare ":8448" site: it has no hostname, so Caddy would serve it over

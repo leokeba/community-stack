@@ -144,6 +144,8 @@ def test_caddyfile_exists_and_contains_routes():
     caddyfile = Path("services/proxy/Caddyfile")
     assert caddyfile.is_file()
     content = caddyfile.read_text(encoding="utf-8")
+    assert "http://localhost" not in content
+    assert 'header Strict-Transport-Security "max-age=31536000"' in content
     assert "handle_path /app*" in content
     assert "handle /.well-known/matrix/client" in content
     assert "import /etc/caddy/vikunja.caddy" in content
@@ -153,8 +155,22 @@ def test_caddyfile_exists_and_contains_routes():
     assert "max_size 12MB" in content
     assert "max_size 256KB" in content
     assert "max_size 1MB" in content
+    development_caddyfile = Path("services/proxy/Caddyfile.dev").read_text(encoding="utf-8")
+    assert "http://localhost" in development_caddyfile
     landing = Path("services/landing/html/index.html").read_text(encoding="utf-8")
     assert 'href="/app/"' in landing
+
+
+def test_caddy_healthcheck_uses_loopback_admin_api_without_success_fallback():
+    with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
+        caddy = yaml.safe_load(stream)["services"]["caddy"]
+    assert caddy["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
+        "-q",
+        "--spider",
+        "http://127.0.0.1:2019/config/",
+    ]
 
 
 def test_element_uses_the_generated_config_and_caddy_gets_domains():

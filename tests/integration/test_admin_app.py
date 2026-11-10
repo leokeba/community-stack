@@ -399,6 +399,15 @@ def test_console_pages_load_nothing_from_other_sites(tmp_path):
     assert "content-security-policy" not in client.get("/health").headers
 
 
+def test_public_html_has_frame_protection_and_https_hsts(tmp_path):
+    client, _feed_dir = make_client(tmp_path)
+    response = client.get("/subscribe")
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
 def test_announcement_list_filters_by_status(tmp_path):
     client, _feed_dir = make_client(tmp_path)
     setup_admin(client)

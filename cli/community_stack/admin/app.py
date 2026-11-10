@@ -163,10 +163,13 @@ def create_app(
         finally:
             if oauth_callback:
                 request.scope["query_string"] = b""
-        if request.url.path.startswith("/admin") and response.headers.get(
-            "content-type", ""
-        ).startswith("text/html"):
-            response.headers.setdefault("Content-Security-Policy", CONSOLE_CSP)
+        if request.url.scheme == "https":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        if response.headers.get("content-type", "").startswith("text/html"):
+            policy = (
+                CONSOLE_CSP if request.url.path.startswith("/admin") else "frame-ancestors 'none'"
+            )
+            response.headers.setdefault("Content-Security-Policy", policy)
             response.headers.setdefault("Referrer-Policy", "same-origin")
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response

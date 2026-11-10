@@ -240,6 +240,7 @@ fi
 
 sudo -n -u community python3 - "$project_dir" "$deploy_id" <<'PY'
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -282,6 +283,51 @@ if missing:
     if text.count(anchor) != 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
     text = text.replace(anchor, "".join(missing) + anchor)
+localhost_site = re.search(r"(?m)^[ \t]*http://localhost[^\n]*\{\s*$", text)
+if localhost_site:
+    if localhost_site.group().strip() != "http://localhost, http://127.0.0.1 {":
+        raise SystemExit("Cannot safely identify the live localhost Caddy site.")
+    lines = text.splitlines(keepends=True)
+    start = text[:localhost_site.start()].count("\n")
+    depth = 0
+    end = None
+    for index in range(start, len(lines)):
+        depth += lines[index].count("{") - lines[index].count("}")
+        if depth == 0:
+            end = index
+            break
+    if end is None:
+        raise SystemExit("Cannot safely find the end of the live localhost Caddy site.")
+    text = "".join(lines[:start] + lines[end + 1 :])
+elif re.search(r"(?m)^[ \t]*http://localhost\b", text):
+    raise SystemExit("Cannot safely identify the live localhost Caddy site.")
+text = re.sub(
+    r"(?m)^([ \t]*)admin[ \t]+off[ \t]*$",
+    r"\1admin 127.0.0.1:2019",
+    text,
+    count=1,
+)
+lines = text.splitlines(keepends=True)
+site_starts = []
+depth = 0
+for index, line in enumerate(lines):
+    stripped = line.strip()
+    if depth == 0 and stripped.endswith("{") and stripped != "{" and not stripped.startswith("("):
+        site_starts.append(index)
+    depth += line.count("{") - line.count("}")
+for start in reversed(site_starts):
+    depth = 0
+    end = None
+    for index in range(start, len(lines)):
+        depth += lines[index].count("{") - lines[index].count("}")
+        if depth == 0:
+            end = index
+            break
+    if end is None:
+        raise SystemExit("Cannot safely locate a live Caddy site block.")
+    if not any("Strict-Transport-Security" in line for line in lines[start + 1 : end]):
+        lines.insert(start + 1, '    header Strict-Transport-Security "max-age=31536000"\n')
+text = "".join(lines)
 if text != original_text:
     path.write_text(text, encoding="utf-8")
     path.chmod(0o644)

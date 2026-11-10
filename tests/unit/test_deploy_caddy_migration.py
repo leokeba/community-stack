@@ -14,7 +14,10 @@ def test_deploy_migration_persists_limits_for_existing_routes(tmp_path):
     proxy_dir = project_dir / "services/proxy"
     proxy_dir.mkdir(parents=True)
     caddyfile = proxy_dir / "Caddyfile"
-    original = """example.test {
+    original = """{
+    admin off
+}
+example.test {
     handle /admin* {
         reverse_proxy community_announcements:8080
     }
@@ -28,6 +31,14 @@ def test_deploy_migration_persists_limits_for_existing_routes(tmp_path):
         reverse_proxy community_announcements:8080
     }
     handle /feed* {
+        reverse_proxy community_landing:80
+    }
+}
+http://localhost, http://127.0.0.1 {
+    handle /admin* {
+        reverse_proxy community_announcements:8080
+    }
+    handle {
         reverse_proxy community_landing:80
     }
 }
@@ -55,6 +66,9 @@ def test_deploy_migration_persists_limits_for_existing_routes(tmp_path):
     assert "handle /feed*" in migrated
     assert "import /etc/caddy/vikunja.caddy" in migrated
     assert "import /etc/caddy/facilmap.caddy" in migrated
+    assert "http://localhost" not in migrated
+    assert "admin 127.0.0.1:2019" in migrated
+    assert migrated.count("Strict-Transport-Security") == 1
     assert (project_dir / "backups/Caddyfile.before-test-deploy").read_text(
         encoding="utf-8"
     ) == original
