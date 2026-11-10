@@ -141,6 +141,7 @@ def create_env_file(target_path: Path | str, force: bool = False) -> None:
 
     postgres_pw = generate_secret(24)
     synapse_secret = generate_secret(32)
+    synapse_form_secret = generate_secret(32)
     synapse_reg_secret = generate_secret(32)
     restic_pw = generate_secret(32)
 
@@ -153,6 +154,7 @@ POSTGRES_USER=synapse_user
 POSTGRES_PASSWORD={postgres_pw}
 
 SYNAPSE_SECRET_KEY={synapse_secret}
+SYNAPSE_FORM_SECRET={synapse_form_secret}
 SYNAPSE_REGISTRATION_SHARED_SECRET={synapse_reg_secret}
 
 # Vikunja secrets are provisioned on first install if Vikunja is enabled.

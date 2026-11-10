@@ -41,6 +41,17 @@ def test_homeserver_config_uses_domains_secrets_and_policy():
     assert loaded["server_name"] == "matrix.ourtown.org"
     assert loaded["public_baseurl"] == "https://matrix.ourtown.org/"
     assert loaded["database"]["args"]["password"] == "pg-secret-123"
+    assert loaded["form_secret"] != loaded["macaroon_secret_key"]
+    assert (
+        loaded["form_secret"]
+        == yaml.safe_load(
+            provision.homeserver_config(
+                Path("services"),
+                config(federation=False),
+                dict(line.split("=", 1) for line in ENV.strip().splitlines()),
+            )
+        )["form_secret"]
+    )
     assert loaded["federation_domain_whitelist"] == []
     assert loaded["enable_registration"] is False
     assert loaded["max_upload_size"] == "25M"
@@ -54,6 +65,18 @@ def test_homeserver_config_uses_domains_secrets_and_policy():
         )
     )
     assert open_federation["federation_domain_whitelist"] is None
+
+    explicit_form_secret = yaml.safe_load(
+        provision.homeserver_config(
+            Path("services"),
+            config(),
+            {
+                **dict(line.split("=", 1) for line in ENV.strip().splitlines()),
+                "SYNAPSE_FORM_SECRET": "distinct-form-secret",
+            },
+        )
+    )
+    assert explicit_form_secret["form_secret"] == "distinct-form-secret"
 
 
 def test_missing_secrets_stop_provisioning():

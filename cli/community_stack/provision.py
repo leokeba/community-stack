@@ -5,6 +5,8 @@ Nothing here overwrites an existing file: operators' own configuration wins.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -70,12 +72,21 @@ def homeserver_config(services_dir: Path, config: dict, env: dict[str, str]) -> 
     if missing:
         raise ProvisionError(f"Missing in .env: {', '.join(missing)}.")
     domain = _domain(config, "matrix")
+    form_secret = (
+        env.get("SYNAPSE_FORM_SECRET")
+        or hmac.new(
+            env["SYNAPSE_SECRET_KEY"].encode(),
+            b"community-stack:synapse-form-secret",
+            hashlib.sha256,
+        ).hexdigest()
+    )
     rendered = string.Template(template).substitute(
         MATRIX_DOMAIN=domain,
         POSTGRES_USER=env["POSTGRES_USER"],
         POSTGRES_PASSWORD=env["POSTGRES_PASSWORD"],
         POSTGRES_DB=env["POSTGRES_DB"],
         SYNAPSE_SECRET_KEY=env["SYNAPSE_SECRET_KEY"],
+        SYNAPSE_FORM_SECRET=form_secret,
         SYNAPSE_REGISTRATION_SHARED_SECRET=env["SYNAPSE_REGISTRATION_SHARED_SECRET"],
         MAX_UPLOAD_SIZE_MB=int(matrix.get("max_upload_size_mb", 50)),
         ALLOW_REGISTRATION="true" if matrix.get("allow_registration") else "false",

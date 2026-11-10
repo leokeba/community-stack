@@ -140,6 +140,14 @@ def test_announcements_does_not_trust_forwarded_headers_from_private_networks():
     assert "--proxy-headers" not in dockerfile
 
 
+def test_announcements_image_uses_locked_dependencies_and_pinned_base_images():
+    dockerfile = Path("services/announcements/Dockerfile").read_text(encoding="utf-8")
+    assert "python:3.12-slim@sha256:" in dockerfile
+    assert "ghcr.io/astral-sh/uv:0.9.8@sha256:" in dockerfile
+    assert "COPY pyproject.toml uv.lock README.md ./" in dockerfile
+    assert "uv sync --frozen --no-dev --no-editable" in dockerfile
+
+
 def test_proxy_does_not_expose_plain_http_federation_port():
     with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
         ports = yaml.safe_load(stream)["services"]["caddy"]["ports"]

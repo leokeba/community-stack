@@ -64,6 +64,7 @@ def test_create_env_file(tmp_path):
     parsed = parse_env_file(env_file)
     assert "POSTGRES_PASSWORD" in parsed
     assert "SYNAPSE_SECRET_KEY" in parsed
+    assert "SYNAPSE_FORM_SECRET" in parsed
     assert "RESTIC_PASSWORD" in parsed
 
     if os.name == "posix":
