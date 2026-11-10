@@ -1,14 +1,17 @@
 """SMS alerts: gateway delivery, confirmation codes, and the public sign-up pages."""
 
 import re
+import sqlite3
 
 import pytest
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
+from community_stack.announcements import sms as sms_module
 from community_stack.announcements.adapters import http
 from community_stack.announcements.models import Announcement
 from community_stack.announcements.sms import (
     CODE_ATTEMPTS,
+    CODES_PER_GLOBAL_DAY,
     CODES_PER_NUMBER_PER_DAY,
     SmsGatewayAdapter,
     SmsSignup,
@@ -91,6 +94,19 @@ def test_codes_are_limited_single_use_and_expire_after_failed_tries(tmp_path):
     for _ in range(CODE_ATTEMPTS):
         signup.confirm("+33699999999", "join", "000000")
     assert not signup.confirm("+33699999999", "join", code)
+
+
+def test_global_code_cap_blocks_rotating_numbers_and_alerts_once(tmp_path):
+    signup = SmsSignup(tmp_path / "subs.db", "server-secret")
+    for index in range(CODES_PER_GLOBAL_DAY):
+        signup.new_code(f"number-{index}", "join", f"client-{index}")
+
+    assert signup.global_limit_alert_needed
+    with pytest.raises(ValueError, match="daily SMS sign-up limit"):
+        signup.new_code("another-number", "join", "another-client")
+    assert not signup.global_limit_alert_needed
+    with sqlite3.connect(signup.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sms_code_limit_alerts").fetchone()[0] == 1
 
 
 @pytest.fixture
@@ -177,6 +193,38 @@ def test_bots_and_forged_forms_get_no_texts(site):
         "/subscribe/join/code", data={"csrf_token": "forged", "number": "+33612345678"}
     )
     assert forged.status_code == 403
+
+
+def test_reaching_global_code_cap_audits_and_logs_once(site, monkeypatch, caplog):
+    app, client, gateway = site
+    monkeypatch.setattr(sms_module, "CODES_PER_GLOBAL_DAY", 1)
+    page = client.get("/subscribe")
+
+    sent = client.post(
+        "/subscribe/join/code",
+        data={"csrf_token": csrf(page), "number": "+33612345678", "consent": "yes"},
+    )
+    assert sent.status_code == 200
+    assert len(gateway.messages) == 1
+    assert any(
+        event["action"] == "sms.signup_daily_limit_reached"
+        for event in app.state.auth_store.list_events()
+    )
+    assert "Daily SMS sign-up code limit reached" in caplog.text
+
+    blocked = client.post(
+        "/subscribe/join/code",
+        data={"csrf_token": csrf(sent), "number": "+33699999999", "consent": "yes"},
+    )
+    assert "daily SMS sign-up limit" in blocked.text
+    assert len(gateway.messages) == 1
+    assert (
+        sum(
+            event["action"] == "sms.signup_daily_limit_reached"
+            for event in app.state.auth_store.list_events()
+        )
+        == 1
+    )
 
 
 def test_sign_up_is_unavailable_without_an_sms_connection(tmp_path):

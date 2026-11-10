@@ -30,6 +30,7 @@ CODE_TTL = timedelta(minutes=15)
 CODE_ATTEMPTS = 5
 CODES_PER_NUMBER_PER_DAY = 3
 CODES_PER_CLIENT_PER_DAY = 10
+CODES_PER_GLOBAL_DAY = 50
 
 
 def normalize_phone(number: str) -> str:
@@ -157,6 +158,7 @@ class SmsSignup:
     def __init__(self, db_path: Path, secret: str) -> None:
         self.db_path = db_path
         self.secret = secret.encode()
+        self.global_limit_alert_needed = False
         with self._connect() as conn:
             conn.execute(
                 """
@@ -170,6 +172,9 @@ class SmsSignup:
                 )
                 """
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS sms_code_limit_alerts (alerted_at TEXT PRIMARY KEY)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -181,11 +186,14 @@ class SmsSignup:
 
     def new_code(self, number: str, purpose: str, client: str) -> str:
         """A 6-digit code for ``number``; raises ValueError when sending too many."""
+        self.global_limit_alert_needed = False
         now = datetime.now(timezone.utc)
         since = (now - timedelta(days=1)).isoformat()
+        error = None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("DELETE FROM sms_codes WHERE created_at < ?", (since,))
+            conn.execute("DELETE FROM sms_code_limit_alerts WHERE alerted_at < ?", (since,))
             per_number = conn.execute(
                 "SELECT COUNT(*) FROM sms_codes WHERE number = ?", (number,)
             ).fetchone()[0]
@@ -193,20 +201,46 @@ class SmsSignup:
                 "SELECT COUNT(*) FROM sms_codes WHERE client_hash = ?", (self._hash(client),)
             ).fetchone()[0]
             if per_number >= CODES_PER_NUMBER_PER_DAY or per_client >= CODES_PER_CLIENT_PER_DAY:
-                raise ValueError("Too many codes were requested today. Try again tomorrow.")
-            code = f"{secrets.randbelow(1_000_000):06d}"
-            conn.execute(
-                "INSERT INTO sms_codes (number, purpose, code_hash, client_hash, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
-                    number,
-                    purpose,
-                    self._hash(f"{number}:{purpose}:{code}"),
-                    self._hash(client),
-                    now.isoformat(),
-                ),
-            )
-            return code
+                error = "Too many codes were requested today. Try again tomorrow."
+            else:
+                total = conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0]
+                if total >= CODES_PER_GLOBAL_DAY:
+                    error = "The daily SMS sign-up limit has been reached. Try again later."
+                    self.global_limit_alert_needed = self._claim_global_limit_alert(
+                        conn, now, since
+                    )
+                else:
+                    code = f"{secrets.randbelow(1_000_000):06d}"
+                    conn.execute(
+                        "INSERT INTO sms_codes "
+                        "(number, purpose, code_hash, client_hash, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            number,
+                            purpose,
+                            self._hash(f"{number}:{purpose}:{code}"),
+                            self._hash(client),
+                            now.isoformat(),
+                        ),
+                    )
+                    if total + 1 >= CODES_PER_GLOBAL_DAY:
+                        self.global_limit_alert_needed = self._claim_global_limit_alert(
+                            conn, now, since
+                        )
+        if error:
+            raise ValueError(error)
+        return code
+
+    @staticmethod
+    def _claim_global_limit_alert(conn: sqlite3.Connection, now: datetime, since: str) -> bool:
+        if conn.execute(
+            "SELECT 1 FROM sms_code_limit_alerts WHERE alerted_at >= ? LIMIT 1", (since,)
+        ).fetchone():
+            return False
+        conn.execute(
+            "INSERT INTO sms_code_limit_alerts (alerted_at) VALUES (?)", (now.isoformat(),)
+        )
+        return True
 
     def confirm(self, number: str, purpose: str, code: str) -> bool:
         cutoff = (datetime.now(timezone.utc) - CODE_TTL).isoformat()

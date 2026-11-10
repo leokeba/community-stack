@@ -13,7 +13,12 @@ from starlette.concurrency import run_in_threadpool
 
 from community_stack.admin.common import PREAUTH_CSRF_COOKIE, PREFERENCE_TOPICS, flash, logger
 from community_stack.announcements.adapters.email_newsletter import EmailNewsletterAdapter
-from community_stack.announcements.sms import SmsGatewayAdapter, SmsSignup, normalize_phone
+from community_stack.announcements.sms import (
+    CODES_PER_GLOBAL_DAY,
+    SmsGatewayAdapter,
+    SmsSignup,
+    normalize_phone,
+)
 from community_stack.community import connection_warnings, load_community
 from community_stack.config import ConfigError
 from community_stack.subscriptions.email_signup import (
@@ -64,6 +69,11 @@ def register_subscriptions(
             storage.set_setting("sms_code_secret", secret)
         return SmsSignup(storage.db_path.parent / "subscribers.db", secret)
 
+    def alert_sms_signup_limit(request: Request, signup: SmsSignup) -> None:
+        if signup.global_limit_alert_needed:
+            audit(request, None, "sms.signup_daily_limit_reached", limit=CODES_PER_GLOBAL_DAY)
+            logger.warning("Daily SMS sign-up code limit reached (limit=%s).", CODES_PER_GLOBAL_DAY)
+
     def subscribe_page(request: Request, step: str, status_code: int = 200, **context) -> Response:
         csrf_token = preauth_csrf_token(request)
         response = render(
@@ -105,10 +115,13 @@ def register_subscriptions(
             return subscribe_page(request, "code", purpose=purpose, number="")
         if purpose == "join" and form.get("consent") != "yes":
             return subscribe_page(request, purpose, 400, error="Please tick the consent box.")
+        signup = sms_signup()
         try:
             number = normalize_phone(form.get("number", ""))
-            code = sms_signup().new_code(number, purpose, client_host(request))
+            code = signup.new_code(number, purpose, client_host(request))
+            alert_sms_signup_limit(request, signup)
         except ValueError as exc:
+            alert_sms_signup_limit(request, signup)
             return subscribe_page(request, purpose, 400, error=str(exc))
         text = f"{code} is your code to {'join' if purpose == 'join' else 'leave'} {community_name()} alerts."
         await run_in_threadpool(
