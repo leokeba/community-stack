@@ -134,7 +134,9 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self._address = address
 
     def connect(self) -> None:
-        sock = socket.create_connection((self._address, self.port), self.timeout, self.source_address)
+        sock = socket.create_connection(
+            (self._address, self.port), self.timeout, self.source_address
+        )
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
