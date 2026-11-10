@@ -246,6 +246,7 @@ import sys
 project_dir = Path(sys.argv[1])
 path = project_dir / "services/proxy/Caddyfile"
 text = path.read_text(encoding="utf-8")
+original_text = text
 routes = {
     "    handle /admin* {\n        reverse_proxy community_announcements:8080\n    }\n":
     "    handle /admin* {\n        request_body {\n            max_size 12MB\n        }\n"
@@ -280,7 +281,9 @@ if missing:
     anchor = "    handle /feed* {\n        reverse_proxy community_landing:80\n    }\n"
     if text.count(anchor) != 1:
         raise SystemExit("Cannot safely locate the live public-feed route in Caddyfile.")
-    path.write_text(text.replace(anchor, "".join(missing) + anchor), encoding="utf-8")
+    text = text.replace(anchor, "".join(missing) + anchor)
+if text != original_text:
+    path.write_text(text, encoding="utf-8")
     path.chmod(0o644)
 text = path.read_text(encoding="utf-8")
 route_import = "import /etc/caddy/vikunja.caddy"
