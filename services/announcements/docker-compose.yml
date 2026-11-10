@@ -12,8 +12,6 @@ services:
     environment:
       COMMUNITY_STACK_ADMIN_SETUP_TOKEN: ${COMMUNITY_STACK_ADMIN_SETUP_TOKEN:-}
       COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN: ${COMMUNITY_STACK_MATRIX_ANNOUNCEMENTS_TOKEN:-}
-      # Only Caddy can reach this container (no host port), so trust Docker bridge peers.
-      FORWARDED_ALLOW_IPS: ${COMMUNITY_STACK_FORWARDED_ALLOW_IPS:-172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       COMMUNITY_STACK_ANNOUNCEMENTS_DB_PATH: /app/data/announcements/announcements.db
       COMMUNITY_STACK_FEED_DIR: /app/data/landing/feed
       COMMUNITY_STACK_CONFIG: /app/community-stack.yaml

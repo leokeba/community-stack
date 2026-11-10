@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import os
 import re
 import secrets
+import socket
+import time
 from collections.abc import AsyncIterator
+from functools import lru_cache
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -69,6 +73,27 @@ from community_stack.continuity.service import ContinuityService
 
 # What each sign-up choice receives. Announcements tagged 'important' reach the second group.
 __all__ = ["LOGIN_IP_LIMIT", "AdminStore", "create_app", "tokens_match"]
+
+
+@lru_cache(maxsize=1)
+def _caddy_addresses(_cache_bucket: int) -> frozenset[str]:
+    try:
+        addresses = socket.getaddrinfo("community_proxy", None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        logger.warning(
+            "Cannot resolve Caddy's proxy address; forwarded headers are ignored: %s", exc
+        )
+        return frozenset()
+    return frozenset(ipaddress.ip_address(address[4][0]).compressed for address in addresses)
+
+
+def _trusted_caddy_peer(request: Request) -> bool:
+    peer = request.client.host if request.client else ""
+    try:
+        peer = ipaddress.ip_address(peer).compressed
+    except ValueError:
+        return False
+    return peer in _caddy_addresses(int(time.monotonic() // 10))
 
 
 def create_app(
@@ -173,6 +198,14 @@ def create_app(
             response.headers.setdefault("Referrer-Policy", "same-origin")
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response
+
+    @app.middleware("http")
+    async def trusted_proxy_headers(request: Request, call_next):
+        if _trusted_caddy_peer(request):
+            forwarded_proto = request.headers.get("x-forwarded-proto")
+            if forwarded_proto in {"http", "https"}:
+                request.scope["scheme"] = forwarded_proto
+        return await call_next(request)
 
     @app.exception_handler(LoginRequired)
     async def login_required(_request: Request, _exc: LoginRequired) -> Response:
@@ -297,7 +330,18 @@ def create_app(
         return {key: str(value) for key, value in form.items()}
 
     def client_host(request: Request) -> str:
-        return request.client.host if request.client else "unknown"
+        peer = request.client.host if request.client else "unknown"
+        if not _trusted_caddy_peer(request):
+            return peer
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if not forwarded_for:
+            return peer
+        address = forwarded_for.rsplit(",", 1)[-1].strip()
+        try:
+            return ipaddress.ip_address(address).compressed
+        except ValueError:
+            logger.warning("Caddy sent an invalid X-Forwarded-For address; using its peer address.")
+            return peer
 
     def csrf_or_forbidden(
         request: Request, session: dict[str, Any] | None, form: dict[str, str]

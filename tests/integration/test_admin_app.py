@@ -4,6 +4,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+import community_stack.admin.app as admin_app_module
 from community_stack.admin.app import LOGIN_IP_LIMIT, AdminStore, create_app
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.continuity.service import DEFAULT_ENGLISH_TEMPLATE
@@ -412,6 +413,41 @@ def test_public_html_has_frame_protection_and_https_hsts(tmp_path):
     assert response.status_code == 200
     assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
     assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_forwarded_client_ip_is_trusted_only_from_caddy(tmp_path, monkeypatch):
+    caddy_ip = "172.20.0.2"
+    monkeypatch.setattr(
+        admin_app_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", (caddy_ip, 0))],
+    )
+    admin_app_module._caddy_addresses.cache_clear()
+    app = create_app(
+        db_path=tmp_path / "announcements.db",
+        feed_dir=tmp_path / "feed",
+        config_path=tmp_path / "no-config.yaml",
+        setup_token="unused",
+    )
+
+    def failed_login(peer, forwarded_ip):
+        client = TestClient(
+            app, base_url="https://community.test", client=(peer, 12345), follow_redirects=False
+        )
+        page = client.get("/admin/login")
+        client.post(
+            "/admin/login",
+            data={
+                "csrf_token": extract_csrf(page),
+                "username": "missing",
+                "password": "incorrect",
+            },
+            headers={"x-forwarded-for": forwarded_ip},
+        )
+        return app.state.auth_store.list_events()[0]["client"]
+
+    assert failed_login(caddy_ip, "203.0.113.7") == "203.0.113.7"
+    assert failed_login("172.20.0.3", "198.51.100.4") == "172.20.0.3"
 
 
 def test_announcement_list_filters_by_status(tmp_path):

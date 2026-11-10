@@ -132,6 +132,14 @@ def test_image_build_context_excludes_caches_secrets_and_data():
         assert pattern in ignored
 
 
+def test_announcements_does_not_trust_forwarded_headers_from_private_networks():
+    with open("services/announcements/docker-compose.yml", "r", encoding="utf-8") as stream:
+        app = yaml.safe_load(stream)["services"]["announcements"]
+    assert "FORWARDED_ALLOW_IPS" not in app["environment"]
+    dockerfile = Path("services/announcements/Dockerfile").read_text(encoding="utf-8")
+    assert "--proxy-headers" not in dockerfile
+
+
 def test_proxy_does_not_expose_plain_http_federation_port():
     with open("services/proxy/docker-compose.yml", "r", encoding="utf-8") as stream:
         ports = yaml.safe_load(stream)["services"]["caddy"]["ports"]
