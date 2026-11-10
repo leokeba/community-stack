@@ -37,8 +37,9 @@ Open a direct chat with the Safe Mode bot. Send these as plain messages:
 ```
 
 - `!safe on` removes your membership in each protected room. The reply says whether all of
-  it worked. If the reply says PARTIAL, some rooms are not yet suspended: send `!safe on`
-  again, or ask an administrator.
+  it worked. If the reply says PARTIAL, some rooms are not yet suspended or could not be
+  checked: send `!safe on` again, or ask an administrator. `!safe on` also works while access
+  is still being restored.
 - `!safe off` needs your **recovery code**. An administrator issues it once and you keep it
   separately from your phone, for example on paper. The bot does not accept a turn-off
   without it.

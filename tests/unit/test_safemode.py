@@ -40,6 +40,7 @@ class FakeGateway:
         self.members: dict[str, dict[str, str]] = {}
         self.failing_kicks: set[str] = set()
         self.failing_invites: set[str] = set()
+        self.failing_reads: set[str] = set()
         self.kicks: list[tuple[str, str]] = []
         self.invites: list[tuple[str, str]] = []
 
@@ -51,6 +52,8 @@ class FakeGateway:
         return self.facts[room_id]
 
     def membership(self, room_id, user_id):
+        if room_id in self.failing_reads:
+            raise GatewayError("unreachable")
         return self.members[room_id].get(user_id)
 
     def kick(self, room_id, user_id):
@@ -230,6 +233,36 @@ def test_retry_never_overwrites_the_original_snapshot(manager, gateway):
     assert previous["!b:example.org"] == "join"
 
 
+def test_unreadable_room_is_never_reported_as_suspended(manager, gateway):
+    gateway.failing_reads.add("!b:example.org")
+    report = manager.activate(ALICE)
+    assert report.state == s.PARTIAL
+    assert report.failed == 1 and "Safe Mode activated" not in report.text()
+    assert gateway.members["!b:example.org"][ALICE] == "join"
+
+    gateway.failing_reads.clear()
+    report = manager.activate(ALICE)
+    assert report.state == s.SUSPENDED
+    assert gateway.membership("!b:example.org", ALICE) == "leave"
+    previous = {m.room_id: m.previous for m in manager.store.memberships(ALICE)}
+    assert previous["!b:example.org"] == "join"  # resolved before the kick, so restore uses it
+
+
+def test_unreadable_room_the_account_is_not_in_resolves_without_a_kick(manager, gateway):
+    gateway.failing_reads.add("!c:example.org")  # Alice is not in C
+    assert manager.activate(ALICE).state == s.PARTIAL
+
+    gateway.failing_reads.clear()
+    report = manager.activate(ALICE)
+    assert report.state == s.SUSPENDED
+    assert report.suspended == 2  # A and B; C was never a membership
+    assert "!c:example.org" not in [room for room, _ in gateway.kicks]
+
+    manager.restore(ALICE, issue(manager))
+    assert manager.store.state(ALICE) is None
+    assert "!c:example.org" not in [room for room, _ in gateway.invites]
+
+
 def test_unenrolled_sender_is_refused(manager, gateway):
     from community_stack.safemode.commands import Command
 
@@ -336,14 +369,41 @@ def test_failed_restore_stays_restoring_and_reconcile_completes_it(manager, gate
     assert manager.store.state(ALICE) is None
 
 
-def test_activation_is_refused_while_restoring(manager, gateway):
+def test_activation_wins_over_an_unfinished_restore(manager, gateway):
     code = issue(manager)
     manager.activate(ALICE)
-    gateway.failing_invites.add("!b:example.org")
+    gateway.failing_invites.add("!b:example.org")  # the restore can never finish on its own
     manager.restore(ALICE, code)
-    with pytest.raises(SafeModeError):
-        manager.activate(ALICE)
-    assert "already being restored" in manager.restore(ALICE, code).text()
+    assert manager.store.state(ALICE)[0] == s.RESTORING
+    assert gateway.membership("!a:example.org", ALICE) == "invite"
+
+    report = manager.activate(ALICE)
+    assert report.state == s.SUSPENDED
+    assert gateway.membership("!a:example.org", ALICE) == "leave"  # the new invite is revoked
+    # The original snapshot survives, so a later restore brings back both rooms.
+    previous = {m.room_id: m.previous for m in manager.store.memberships(ALICE)}
+    assert previous == {"!a:example.org": "join", "!b:example.org": "join"}
+    # The used code is spent; the reply says a new one is needed.
+    assert report.needs_new_code and "new one" in report.text()
+
+    gateway.failing_invites.clear()
+    gateway.invites.clear()
+    manager.restore(ALICE, issue(manager))
+    assert manager.store.state(ALICE) is None
+    assert sorted(room for room, _ in gateway.invites) == ["!a:example.org", "!b:example.org"]
+
+
+def test_activation_from_restoring_keeps_unprotected_rooms_skipped(manager, gateway):
+    code = issue(manager)
+    manager.activate(ALICE)
+    manager.unprotect_room("!b:example.org")
+    gateway.failing_invites.add("!a:example.org")
+    manager.restore(ALICE, code)
+    assert manager.store.state(ALICE)[0] == s.RESTORING
+    gateway.kicks.clear()
+
+    assert manager.activate(ALICE).state == s.SUSPENDED
+    assert "!b:example.org" not in [room for room, _ in gateway.kicks]
 
 
 def test_disabled_room_is_skipped_on_restore(manager, gateway):

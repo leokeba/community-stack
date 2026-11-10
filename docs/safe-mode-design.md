@@ -67,6 +67,8 @@ Not yet verified (must be tested on a live homeserver before enabling):
   protocol.
   - Activation writes the state and the membership snapshot in one transaction before any
     kick. Retries never overwrite the snapshot.
+  - A room whose membership cannot be read is recorded as `unknown`, never dropped. It is read
+    again before any kick, and the account stays `PARTIAL` until that succeeds.
   - Each room is recorded as `pending`, `done` or `failed`. The account is `SUSPENDED`
     only when every room is `done`, and `PARTIAL` otherwise.
   - Restore needs a one-time recovery code, which is consumed before any Matrix call.
@@ -75,6 +77,9 @@ Not yet verified (must be tested on a live homeserver before enabling):
     never-joined rooms are not restored. Disabled rooms are skipped.
   - The account returns to `ACTIVE` only when every restore has succeeded. Otherwise it stays
     `RESTORING`, and `reconcile()` finishes it after a restart.
+  - `!safe on` always works, including during an unfinished restore: it suspends the account
+    again from the original snapshot. The spent code is not revived; the reply says a new one
+    is needed.
   - Replies never include room names or other people's state.
 
 Tests: `tests/unit/test_safemode.py` (36 tests, fake gateway). The full suite passes

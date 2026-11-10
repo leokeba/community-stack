@@ -23,6 +23,10 @@ DONE = "done"
 FAILED = "failed"
 SKIPPED = "skipped"
 
+# Values of ``suspended_memberships.previous`` besides a Matrix membership ("join", "invite").
+UNKNOWN = "unknown"  # the snapshot could not read the room; resolved before any kick
+NOT_MEMBER = "none"  # resolved: the account was not in the room, so nothing was suspended
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS protected_rooms (
     room_id TEXT PRIMARY KEY,
@@ -205,6 +209,31 @@ class Store:
                        (user_id, room_id, previous, result) VALUES (?, ?, ?, ?)""",
                     (user_id, room_id, previous, PENDING),
                 )
+
+    def restart_suspension(self, user_id: str, operation_id: str) -> None:
+        """Turn an unfinished restore back into a suspension, in one transaction.
+
+        The snapshot is kept, so a later restore still knows what to bring back. Rooms the
+        restore skipped (no longer protected) stay skipped.
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE access_state SET state = ?, operation_id = ? WHERE user_id = ?",
+                (SUSPENDING, operation_id, user_id),
+            )
+            self.conn.execute(
+                "UPDATE suspended_memberships SET result = ? WHERE user_id = ? AND result != ?",
+                (PENDING, user_id, SKIPPED),
+            )
+
+    def resolve_previous(self, user_id: str, room_id: str, previous: str) -> None:
+        """Fill in a membership the snapshot could not read. A known value is never changed."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE suspended_memberships SET previous = ? "
+                "WHERE user_id = ? AND room_id = ? AND previous = ?",
+                (previous, user_id, room_id, UNKNOWN),
+            )
 
     def memberships(self, user_id: str) -> list[Membership]:
         rows = self.conn.execute(

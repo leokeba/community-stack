@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The unused `WhatsAppBridgeManager` (`mode`, `mapped_rooms`).
 
 ### Fixed
+- Safe Mode: a protected room whose membership cannot be read when Safe Mode is turned on is kept and retried, so the account is reported PARTIAL instead of fully suspended while still in that room.
+- Safe Mode: `!safe on` works while a restore is unfinished, instead of being refused until every invitation succeeds.
 - Matrix room version 12 IDs (no `:server` part) are accepted everywhere: bridges, Safe Mode, the access CLI, Matrix and WhatsApp announcement channels, and mirrored rooms.
 - Bot commands sent in a bridged room carry the bridge's command prefix, so relay and room deletion reach the bot.
 - Unlinking or deleting a bridged room also removes its chat from the allowlist, so the bridge no longer creates a replacement room on the next message.

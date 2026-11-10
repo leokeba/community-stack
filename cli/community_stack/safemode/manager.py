@@ -78,12 +78,13 @@ class ActivationReport:
     suspended: int = 0
     failed: int = 0
     failed_room_ids: list[str] = field(default_factory=list)  # ids only, never names
+    needs_new_code: bool = False
 
     def text(self) -> str:
         if self.state == s.ACTIVE:
             return "Safe Mode is off."
         if self.failed == 0:
-            return (
+            body = (
                 "Safe Mode activated.\n\n"
                 f"{self.rooms_checked} protected rooms checked.\n"
                 f"{self.suspended} memberships suspended.\n\n"
@@ -91,13 +92,20 @@ class ActivationReport:
                 "Server-side access has been suspended. Local message history previously "
                 "downloaded to your devices may still be accessible."
             )
-        return (
-            "Safe Mode partially activated.\n\n"
-            f"{self.suspended} rooms successfully suspended.\n"
-            f"{self.failed} rooms could not be suspended.\n\n"
-            "Your Safe Mode status is PARTIAL.\n\n"
-            "Use !safe status for details."
-        )
+        else:
+            body = (
+                "Safe Mode partially activated.\n\n"
+                f"{self.suspended} rooms successfully suspended.\n"
+                f"{self.failed} rooms could not be suspended or checked.\n\n"
+                "Your Safe Mode status is PARTIAL. Send !safe on again to retry.\n\n"
+                "Use !safe status for details."
+            )
+        if self.needs_new_code:
+            body += (
+                "\n\nNo recovery code is set for this account. To turn Safe Mode off later, "
+                "ask an administrator for a new one."
+            )
+        return body
 
 
 class AccessManager:
@@ -169,8 +177,11 @@ class AccessManager:
         with self._lock:
             current = self.store.state(user_id)
             if current is not None and current[0] == s.RESTORING:
-                raise SafeModeError("Access is being restored. Try again once that finishes.")
-            if current is None:
+                # Turning Safe Mode on always wins over an unfinished restore: a restore can stay
+                # unfinished for good if one room cannot be re-invited, and the member may need
+                # to suspend access again in the meantime. The snapshot is kept.
+                self.store.restart_suspension(user_id, _new_id())
+            elif current is None:
                 rooms = self.store.enabled_rooms()
                 snapshot = self._snapshot(user_id, rooms)
                 self.store.begin_suspension(user_id, _new_id(), snapshot)
@@ -261,29 +272,36 @@ class AccessManager:
     def _snapshot(self, user_id: str, rooms: list[ProtectedRoom]) -> dict[str, str]:
         snapshot: dict[str, str] = {}
         for room in rooms:
-            membership = self._membership_or_none(room.room_id, user_id)
+            try:
+                membership = self.gateway.membership(room.room_id, user_id)
+            except GatewayError:
+                # Never drop a room that could not be read: the account may be in it. It is
+                # checked again before any kick, and stays outstanding until that succeeds.
+                snapshot[room.room_id] = s.UNKNOWN
+                continue
             if membership in ("join", "invite"):
                 snapshot[room.room_id] = membership
         return snapshot
 
-    def _membership_or_none(self, room_id: str, user_id: str) -> str | None:
-        try:
-            return self.gateway.membership(room_id, user_id)
-        except GatewayError:
-            return "unknown"
-
     def _drive_suspension(self, user_id: str) -> None:
         for membership in self.store.memberships(user_id):
-            if membership.result == s.DONE:
+            if membership.result in (s.DONE, s.SKIPPED):
                 continue
             try:
                 current = self.gateway.membership(membership.room_id, user_id)
+                if membership.previous == s.UNKNOWN:
+                    # Record what the snapshot missed before kicking, so restore can use it.
+                    self.store.resolve_previous(
+                        user_id,
+                        membership.room_id,
+                        current if current in ("join", "invite") else s.NOT_MEMBER,
+                    )
                 if current in ("join", "invite"):
                     self.gateway.kick(membership.room_id, user_id)
                 self.store.set_result(user_id, membership.room_id, s.DONE)
             except GatewayError:
                 self.store.set_result(user_id, membership.room_id, s.FAILED)
-        failed = any(m.result != s.DONE for m in self.store.memberships(user_id))
+        failed = any(m.result not in (s.DONE, s.SKIPPED) for m in self.store.memberships(user_id))
         self.store.set_state(
             user_id, s.PARTIAL if failed else s.SUSPENDED, _operation(self, user_id)
         )
@@ -326,13 +344,14 @@ class AccessManager:
     def _activation_report(self, user_id: str) -> ActivationReport:
         state = self.store.state(user_id)
         memberships = self.store.memberships(user_id)
-        done = sum(1 for m in memberships if m.result == s.DONE)
-        failed = [m for m in memberships if m.result != s.DONE]
+        done = sum(1 for m in memberships if m.result == s.DONE and m.previous != s.NOT_MEMBER)
+        failed = [m for m in memberships if m.result not in (s.DONE, s.SKIPPED)]
         report = ActivationReport(
             state=state[0] if state else s.ACTIVE,
             rooms_checked=len(self.store.enabled_rooms()),
             suspended=done,
             failed=len(failed),
+            needs_new_code=self.store.recovery_code(user_id) is None,
         )
         report.failed_room_ids = [m.room_id for m in failed]
         return report
@@ -344,7 +363,9 @@ class AccessManager:
                 "Safe Mode turned off. Historical messages from before your suspension "
                 "may not be available."
             )
-        pending = sum(1 for m in self.store.memberships(user_id) if m.result != s.DONE)
+        pending = sum(
+            1 for m in self.store.memberships(user_id) if m.result not in (s.DONE, s.SKIPPED)
+        )
         return (
             f"Access is being restored. {pending} room invitations are not yet sent. "
             "Accept the invitations in your client. Send !safe status to check."
