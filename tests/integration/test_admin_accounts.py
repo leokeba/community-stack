@@ -47,6 +47,12 @@ def login(app, username: str, password: str = PASSWORD) -> TestClient:
 
 def post(client: TestClient, path: str, **data):
     token = csrf(client.get("/admin/account"))
+    if path in (
+        "/admin/accounts/create",
+        "/admin/accounts/password",
+        "/admin/accounts/two-step",
+    ):
+        data.setdefault("current_password", PASSWORD)
     return client.post(path, data={"csrf_token": token, **data})
 
 
@@ -134,6 +140,35 @@ def test_admin_cannot_create_or_manage_owners(app):
     )
     assert add_account(admin, "pat", "publisher").status_code == 303
     assert post(admin, "/admin/accounts/role", username="pat", role="reviewer").status_code == 303
+
+
+def test_sensitive_account_actions_require_the_actor_password(app):
+    owner = login(app, "owner")
+    page = owner.get("/admin/accounts")
+    rejected = owner.post(
+        "/admin/accounts/create",
+        data={
+            "csrf_token": csrf(page),
+            "username": "pat",
+            "password": PASSWORD,
+            "role": "publisher",
+        },
+    )
+    assert rejected.status_code == 400
+    assert app.state.auth_store.get_account("pat") is None
+
+    add_account(owner, "pat", "publisher")
+    page = owner.get("/admin/accounts")
+    rejected = owner.post(
+        "/admin/accounts/password",
+        data={
+            "csrf_token": csrf(page),
+            "username": "pat",
+            "password": "fresh-temp-password",
+        },
+    )
+    assert rejected.status_code == 400
+    assert app.state.auth_store.verify_password("pat", PASSWORD)
 
 
 def test_last_owner_and_own_account_are_protected(app):

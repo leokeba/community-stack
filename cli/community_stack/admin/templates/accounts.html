@@ -41,6 +41,8 @@
         <input type="hidden" name="username" value="{{ account.username }}">
         <label for="password-{{ loop.index }}">New temporary password for {{ account.username }}</label>
         <input id="password-{{ loop.index }}" name="password" type="password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters" required>
+        <label for="confirm-password-{{ loop.index }}">Your current password</label>
+        <input id="confirm-password-{{ loop.index }}" name="current_password" type="password" autocomplete="current-password" required>
         <p><button type="submit" class="secondary small">Reset password</button></p>
       </form>
       <form method="post" action="/admin/accounts/access"{% if not account.disabled_at %} data-confirm="Disable {{ account.username }}? They are signed out and cannot sign in until the account is enabled again." data-confirm-label="Disable account"{% endif %}>
@@ -57,6 +59,8 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="username" value="{{ account.username }}">
         <p class="muted">For someone who lost their phone and recovery codes.</p>
+        <label for="two-step-current-password-{{ loop.index }}">Your current password</label>
+        <input id="two-step-current-password-{{ loop.index }}" name="current_password" type="password" autocomplete="current-password" required>
         <p><button type="submit" class="secondary small danger">Turn off (lost phone)</button></p>
       </form>
       {% endif %}
@@ -79,6 +83,8 @@
   <select id="new-role" name="role">
     {% for option in assignable_roles %}<option value="{{ option }}" {% if option == "publisher" %}selected{% endif %}>{{ option }}</option>{% endfor %}
   </select>
+  <label for="current-password-create">Your current password</label>
+  <input id="current-password-create" name="current_password" type="password" autocomplete="current-password" required>
   <p><button type="submit">Add account</button></p>
   <p class="muted">Share the temporary password privately and ask the person to change it on their My account page.</p>
 </form>

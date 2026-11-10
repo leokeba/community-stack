@@ -200,8 +200,18 @@ def test_admins_can_turn_off_two_step_for_someone_who_lost_their_phone(app, stor
     password_step(owner)
     page = owner.get("/admin/accounts")
     assert "Turn off (lost phone)" in page.text
-    response = owner.post(
+    missing_password = owner.post(
         "/admin/accounts/two-step", data={"csrf_token": csrf(page), "username": "pat"}
+    )
+    assert missing_password.status_code == 400
+    assert store.totp_enabled("pat")
+    response = owner.post(
+        "/admin/accounts/two-step",
+        data={
+            "csrf_token": csrf(page),
+            "username": "pat",
+            "current_password": PASSWORD,
+        },
     )
     assert response.status_code == 303
     assert not store.totp_enabled("pat")

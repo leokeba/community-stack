@@ -341,6 +341,7 @@ def test_action_results_are_shown_once_on_the_next_page(tmp_path):
             "username": "camille",
             "password": "another-long-password",
             "role": "publisher",
+            "current_password": "a-long-safe-test-password",
         },
     )
     assert created.status_code == 303
@@ -355,6 +356,7 @@ def test_action_results_are_shown_once_on_the_next_page(tmp_path):
             "username": "sami",
             "password": "short",
             "role": "publisher",
+            "current_password": "a-long-safe-test-password",
         },
     )
     assert refused.status_code == 400

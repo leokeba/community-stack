@@ -57,6 +57,13 @@ def register_accounts(
             raise HTTPException(status_code=403, detail="Only owners can manage owners.")
         return account
 
+    async def current_password_matches(session: dict[str, Any], form: dict[str, str]) -> bool:
+        return await run_in_threadpool(
+            auth_store.verify_password,
+            session["username"],
+            form.get("current_password", ""),
+        )
+
     @app.get("/admin/accounts")
     async def accounts(request: Request) -> Response:
         return accounts_page(request, require(request, "accounts"))
@@ -67,6 +74,8 @@ def register_accounts(
         role = form.get("role", "")
         if role == "owner" and session["role"] != "owner":
             raise HTTPException(status_code=403, detail="Only owners can create owners.")
+        if not await current_password_matches(session, form):
+            return accounts_page(request, session, "Your current password is not correct.", 400)
         username = form.get("username", "").strip()
         try:
             await run_in_threadpool(
@@ -126,6 +135,8 @@ def register_accounts(
     async def reset_password(request: Request) -> Response:
         session, form = await checked_form(request, "accounts")
         account = managed_account(session, form)
+        if not await current_password_matches(session, form):
+            return accounts_page(request, session, "Your current password is not correct.", 400)
         try:
             await run_in_threadpool(
                 auth_store.set_password, account["username"], form.get("password", "")
@@ -159,6 +170,8 @@ def register_accounts(
     async def reset_two_step(request: Request) -> Response:
         session, form = await checked_form(request, "accounts")
         account = managed_account(session, form)
+        if not await current_password_matches(session, form):
+            return accounts_page(request, session, "Your current password is not correct.", 400)
         auth_store.disable_totp(account["username"])
         audit(request, session["username"], "two_step.reset", account["username"])
         return redirect_with(
