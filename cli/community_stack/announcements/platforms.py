@@ -212,7 +212,8 @@ _AUTOMATIC_PLATFORMS = {
         frozenset(),
         connector_name="whatsapp",
         character_limit_verified=True,
-        notes="Automatic delivery uses the community's Matrix portal bridge.",
+        notes="Automatic delivery posts in groups chosen on the Channels page, through the "
+        "WhatsApp bridge.",
     ),
     "discord": _platform(
         "discord",

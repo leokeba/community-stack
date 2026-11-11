@@ -583,6 +583,13 @@ CATALOG: dict[str, Operation] = {
             summary="Create a Matrix account with a temporary password.",
         ),
         Operation(
+            "matrix.announcer.session",
+            CHANGE,
+            "system",
+            _matrix_call(matrix_admin.announcer_session),
+            summary="Create the announcer account if needed and issue it a new access token.",
+        ),
+        Operation(
             "matrix.users.reset_password",
             DANGEROUS,
             "system",

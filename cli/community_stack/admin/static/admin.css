@@ -522,6 +522,18 @@ td.mono, td .mono { color: var(--ink-2); white-space: nowrap; }
 .channel-body { padding: 0 1rem 1rem; border-top: 1px solid var(--line-soft); }
 .channel-body > .actions { margin: .9rem 0; }
 .channel-setup { margin-top: .75rem; }
+.bridged-rooms { margin: .75rem 0; padding: 0; list-style: none; }
+.bridged-rooms > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem 1rem;
+  padding: .7rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+.bridged-rooms > li:first-child { border-top: 0; }
+.bridged-rooms form { margin: 0; }
 
 /* Accounts --------------------------------------------------------------- */
 

@@ -18,14 +18,14 @@ from community_stack.announcements.adapters.base import (
     UpdateMode,
     WithdrawMode,
 )
+from community_stack.announcements.adapters.bridged_room import (
+    INTERNAL_HOMESERVER,
+    BridgedRoomAdapter,
+)
 from community_stack.announcements.adapters.manual import ManualChannelAdapter
 from community_stack.announcements.adapters.matrix_room import MatrixRoomAdapter
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
-from community_stack.announcements.connectors import (
-    CONNECTORS,
-    build_connector,
-    build_email_adapter,
-)
+from community_stack.announcements.connectors import CONNECTORS, build_email_adapter
 from community_stack.announcements.fediverse import Fediverse, FediverseAdapter
 from community_stack.announcements.formatting import with_simulation_label
 from community_stack.announcements.models import UNPUBLISHED, Announcement, AnnouncementStatus
@@ -33,6 +33,7 @@ from community_stack.announcements.platform_content import generate_platform_tex
 from community_stack.announcements.platforms import PLATFORM_CATALOG, PLATFORMS
 from community_stack.announcements.sms import SmsGatewayAdapter
 from community_stack.announcements.storage import AnnouncementStorage
+from community_stack.bridges.catalogue import CATALOG as BRIDGES
 from community_stack.config import load_config
 from community_stack.continuity.connect_page import build_site, load_identity, write_files
 from community_stack.continuity.store import ContinuityStore
@@ -87,13 +88,18 @@ class AnnouncementPublisher:
         self.connect_url = f"{self.base_url}/connect/"
         self.feed_dir = Path(feed_dir)
         self.storage = storage or AnnouncementStorage()
-        self.whatsapp_bridge_enabled = False
+        # Keys of the bridges turned on in the configuration, e.g. {"whatsapp", "signal"}.
+        self.enabled_bridges: set[str] = set()
         self.matrix_auth: dict[str, str] | None = None
 
         if adapters is not None:
             self.adapters = adapters
         else:
             self.adapters = self._load_default_adapters()
+
+    @property
+    def whatsapp_bridge_enabled(self) -> bool:
+        return "whatsapp" in self.enabled_bridges
 
     @property
     def timezone(self) -> ZoneInfo:
@@ -106,7 +112,7 @@ class AnnouncementPublisher:
         community_name = "Community Communications"
         channels: dict[str, Any] = {}
         social_platforms: set[str] = set()
-        self.whatsapp_bridge_enabled = False
+        self.enabled_bridges = set()
         self.matrix_auth = None
         if self.config_path.is_file():
             cfg = load_config(self.config_path)
@@ -123,9 +129,12 @@ class AnnouncementPublisher:
             if not announcement_config["enabled"]:
                 return adapters
             channels = announcement_config.get("channels", {})
-            self.whatsapp_bridge_enabled = (
-                cfg.get("services", {}).get("whatsapp_bridge", {}).get("enabled", False)
-            )
+            services = cfg.get("services", {})
+            self.enabled_bridges = {
+                spec.key
+                for spec in BRIDGES.values()
+                if spec.announcements and (services.get(spec.service) or {}).get("enabled", False)
+            }
 
         web_config = channels.get("web_feed", {})
         if (
@@ -176,8 +185,10 @@ class AnnouncementPublisher:
                     access_token=access_token,
                 )
             )
-        connected = self._connected_adapters()
-        configured_names = {adapter.name for adapter in (*adapters, *connected)}
+        connected = self._connected_adapters() + self._bridged_adapters()
+        configured_names = {adapter.name for adapter in (*adapters, *connected)} | {
+            destination["bridge"] for destination in self.storage.list_bridged_destinations()
+        }
         manual = [
             ManualChannelAdapter(platform)
             for platform in PLATFORM_CATALOG
@@ -193,16 +204,6 @@ class AnnouncementPublisher:
         for kind, values in connections.items():
             connector = CONNECTORS.get(kind)
             if connector is None:
-                continue
-            if kind == "whatsapp":
-                if not self.whatsapp_bridge_enabled or self.matrix_auth is None:
-                    continue
-                try:
-                    adapters.append(build_connector(kind, values, self.matrix_auth))
-                except (KeyError, ValueError):
-                    logger.warning(
-                        "Skipping the %s connection: its saved settings are invalid.", kind
-                    )
                 continue
             if kind == "email":
                 try:
@@ -246,6 +247,45 @@ class AnnouncementPublisher:
                 adapters.append(connector.build(values))
             except (KeyError, ValueError):
                 logger.warning("Skipping the %s connection: its saved settings are invalid.", kind)
+        return adapters
+
+    def bridged_adapter(self, destination: dict[str, str]) -> BridgedRoomAdapter | None:
+        """The channel for one bridged group, or None while its bridge or account is missing."""
+        spec = BRIDGES.get(destination["bridge"])
+        if spec is None or spec.key not in self.enabled_bridges:
+            return None
+        if destination["account"] == "matrix_room":
+            auth = self.matrix_auth
+        else:
+            announcer = self.storage.get_announcer()
+            auth = (
+                {"homeserver_url": INTERNAL_HOMESERVER, "access_token": announcer["access_token"]}
+                if announcer
+                else None
+            )
+        if auth is None:
+            return None
+        return BridgedRoomAdapter(
+            name=destination["name"],
+            label=f"{spec.name}: {destination['room_name']}",
+            homeserver_url=auth["homeserver_url"],
+            room_id=destination["room_id"],
+            access_token=auth["access_token"],
+            max_text_length=spec.message_max_length,
+        )
+
+    def _bridged_adapters(self) -> list[ChannelAdapter]:
+        """One channel per WhatsApp or Signal group chosen to receive announcements."""
+        adapters: list[ChannelAdapter] = []
+        for destination in self.storage.list_bridged_destinations():
+            adapter = self.bridged_adapter(destination)
+            if adapter is None:
+                logger.warning(
+                    "Skipping the bridged room %s: its bridge is off or its account is missing.",
+                    destination["name"],
+                )
+                continue
+            adapters.append(adapter)
         return adapters
 
     def _unsubscribe_secret(self) -> bytes:

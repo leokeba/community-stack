@@ -242,6 +242,22 @@ class AnnouncementStorage:
                 FROM delivery_states
                 WHERE attempts > 0;
             """)
+            # Chat groups on other networks that receive announcements through their
+            # bridged Matrix room. `account` names who posts: the stack's announcer, or the
+            # Matrix announcements account for a room connected before the announcer existed.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bridged_destinations (
+                    name TEXT PRIMARY KEY,
+                    bridge TEXT NOT NULL,
+                    room_id TEXT NOT NULL,
+                    room_name TEXT NOT NULL,
+                    account TEXT NOT NULL DEFAULT 'announcer',
+                    added_by TEXT,
+                    added_at TEXT NOT NULL,
+                    UNIQUE (bridge, room_id)
+                );
+            """)
+            self._migrate_whatsapp_connection(conn)
             conn.commit()
         if os.name == "posix":
             self.db_path.chmod(0o600)
@@ -739,6 +755,93 @@ class AnnouncementStorage:
     def delete_connection(self, kind: str) -> None:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM channel_connections WHERE kind = ?", (kind,))
+
+    @staticmethod
+    def _migrate_whatsapp_connection(conn: sqlite3.Connection) -> None:
+        """Move the single WhatsApp room of older versions into the bridged destinations.
+
+        It keeps the channel name "whatsapp", so its delivery history and on/off setting
+        still apply, and keeps posting with the Matrix announcements account that joined it.
+        """
+        row = conn.execute(
+            "SELECT values_json, updated_by, updated_at FROM channel_connections "
+            "WHERE kind = 'whatsapp'"
+        ).fetchone()
+        if row is None:
+            return
+        room_id = json.loads(row["values_json"]).get("room_id")
+        if room_id:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO bridged_destinations
+                    (name, bridge, room_id, room_name, account, added_by, added_at)
+                VALUES ('whatsapp', 'whatsapp', ?, 'WhatsApp group', 'matrix_room', ?, ?)
+                """,
+                (room_id, row["updated_by"], row["updated_at"]),
+            )
+        conn.execute("DELETE FROM channel_connections WHERE kind = 'whatsapp'")
+
+    def list_bridged_destinations(self) -> list[dict[str, str]]:
+        """Bridged chat groups that receive announcements, oldest first."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT name, bridge, room_id, room_name, account, added_by, added_at "
+                "FROM bridged_destinations ORDER BY added_at, name"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_bridged_destination(
+        self, name: str, bridge: str, room_id: str, room_name: str, actor: str | None
+    ) -> bool:
+        """Add a bridged room, or refresh its name; return whether it was new.
+
+        Saving again always switches the room to the announcer account, which is how a
+        room connected by an older version is moved over.
+        """
+        with self._get_connection() as conn:
+            existed = conn.execute(
+                "SELECT 1 FROM bridged_destinations WHERE bridge = ? AND room_id = ?",
+                (bridge, room_id),
+            ).fetchone()
+            if existed:
+                conn.execute(
+                    "UPDATE bridged_destinations SET room_name = ?, account = 'announcer' "
+                    "WHERE bridge = ? AND room_id = ?",
+                    (room_name, bridge, room_id),
+                )
+                return False
+            conn.execute(
+                """
+                INSERT INTO bridged_destinations
+                    (name, bridge, room_id, room_name, account, added_by, added_at)
+                VALUES (?, ?, ?, ?, 'announcer', ?, ?)
+                """,
+                (name, bridge, room_id, room_name, actor, datetime.now(timezone.utc).isoformat()),
+            )
+            return True
+
+    def delete_bridged_destination(self, name: str) -> dict[str, str] | None:
+        """Remove a bridged room from the destinations; return what was removed."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT name, bridge, room_id, room_name, account, added_by, added_at "
+                "FROM bridged_destinations WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM bridged_destinations WHERE name = ?", (name,))
+        return dict(row)
+
+    def get_announcer(self) -> dict[str, str] | None:
+        """The announcer account's user ID and access token, once it has been created."""
+        raw = self.get_setting("bridge_announcer", "")
+        return json.loads(raw) if raw else None
+
+    def save_announcer(self, user_id: str, access_token: str) -> None:
+        self.set_setting(
+            "bridge_announcer", json.dumps({"user_id": user_id, "access_token": access_token})
+        )
 
     def save_image(self, announcement_id: str, image, alt: str, actor: str | None) -> MediaImage:
         """Store a processed image and attach it to the announcement, replacing any old one."""

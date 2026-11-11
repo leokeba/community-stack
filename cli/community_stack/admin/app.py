@@ -712,6 +712,7 @@ def create_app(
 
     register_channels(
         app,
+        agent=agent,
         audit=audit,
         checked_form=checked_form,
         config_path=config_path,

@@ -127,7 +127,7 @@
         </span>
         <span class="channel-state">
           {{ badge("relay", "Relay on", "success") if room.relay else badge("relay", "Relay off", "warning") }}
-          {% if announce_room == room.room_id %}{{ badge("announce", "Announcements", "info") }}{% endif %}
+          {% if room.room_id in announce_rooms %}{{ badge("announce", "Announcements", "info") }}{% endif %}
           {% if room.encrypted %}{{ badge("encrypted", "Encrypted", "neutral") }}{% endif %}
         </span>
       </summary>
@@ -161,18 +161,19 @@
             <p class="muted">Update the room's name, picture and {{ spec.name }} members from the {{ noun }}.</p>
             <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Refresh from {{ spec.name }}</button></p>
           </form>
-          {% if spec.key == "whatsapp" %}
-          <form method="post" action="{{ base }}/announce-room">
+          {% if spec.announcements %}
+          <form method="post" action="/admin/channels/bridged/{{ spec.key }}/add"{% if not room.relay and room.room_id not in announce_rooms %} data-confirm="Use this {{ noun }} for announcements? Relay will be turned on in its room." data-confirm-label="Use for announcements"{% endif %}>
             <h3>Announcements</h3>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="room_id" value="{{ room.room_id }}">
-            {% if announce_room == room.room_id %}
-            <p class="muted">Announcements published to the WhatsApp channel are posted here.</p>
+            <input type="hidden" name="back" value="bridge">
+            {% if room.room_id in announce_rooms %}
+            <p class="muted">This {{ noun }} receives announcements. Manage it on the <a href="/admin/channels#bridged-{{ spec.key }}">Channels</a> page.</p>
+            {% elif room.encrypted %}
+            <p class="muted">Encrypted rooms cannot receive announcements.</p>
             {% elif announcements_ready %}
-            <p class="muted">Post announcements published to the WhatsApp channel in this {{ noun }}.</p>
-            <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Use for WhatsApp announcements</button></p>
-            {% else %}
-            <p class="muted">Connect Matrix announcements on the <a href="/admin/channels">Channels</a> page first; WhatsApp forwarding posts with that account.</p>
+            <p class="muted">Post announcements in this {{ noun }}, as their own channel.</p>
+            <p><button type="submit" class="small secondary"{% if off %} disabled{% endif %}>Use for announcements</button></p>
             {% endif %}
           </form>
           {% endif %}

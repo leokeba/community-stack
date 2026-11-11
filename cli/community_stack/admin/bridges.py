@@ -15,7 +15,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
@@ -24,15 +23,12 @@ from starlette.concurrency import run_in_threadpool
 
 from community_stack.admin.common import flash
 from community_stack.agent.client import AgentRefused, AgentUnavailable
-from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
 from community_stack.bridges.catalogue import (
     CATALOG,
     LOGIN_COMMAND,
-    WHATSAPP,
     BridgeSpec,
     supported,
 )
-from community_stack.matrix_ids import ROOM_ID
 
 FLOW = re.compile(r"[a-z][a-z0-9-]{0,31}")
 QR_TTL_SECONDS = 180
@@ -235,7 +231,11 @@ def register_bridges(
             problems += sum(not check["ok"] for check in bridge["checks"])
         if overview:
             problems += len(overview["broken"]) + len(overview["leftovers"])
-        announce_room = storage.list_connections().get("whatsapp", {}).get("room_id")
+        announce_rooms = {
+            destination["room_id"]
+            for destination in storage.list_bridged_destinations()
+            if destination["bridge"] == spec.key
+        }
         return render(
             request,
             "bridge.html",
@@ -249,10 +249,8 @@ def register_bridges(
                 candidates=candidates,
                 problems=problems,
                 matrix_domain=matrix_domain(),
-                announcements_ready=spec.key == WHATSAPP.key
-                and publisher.whatsapp_bridge_enabled
-                and publisher.matrix_auth is not None,
-                announce_room=announce_room if spec.key == WHATSAPP.key else None,
+                announcements_ready=spec.announcements and spec.key in publisher.enabled_bridges,
+                announce_rooms=announce_rooms,
                 replies=replies,
                 **({"flash": outcome} if outcome else {}),
             ),
@@ -331,91 +329,6 @@ def register_bridges(
         audit(request, session["username"], operation, command, outcome="succeeded")
         return await bridge_page(
             request, session, spec, flash(f"{spec.name}: sent '{command}'."), replies=result
-        )
-
-    @app.post("/admin/bridges/{key}/announce-room")
-    async def bridge_announce_room(request: Request, key: str) -> Response:
-        """Forward announcements to a WhatsApp room: invite the announcements account through
-        the bridge bot, join it with that account, and save the room as the destination."""
-        spec = spec_or_404(key)
-        if spec.key != WHATSAPP.key:
-            raise HTTPException(status_code=404, detail="Unknown action.")
-        session, form = await checked_form(request, "settings")
-        room_id = form.get("room_id", "")
-        if not ROOM_ID.fullmatch(room_id):
-            return await bridge_page(
-                request, session, spec, flash("That is not a valid room ID.", "error"), 400
-            )
-        if not (publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None):
-            return await bridge_page(
-                request,
-                session,
-                spec,
-                flash(
-                    "Connect Matrix announcements on the Channels page first; WhatsApp "
-                    "forwarding posts with that account.",
-                    "error",
-                ),
-                status_code=409,
-            )
-        sender = WhatsAppAnnouncementAdapter(
-            homeserver_url=publisher.matrix_auth["homeserver_url"],
-            room_id=room_id,
-            access_token=publisher.matrix_auth["access_token"],
-        )
-        try:
-            status, account = await run_in_threadpool(
-                sender._http_request, "GET", "/_matrix/client/v3/account/whoami"
-            )
-            if status != 200 or not account.get("user_id"):
-                raise AgentRefused("The Matrix announcements account could not sign in.")
-            status, joined = await run_in_threadpool(
-                sender._http_request, "GET", "/_matrix/client/v3/joined_rooms"
-            )
-            if room_id not in (joined.get("joined_rooms", []) if status == 200 else []):
-                await call(
-                    session,
-                    f"bridge.{spec.key}.room_invite",
-                    {"room_id": room_id, "user_id": account["user_id"]},
-                )
-                status, reply = await run_in_threadpool(
-                    sender._http_request,
-                    "POST",
-                    f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/join",
-                    {},
-                )
-                if status != 200:
-                    raise AgentRefused(
-                        f"The announcements account could not join the room: "
-                        f"{reply.get('error', status)}"
-                    )
-        except (AgentUnavailable, AgentRefused) as exc:
-            audit(request, session["username"], "channel.connected", "whatsapp", outcome="failed")
-            return await bridge_page(
-                request,
-                session,
-                spec,
-                flash(f"WhatsApp announcements: {exc}", "error"),
-                status_code=400,
-            )
-        existed = "whatsapp" in storage.list_connections()
-        storage.save_connection("whatsapp", {"room_id": room_id}, session["username"])
-        publisher.reload_connections()
-        audit(
-            request,
-            session["username"],
-            "channel.updated" if existed else "channel.connected",
-            "whatsapp",
-            room_id=room_id,
-        )
-        return await bridge_page(
-            request,
-            session,
-            spec,
-            flash(
-                "Announcements published to the WhatsApp channel now go to this room. "
-                "Turn the channel on or off under Publishing settings."
-            ),
         )
 
     @app.post("/admin/bridges/{key}/{action}")

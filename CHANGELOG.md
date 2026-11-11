@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Bridges: link a chat to an existing Matrix room instead of letting the bridge create one, move a chat to another room, unlink a room (keeping it for its Matrix members), create a room for a chat the bridge has seen, turn relay on or off, and refresh a room from the remote network. Works the same for WhatsApp, Signal and Messenger.
 - Bridges: a **Needs attention** list with repairs for links to deleted rooms and rooms the bot is still in but no chat uses; restart the bridge and open a new bot chat from its page.
-- WhatsApp: add a group from its invite link straight into an existing room; relay is turned on automatically; **Use for WhatsApp announcements** sets up the announcements destination in one step.
+- WhatsApp: add a group from its invite link straight into an existing room; relay is turned on automatically.
+- Channels: a **Chat groups** section lists the WhatsApp and Signal groups linked through a bridge, with **Use for announcements** on each. One click creates the stack's passwordless announcer account the first time, turns relay on in the room, joins it, and makes the group a channel of its own. Any number of groups per network; **Test** checks access and relay, **Stop posting** removes one.
 - `community-stack bridge --bridge signal|messenger …` for the other bridges.
 - Safe Mode: `community-stack access create-room` (and **Create a protected room** on the console) creates a protected room owned by the bot, already encrypted, invite-only, with `joined` history and no guests.
 - Safe Mode: a suspended account that is invited back or rejoins a protected room is removed again.
@@ -20,13 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - One console page for every bridge at `/admin/bridges/<name>`, and a **Bridges** overview under a new **Chat** menu section. `/admin/whatsapp` redirects to the new page. The menu is regrouped into Publishing, Chat, Continuity, Server and Accounts.
 - The chat allowlist, required settings and command prefix are handled by shared code for every bridge (`community_stack.bridges.config`); per-bridge differences are data in the catalogue.
 - The WhatsApp announcements adapter moved to `community_stack.announcements.adapters.whatsapp`.
+- WhatsApp announcements no longer need the Matrix announcements channel; they are posted by the announcer account. A WhatsApp room connected by an earlier version is kept as the channel "whatsapp" and keeps posting with the Matrix announcements account until it is chosen again.
 - Safe Mode: the bot records a command and acknowledges Synapse at once; removals, invitations and replies run on worker threads, one account at a time, so one slow `!safe on` no longer holds up everyone else's. Administrative restore is recorded by the operator command and carried out by the bot.
 - Safe Mode: the reply to `!safe off` says that messages sent while Safe Mode was on stay hidden. The previous wording suggested earlier history might be hidden, which a live test showed it is not. `docs/safe-mode.md` now records what was verified on Synapse 1.163.2, including that a signed-in device can still fetch messages from before the suspension.
 
 ### Removed
+- The **WhatsApp announcements** card on the Channels page (a room ID field) and the `/admin/bridges/{key}/announce-room` route; choose groups under **Chat groups** instead.
 - The unused `WhatsAppBridgeManager` (`mode`, `mapped_rooms`).
 
 ### Fixed
+- Announcements to bridged groups are sent as `m.text`. They were sent as `m.notice`, which the WhatsApp and Signal bridges drop (`bridge_notices: false`), so they never reached the group.
 - Safe Mode: a protected room whose membership cannot be read when Safe Mode is turned on is kept and retried, so the account is reported PARTIAL instead of fully suspended while still in that room.
 - Safe Mode: `!safe on` works while a restore is unfinished, instead of being refused until every invitation succeeds.
 - Safe Mode: the database's multi-step writes were not transactions (SQLite autocommit mode), so a crash could leave a half-written snapshot. Each change is now one transaction, and a newer operation for an account always wins over an older one still running, including across the bot and operator processes.

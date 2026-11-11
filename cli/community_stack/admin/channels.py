@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from community_stack.admin.bridged_channels import register_bridged_channels
 from community_stack.admin.common import flash
 from community_stack.announcements.adapters import http
 from community_stack.announcements.adapters.http import UnsafeURLError
@@ -24,6 +25,7 @@ PIXELFED_OAUTH_CALLBACK_PATH = "/admin/channels/pixelfed/callback"
 def register_channels(
     app: FastAPI,
     *,
+    agent: Any,
     audit: Any,
     checked_form: Any,
     config_path: Any,
@@ -34,7 +36,17 @@ def register_channels(
     require: Any,
     storage: Any,
 ) -> None:
-    def channels_page(
+    bridged_sections = register_bridged_channels(
+        app,
+        agent=agent,
+        audit=audit,
+        checked_form=checked_form,
+        publisher=publisher,
+        redirect_with=redirect_with,
+        storage=storage,
+    )
+
+    async def channels_page(
         request: Request,
         session: dict[str, Any],
         message: dict[str, Any] | None = None,
@@ -48,8 +60,6 @@ def register_channels(
                 "type": connector,
                 "connected": kind in saved,
                 "enabled": enabled.get(kind, True),
-                "available": kind != "whatsapp"
-                or (publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None),
                 "values": {
                     field.name: saved.get(kind, {}).get(field.name, "")
                     for field in connector.fields
@@ -61,6 +71,8 @@ def register_channels(
         context = page(
             session,
             connectors=connectors,
+            bridged=await bridged_sections(session),
+            channel_enabled=enabled,
             pixelfed_redirect_uri=(
                 f"{publisher.base_url.rstrip('/')}/admin/channels/pixelfed/callback"
             ),
@@ -77,36 +89,21 @@ def register_channels(
 
     @app.get("/admin/channels")
     async def channels(request: Request) -> Response:
-        return channels_page(request, require(request, "settings"))
+        return await channels_page(request, require(request, "settings"))
 
     @app.post("/admin/channels/{kind}/save")
     async def save_channel(request: Request, kind: str) -> Response:
         session, form = await checked_form(request, "settings")
         connector = connector_for(kind)
-        if kind == "whatsapp" and not publisher.whatsapp_bridge_enabled:
-            return channels_page(
-                request,
-                session,
-                flash("Enable the WhatsApp bridge first on the Services page.", "error"),
-                409,
-            )
-        if kind == "whatsapp" and publisher.matrix_auth is None:
-            return channels_page(
-                request,
-                session,
-                flash(
-                    "Connect Matrix announcements first; WhatsApp forwarding uses that account.",
-                    "error",
-                ),
-                409,
-            )
         saved = storage.list_connections().get(kind, {})
         try:
             values = await run_in_threadpool(
                 connector.validate, merge_values(connector, form, saved)
             )
         except (UnsafeURLError, ValueError) as exc:
-            return channels_page(request, session, flash(f"{connector.label}: {exc}", "error"), 400)
+            return await channels_page(
+                request, session, flash(f"{connector.label}: {exc}", "error"), 400
+            )
         storage.save_connection(kind, values, session["username"])
         publisher.reload_connections()
         public = {f.name: values.get(f.name) for f in connector.fields if not f.secret}
@@ -130,7 +127,7 @@ def register_channels(
         try:
             instance_url = await run_in_threadpool(http.assert_public_https, instance_url)
         except UnsafeURLError as exc:
-            return channels_page(
+            return await channels_page(
                 request, session, flash(f"Pixelfed: {exc}", "error"), status_code=400
             )
 
@@ -154,7 +151,7 @@ def register_channels(
             or not body.get("client_secret")
         ):
             detail = http.error_text(status, body)
-            return channels_page(
+            return await channels_page(
                 request,
                 session,
                 flash(f"Pixelfed could not register an OAuth client: {detail}", "error"),
@@ -374,20 +371,13 @@ def register_channels(
     async def test_channel(request: Request, kind: str) -> Response:
         session, _ = await checked_form(request, "settings")
         connector = connector_for(kind)
-        if kind == "whatsapp" and not (
-            publisher.whatsapp_bridge_enabled and publisher.matrix_auth is not None
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="Enable the WhatsApp bridge and connect Matrix announcements first.",
-            )
         values = storage.list_connections().get(kind)
         if values is None:
             raise HTTPException(status_code=409, detail="This channel is not connected.")
         try:
             adapter = next((a for a in publisher.adapters if a.name == kind), None)
             if adapter is None:
-                adapter = build_connector(kind, values, publisher.matrix_auth)
+                adapter = build_connector(kind, values)
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         result = await run_in_threadpool(adapter.health_check)

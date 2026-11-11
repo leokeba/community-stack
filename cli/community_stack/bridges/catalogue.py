@@ -62,6 +62,11 @@ class BridgeSpec:
     # bridge is provisioned and on deployment, and checked on its console page.
     required_settings: tuple[tuple[tuple[str, ...], object], ...] = ()
     invite_links: bool = False  # the bot can join a group from an invite link
+    # Linked chats can receive announcements: the stack's announcer account posts in the
+    # portal room and the bridge relays it through the linked account.
+    announcements: bool = False
+    # Longest announcement the remote network delivers as one message, when known.
+    message_max_length: int | None = None
 
     def chat_id_ok(self, chat_id: str) -> bool:
         return bool(self.chat_id_pattern.fullmatch(chat_id))
@@ -90,6 +95,8 @@ WHATSAPP = BridgeSpec(
         (("network", "max_member_sync"), 0),
     ),
     invite_links=True,
+    announcements=True,
+    message_max_length=65_536,
     login="QR code scanned in WhatsApp Linked devices",
     commands={
         **GENERIC_COMMANDS,
@@ -119,6 +126,8 @@ SIGNAL = BridgeSpec(
     image="dock.mau.dev/mautrix/signal:v26.10",
     login="Linked as a secondary device; the bot shows the linking code (flow to confirm live)",
     experimental=True,
+    announcements=True,
+    message_max_length=2_000,
     limitations=(
         "Signal may restrict accounts it considers automated.",
         "Linking flows and the bridge's first-run settings are not yet tested on a live account.",

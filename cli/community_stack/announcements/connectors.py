@@ -27,7 +27,6 @@ from community_stack.announcements.adapters.social import (
     MastodonAdapter,
     PixelfedAdapter,
 )
-from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
 from community_stack.matrix_ids import ROOM_ID
 from community_stack.subscriptions.email_transport import MailgunTransport, SmtpTransport
 from community_stack.subscriptions.manager import SubscriberManager
@@ -146,28 +145,15 @@ def _validate_matrix_room(values: dict[str, str]) -> dict[str, str]:
     }
 
 
-def _validate_whatsapp(values: dict[str, str]) -> dict[str, str]:
-    room_id = values.get("room_id", "").strip()
-    if not ROOM_ID.fullmatch(room_id):
-        raise ValueError("Enter the Matrix room ID of the WhatsApp room, beginning with !.")
-    return {"room_id": room_id}
+def build_connector(kind: str, values: dict[str, str]) -> ChannelAdapter:
+    """Build a connected channel from its saved settings.
 
-
-def build_connector(
-    kind: str, values: dict[str, str], matrix_values: dict[str, str] | None = None
-) -> ChannelAdapter:
-    """Build a connector, supplying the shared Matrix account for WhatsApp forwarding."""
+    WhatsApp and Signal groups linked through a bridge are not connectors: they are
+    bridged destinations, built by the publisher with the announcer account.
+    """
     connector = CONNECTORS.get(kind)
     if connector is None:
         raise ValueError(f"Unknown channel type: {kind}.")
-    if kind == "whatsapp":
-        if matrix_values is None:
-            raise ValueError("Connect the Matrix announcements account before WhatsApp.")
-        values = {
-            **values,
-            "homeserver_url": matrix_values["homeserver_url"],
-            "access_token": matrix_values["access_token"],
-        }
     return connector.build(values)
 
 
@@ -493,27 +479,6 @@ CONNECTORS: dict[str, ConnectorType] = {
             caveat="The room must be public and unencrypted. Matrix account tokens are stored in the private announcements database.",
         ),
         ConnectorType(
-            kind="whatsapp",
-            label="WhatsApp announcements",
-            steps=(
-                "Turn the WhatsApp bridge on under Services and updates.",
-                "On Chat → Bridges → WhatsApp, link the WhatsApp account and add a group intended for public announcements.",
-                "In that group's row, choose “Use for WhatsApp announcements”. It invites the announcements account and saves the room here.",
-                "Or enter the room's Matrix ID below. Only announcements published to this channel are sent there.",
-            ),
-            fields=(
-                ConnectorField("room_id", "WhatsApp room ID", placeholder="!room:example.org"),
-            ),
-            validate=_validate_whatsapp,
-            build=lambda c: WhatsAppAnnouncementAdapter(
-                homeserver_url=c["homeserver_url"],
-                room_id=c["room_id"],
-                access_token=c["access_token"],
-            ),
-            caveat="Requires a linked WhatsApp account and a Matrix room linked to the group. The connection test checks Matrix access, not WhatsApp account linkage.",
-            setup_page=("Open the WhatsApp bridge", "/admin/bridges/whatsapp"),
-        ),
-        ConnectorType(
             kind="discord",
             label="Discord channel",
             steps=(
@@ -649,7 +614,8 @@ CONNECTORS: dict[str, ConnectorType] = {
             validate=_validate_signal,
             build=lambda c: SignalAdapter(c["number"], c["group_id"]),
             caveat="Signal has no official bot interface. Use a dedicated number: Signal may "
-            "block accounts that look automated.",
+            "block accounts that look automated. If the Signal bridge is on, choose a bridged "
+            "group under Chat groups instead; it needs no second linked device.",
             setup_page=("Open the Signal linking page", "/admin/channels/signal/link"),
         ),
         ConnectorType(

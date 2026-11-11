@@ -22,6 +22,9 @@ import yaml
 
 SYNAPSE_CONTAINER = "community_synapse"
 ADMIN_LOCALPART = "community-stack-admin"
+# Posts announcements into bridged WhatsApp and Signal rooms; it has no password.
+ANNOUNCER_LOCALPART = "community-stack-announcements"
+ANNOUNCER_DISPLAY_NAME = "Announcements"
 LOCALPART = re.compile(r"^[a-z0-9._=/-]{1,64}$")
 USER_ID = re.compile(r"^@[a-z0-9._=/-]{1,64}:[A-Za-z0-9.-]{1,253}(:\d{1,5})?$")
 
@@ -168,8 +171,8 @@ def _user_id(context, value: str) -> str:
     server = _homeserver(context).get("server_name", "")
     if value.split(":", 1)[1] != server:
         raise MatrixAdminError("Only accounts on this server can be managed here.")
-    if value.split(":", 1)[0] == f"@{ADMIN_LOCALPART}":
-        raise MatrixAdminError("The stack's own admin account cannot be changed here.")
+    if value.split(":", 1)[0] in (f"@{ADMIN_LOCALPART}", f"@{ANNOUNCER_LOCALPART}"):
+        raise MatrixAdminError("The stack's own accounts cannot be changed here.")
     return value
 
 
@@ -228,7 +231,7 @@ def list_users(context, params: dict[str, Any]) -> dict[str, Any]:
 
 def create_user(context, params: dict[str, Any]) -> dict[str, Any]:
     localpart = params["username"].lower()
-    if not LOCALPART.fullmatch(localpart) or localpart == ADMIN_LOCALPART:
+    if not LOCALPART.fullmatch(localpart) or localpart in (ADMIN_LOCALPART, ANNOUNCER_LOCALPART):
         raise MatrixAdminError("Use lowercase letters, digits and . _ = / - for the username.")
     user_id = f"@{localpart}:{_homeserver(context).get('server_name')}"
     path = f"/_synapse/admin/v2/users/{quote(user_id, safe='')}"
@@ -270,3 +273,39 @@ def deactivate_user(context, params: dict[str, Any]) -> dict[str, Any]:
     if status != 200:
         raise MatrixAdminError(f"Synapse refused to deactivate: {reply.get('error', status)}")
     return {"user_id": user_id}
+
+
+def announcer_session(context, params: dict[str, Any]) -> dict[str, Any]:
+    """Create the announcer account if needed and give the console a new token for it.
+
+    The account has no password: its only way in is a token issued here through the admin
+    API. It posts announcements in bridged rooms, so it is exempt from message rate limits
+    (a publication reaches every chosen group at once).
+    """
+    user_id = f"@{ANNOUNCER_LOCALPART}:{_homeserver(context).get('server_name')}"
+    path = f"/_synapse/admin/v2/users/{quote(user_id, safe='')}"
+    status, existing = _call(context, "GET", path)
+    if status == 200 and existing.get("deactivated"):
+        raise MatrixAdminError(f"{user_id} was deactivated; announcements cannot use it.")
+    if status != 200:
+        status, reply = _call(
+            context, "PUT", path, {"displayname": ANNOUNCER_DISPLAY_NAME, "admin": False}
+        )
+        if status not in (200, 201):
+            raise MatrixAdminError(
+                f"Synapse refused the announcer account: {reply.get('error', status)}"
+            )
+    _call(
+        context,
+        "POST",
+        f"/_synapse/admin/v1/users/{quote(user_id, safe='')}/override_ratelimit",
+        {"messages_per_second": 0, "burst_count": 0},
+    )
+    status, login = _call(
+        context, "POST", f"/_synapse/admin/v1/users/{quote(user_id, safe='')}/login", {}
+    )
+    if status != 200 or not login.get("access_token"):
+        raise MatrixAdminError(
+            f"Synapse would not sign the announcer account in: {login.get('error', status)}"
+        )
+    return {"user_id": user_id, "access_token": login["access_token"]}

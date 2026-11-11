@@ -24,11 +24,6 @@ AUTOMATIC_CONNECTOR_VALUES = {
     "instagram": {"account_id": "123456", "access_token": "token"},
     "threads": {"user_id": "123456", "access_token": "token"},
     "telegram": {"chat_id": "@example", "bot_token": "token"},
-    "whatsapp": {
-        "homeserver_url": "http://community_synapse:8008",
-        "room_id": "!room:example.org",
-        "access_token": "token",
-    },
     "discord": {"webhook_url": "https://discord.example/webhook"},
     "signal": {"number": "+15555550123", "group_id": "group"},
 }
@@ -67,6 +62,16 @@ def test_automatic_catalogue_capabilities_match_the_existing_adapter(identifier,
     assert platform.supported_media == (
         frozenset({"image"}) if adapter.capabilities.supports_media else frozenset()
     )
+
+
+def test_whatsapp_is_automatic_through_bridged_groups_not_a_connector():
+    from community_stack.announcements.adapters.whatsapp import WhatsAppAnnouncementAdapter
+
+    platform = PLATFORMS["whatsapp"]
+    adapter = WhatsAppAnnouncementAdapter("http://community_synapse:8008", "!room", "token")
+    assert "whatsapp" not in CONNECTORS
+    assert platform.capabilities == adapter.capabilities
+    assert PublicationMode.AUTOMATIC in platform.publication_modes
 
 
 def test_unknown_manual_platform_limits_and_media_are_not_guessed():

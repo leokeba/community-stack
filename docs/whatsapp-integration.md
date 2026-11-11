@@ -35,12 +35,24 @@ Everything below is done from the admin console, under **Chat → Bridges → Wh
    afterwards if you can.
 4. **Linked rooms**: open a room's row to invite Matrix accounts (the bridge bot sends
    the invitation), turn relay on or off, refresh its name and members from WhatsApp,
-   or choose **Use for WhatsApp announcements** (see below).
-5. **Announcements to WhatsApp**: connect a dedicated **Matrix announcements** account
-   on the Channels page once. Then press **Use for WhatsApp announcements** in the
-   room's row: the bridge bot invites that account, the account joins, and the room is
-   saved as the WhatsApp channel's destination. Turn the channel on under Publishing
-   settings.
+   or choose **Use for announcements** (see below).
+5. **Announcements to WhatsApp**: on **Publishing → Channels**, under **Chat groups**,
+   each linked group has a **Use for announcements** button (the same button is in the
+   room's row here). One click:
+   - creates the stack's announcer account (`@community-stack-announcements`) the
+     first time. It has no password; the control agent issues its token through
+     Synapse's admin API, and its message rate limit is lifted;
+   - turns relay on in the group's room, after asking, because the bridge only
+     forwards messages from Matrix accounts without their own login through relay;
+   - invites the announcer through the bridge bot, joins it, and saves the group as a
+     channel of its own, named like "WhatsApp: Neighbours".
+
+   Choose as many groups as you like; each can be turned on and off under Publishing
+   settings and picked per announcement. **Test** checks that the announcer can post
+   and that relay is on. **Stop posting** removes the channel and the announcer leaves
+   the room; the group and its bridge are unchanged. Encrypted rooms cannot be used.
+   Announcements are sent as ordinary messages (`m.text`): the bridges ignore notices.
+   Signal groups linked through the Signal bridge work the same way.
 6. To publish from another **Matrix room** to WhatsApp, open **Mirrored rooms**, add
    that source room and choose the WhatsApp destination.
 

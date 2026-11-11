@@ -9,15 +9,11 @@
       <span class="channel-state">
         {% if item.connected %}{{ badge("connected", "Connected", "success" if item.enabled else "neutral") }}{% if not item.enabled %} <span class="muted">turned off</span>{% endif %}
         {% else %}<span class="muted">Not connected</span>{% endif %}
-        {% if connector.kind == "whatsapp" and not item.available %}{{ badge("setup", "Needs setup", "warning") }}{% endif %}
       </span>
     </summary>
     <div class="channel-body">
       {% if connector.caveat %}<p class="muted">{{ connector.caveat }}</p>{% endif %}
-      {% if connector.kind == "whatsapp" and not item.available %}
-      <p class="notice">WhatsApp needs the bridge enabled and a Matrix announcements account connected. Start with <a href="/admin/services">Services</a> and <a href="#channel-matrix_room">Matrix announcements</a>.</p>
-      {% endif %}
-      {% if item.connected and item.available %}
+      {% if item.connected %}
       <div class="actions">
         <form method="post" action="/admin/channels/{{ connector.kind }}/test">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -33,7 +29,6 @@
         <summary>{{ "Change settings" if item.connected else "How to connect" }}</summary>
         <ol>{% for step in connector.steps %}<li>{{ step }}</li>{% endfor %}</ol>
         {% if connector.setup_page %}<p><a href="{{ connector.setup_page[1] }}">{{ connector.setup_page[0] }}</a></p>{% endif %}
-        {% if item.available %}
         {% if connector.kind == "pixelfed" %}
         <form method="post" action="/admin/channels/pixelfed/oauth/start">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -64,8 +59,83 @@
           <p><button type="submit">{{ "Save changes" if item.connected else "Connect" }}</button></p>
         </form>
         {% if connector.kind == "pixelfed" %}</details>{% endif %}
-        {% endif %}
       </details>
+    </div>
+  </details>
+</section>
+{% endmacro %}
+{% macro bridged_section(section) %}
+{% set spec = section.spec %}
+{% set noun = spec.chat_noun %}
+{% set chosen = section.destinations %}
+<section class="channel{% if chosen %} channel-connected{% endif %}" id="bridged-{{ spec.key }}" aria-labelledby="bridged-{{ spec.key }}-name">
+  <details {% if section.enabled %}open{% endif %}>
+    <summary>
+      <span class="channel-name" id="bridged-{{ spec.key }}-name">{{ spec.name }} {{ noun }}s</span>
+      <span class="channel-state">
+        {% if not section.enabled %}<span class="muted">Bridge off</span>
+        {% elif chosen %}{{ badge("connected", chosen|length ~ " " ~ noun ~ ("" if chosen|length == 1 else "s"), "success") }}
+        {% else %}<span class="muted">None chosen</span>{% endif %}
+      </span>
+    </summary>
+    <div class="channel-body">
+      {% if not section.enabled %}
+      <p class="notice">Turn the {{ spec.name }} bridge on under <a href="/admin/services">Services</a>, then link a {{ noun }} on the <a href="/admin/bridges/{{ spec.key }}">{{ spec.name }} bridge page</a>.</p>
+      {% elif section.error %}
+      <p class="notice">{{ section.error }}</p>
+      {% elif not section.rooms %}
+      <p class="muted">No {{ spec.name }} {{ noun }} is linked to a Matrix room yet. Link one on the <a href="/admin/bridges/{{ spec.key }}">{{ spec.name }} bridge page</a>, then come back here.</p>
+      {% else %}
+      <p class="muted">Choose the {{ noun }}s that receive announcements. Each one becomes its own channel.</p>
+      <ul class="bridged-rooms">
+        {% for room in section.rooms %}
+        <li>
+          <span>
+            <strong>{{ room.name }}</strong><br>
+            <span class="muted">{{ spec.name }} {{ noun }}: {{ room.chat_name }} · {{ room.members }} member{{ "" if room.members == 1 else "s" }}</span><br>
+            {% if room.destination %}{{ badge("announce", "Receives announcements", "success" if channel_enabled.get(room.destination.name, True) else "neutral") }}{% if not channel_enabled.get(room.destination.name, True) %} <span class="muted">turned off</span>{% endif %}{% endif %}
+            {{ badge("relay", "Relay on", "success") if room.relay else badge("relay", "Relay off", "warning") }}
+            {% if room.encrypted %}{{ badge("encrypted", "Encrypted", "neutral") }}{% endif %}
+          </span>
+          <span class="actions">
+            {% if room.destination %}
+            <form method="post" action="/admin/channels/bridged/{{ room.destination.name }}/test">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="small secondary">Test</button>
+            </form>
+            {% if not room.relay %}
+            <form method="post" action="/admin/channels/bridged/{{ spec.key }}/add" data-confirm="Turn relay on in {{ room.name }}? Messages from every Matrix member of this room will then be sent to the {{ spec.name }} {{ noun }} through the linked account." data-confirm-label="Turn relay on">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="room_id" value="{{ room.room_id }}">
+              <button type="submit" class="small">Repair</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/admin/channels/bridged/{{ room.destination.name }}/remove" data-confirm="Stop posting announcements in {{ room.name }}? The {{ noun }} and its bridge stay as they are." data-confirm-label="Stop posting">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="small secondary danger">Stop posting</button>
+            </form>
+            {% elif room.encrypted %}
+            <span class="muted">Encrypted rooms cannot receive announcements.</span>
+            {% else %}
+            <form method="post" action="/admin/channels/bridged/{{ spec.key }}/add"{% if not room.relay %} data-confirm="Use {{ room.name }} for announcements? Relay will be turned on: messages from every Matrix member of this room will then be sent to the {{ spec.name }} {{ noun }} through the linked account." data-confirm-label="Use for announcements"{% endif %}>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="room_id" value="{{ room.room_id }}">
+              <button type="submit" class="small">Use for announcements</button>
+            </form>
+            {% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% for destination in chosen if destination.linked is defined and not destination.linked %}
+      <p class="notice">{{ destination.room_name }} receives announcements but is no longer linked to a {{ spec.name }} {{ noun }}.</p>
+      <form method="post" action="/admin/channels/bridged/{{ destination.name }}/remove">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="small secondary danger">Stop posting in {{ destination.room_name }}</button>
+      </form>
+      {% endfor %}
+      {% if section.enabled %}<p class="muted">Announcements are posted by the server's announcer account and relayed through the linked {{ spec.name }} account. Edits and withdrawals are sent as follow-up messages. <a href="/admin/bridges/{{ spec.key }}">Open the {{ spec.name }} bridge</a></p>{% endif %}
     </div>
   </details>
 </section>
@@ -73,6 +143,13 @@
 {% block content %}
 <h1>Channels</h1>
 <p class="page-intro">Connect the accounts announcements should be posted to. Credentials are stored on this server and never shown again after saving. Turn channels on or off on the <a href="/admin/settings">Settings</a> page.</p>
+{% if bridged %}
+<h2 id="chat-groups">Chat groups</h2>
+<p class="muted">WhatsApp and Signal groups linked through a bridge on this server.</p>
+<div class="channel-list">
+{% for section in bridged %}{{ bridged_section(section) }}{% endfor %}
+</div>
+{% endif %}
 {% set connected = connectors|selectattr("connected")|list %}
 {% set others = connectors|rejectattr("connected")|list %}
 {% if connected %}

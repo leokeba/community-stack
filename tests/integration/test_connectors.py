@@ -741,7 +741,7 @@ def test_invalid_settings_are_explained_and_disconnect_removes_credentials(conso
     assert not any(a.name == "discord" for a in app.state.publisher.adapters)
 
 
-def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp_path):
+def test_matrix_connector_enables_mirroring_and_bridge_pages(console, tmp_path):
     app, client, _ = console
     config = yaml.safe_load(Path("config/example.yaml").read_text(encoding="utf-8"))
     config["domain"]["matrix"] = "community.test"
@@ -778,15 +778,9 @@ def test_matrix_connector_enables_mirroring_and_whatsapp_forwarding(console, tmp
     assert "Join and link the group" in wa_page.text
     route_paths = {route.path for route in app.routes}
     assert "/admin/bridges/{key}/{action}" in route_paths
-    assert "/admin/bridges/{key}/announce-room" in route_paths
+    assert "/admin/bridges/{key}/announce-room" not in route_paths
+    assert "/admin/channels/bridged/{key}/add" in route_paths
     assert not any(path.startswith("/admin/whatsapp/") for path in route_paths)
-
-    saved_wa = client.post(
-        "/admin/channels/whatsapp/save",
-        data={"csrf_token": csrf(page), "room_id": "!portal:community.test"},
-    )
-    assert saved_wa.status_code == 303
-    assert any(adapter.name == "whatsapp" for adapter in app.state.publisher.adapters)
 
 
 def test_channel_credentials_database_is_private_on_posix(console):
@@ -796,7 +790,7 @@ def test_channel_credentials_database_is_private_on_posix(console):
         assert app.state.storage.db_path.stat().st_mode & 0o777 == 0o600
 
 
-def test_whatsapp_channel_requires_bridge_and_matrix_prerequisites(console):
+def test_whatsapp_is_chosen_as_a_bridged_group_not_saved_as_a_room_id(console):
     _, client, _ = console
     page = client.get("/admin/channels")
 
@@ -805,8 +799,9 @@ def test_whatsapp_channel_requires_bridge_and_matrix_prerequisites(console):
         data={"csrf_token": csrf(page), "room_id": "!portal:community.test"},
     )
 
-    assert response.status_code == 409
-    assert "Enable the WhatsApp bridge first" in response.text
+    assert response.status_code == 404
+    assert "Turn the WhatsApp bridge on under" in page.text
+    assert 'id="bridged-signal"' in page.text
 
 
 def test_unknown_channel_types_are_rejected(console):

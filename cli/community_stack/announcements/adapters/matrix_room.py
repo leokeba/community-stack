@@ -25,6 +25,10 @@ from community_stack.announcements.models import Announcement
 class MatrixRoomAdapter(ChannelAdapter):
     """Publishes canonical announcements to a designated Matrix announcement room."""
 
+    # Notices suit a Matrix room; rooms relayed by a bridge need m.text, because the
+    # bridges drop m.notice messages (bridge_notices: false).
+    msgtype = "m.notice"
+
     def __init__(
         self,
         homeserver_url: str = "http://localhost:8008",
@@ -97,7 +101,7 @@ class MatrixRoomAdapter(ChannelAdapter):
             formatted_html += f"<p><em>— {html.escape(announcement.author)}</em></p>"
 
         payload = {
-            "msgtype": "m.notice",
+            "msgtype": self.msgtype,
             "body": self.render_text(announcement),
             "format": "org.matrix.custom.html",
             "formatted_body": formatted_html,
@@ -132,7 +136,7 @@ class MatrixRoomAdapter(ChannelAdapter):
             announcement.body
         )
         payload = {
-            "msgtype": "m.notice",
+            "msgtype": self.msgtype,
             "body": f"📢 [UPDATED] {announcement.title}\n\n{to_plain_text(announcement.body)}",
             "format": "org.matrix.custom.html",
             "formatted_body": formatted_html,
@@ -158,7 +162,7 @@ class MatrixRoomAdapter(ChannelAdapter):
         )
 
         payload = {
-            "msgtype": "m.notice",
+            "msgtype": self.msgtype,
             "body": f"⚠️ Notice: Announcement {announcement_id} has been withdrawn by the organizers.",
             "org.community_stack.announcement_id": announcement_id,
         }
