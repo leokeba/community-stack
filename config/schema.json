@@ -523,7 +523,7 @@
             "version": {
               "type": "string",
               "pattern": "^[a-f0-9]{40}$",
-              "default": "107595ae25d0ea197efb6ee8fddc29047bc6c623",
+              "default": "c9646113b2817d838e340f649a6445d0381fb702",
               "description": "Pinned full Git commit from leokeba/field-map"
             },
             "hostname": {

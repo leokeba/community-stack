@@ -76,7 +76,7 @@ services:
     cpu_limit: 1
   field_map:
     enabled: false
-    version: "107595ae25d0ea197efb6ee8fddc29047bc6c623"
+    version: "c9646113b2817d838e340f649a6445d0381fb702"
     # hostname: "field-map.example.org" # defaults to field-map.<domain.base>
     tile_url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     anonymous_links_enabled: true

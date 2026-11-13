@@ -490,7 +490,7 @@ def test_console_provisions_and_deploys_field_map(console, project):
     assert config["services"]["field_map"]["anonymous_links_enabled"] is True
     env = (root / ".env").read_text(encoding="utf-8")
     assert "FIELD_MAP_DB_PASSWORD=" in env
-    assert "FIELD_MAP_SOURCE_REF=107595ae25d0ea197efb6ee8fddc29047bc6c623" in env
+    assert "FIELD_MAP_SOURCE_REF=c9646113b2817d838e340f649a6445d0381fb702" in env
     route = (root / "data/proxy/field_map.caddy").read_text(encoding="utf-8")
     assert "maps.example.org" in route
 

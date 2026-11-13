@@ -58,7 +58,7 @@ LIBREBOOKING_DEFAULTS = """  librebooking:
 
 FIELD_MAP_DEFAULTS = """  field_map:
     enabled: false
-    version: "107595ae25d0ea197efb6ee8fddc29047bc6c623"
+    version: "c9646113b2817d838e340f649a6445d0381fb702"
     tile_url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     anonymous_links_enabled: true
     uploads_path: "data/field_map/uploads"

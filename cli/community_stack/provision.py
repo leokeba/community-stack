@@ -528,8 +528,8 @@ def prepare_field_map(project_dir: Path, config: dict, env_path: Path) -> str | 
         raise ProvisionError("COMMUNITY_STACK_UID and COMMUNITY_STACK_GID must be numeric.")
     values = {
         **generated,
-        "FIELD_MAP_VERSION": settings.get("version", "107595ae25d0ea197efb6ee8fddc29047bc6c623"),
-        "FIELD_MAP_SOURCE_REF": settings.get("version", "107595ae25d0ea197efb6ee8fddc29047bc6c623"),
+        "FIELD_MAP_VERSION": settings.get("version", "c9646113b2817d838e340f649a6445d0381fb702"),
+        "FIELD_MAP_SOURCE_REF": settings.get("version", "c9646113b2817d838e340f649a6445d0381fb702"),
         "FIELD_MAP_DOMAIN": hostname,
         "FIELD_MAP_ORIGIN": f"https://{hostname}",
         "FIELD_MAP_TILE_URL": settings.get(

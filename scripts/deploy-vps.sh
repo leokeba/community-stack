@@ -66,8 +66,8 @@ LIBREBOOKING_DB_ROOT_PASSWORD=compose-check \
 LIBREBOOKING_INSTALL_PASSWORD=compose-check \
 docker compose -f services/librebooking/docker-compose.yml config --quiet
 FIELD_MAP_DB_PASSWORD=compose-check \
-FIELD_MAP_VERSION=107595ae25d0ea197efb6ee8fddc29047bc6c623 \
-FIELD_MAP_SOURCE_REF=107595ae25d0ea197efb6ee8fddc29047bc6c623 \
+FIELD_MAP_VERSION=c9646113b2817d838e340f649a6445d0381fb702 \
+FIELD_MAP_SOURCE_REF=c9646113b2817d838e340f649a6445d0381fb702 \
 FIELD_MAP_ORIGIN=https://field-map.example.org \
 docker compose -f services/field_map/docker-compose.yml config --quiet
 

@@ -313,7 +313,7 @@ SETTINGS: dict[str, Setting] = {
             "Pinned full Git commit SHA from leokeba/field-map. Changing it rebuilds the app "
             "after a safety backup.",
             "git_ref",
-            "107595ae25d0ea197efb6ee8fddc29047bc6c623",
+            "c9646113b2817d838e340f649a6445d0381fb702",
             restart_service="field_map",
             dangerous=True,
         ),

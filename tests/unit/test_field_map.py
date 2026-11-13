@@ -33,7 +33,7 @@ def test_prepare_field_map_generates_stable_secret_storage_and_route(tmp_path):
 
     values = parse_env_file(env_file)
     assert len(values["FIELD_MAP_DB_PASSWORD"]) == 64
-    assert values["FIELD_MAP_VERSION"] == "107595ae25d0ea197efb6ee8fddc29047bc6c623"
+    assert values["FIELD_MAP_VERSION"] == "c9646113b2817d838e340f649a6445d0381fb702"
     assert values["FIELD_MAP_SOURCE_REF"] == values["FIELD_MAP_VERSION"]
     assert values["FIELD_MAP_DOMAIN"] == "maps.community.org"
     assert values["FIELD_MAP_ORIGIN"] == "https://maps.community.org"
