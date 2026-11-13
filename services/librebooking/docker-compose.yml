@@ -1,0 +1,77 @@
+services:
+  librebooking-db:
+    image: mariadb:${LIBREBOOKING_DATABASE_VERSION:-11.4.12}
+    container_name: community_librebooking_db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: librebooking
+      MARIADB_USER: librebooking
+      MARIADB_PASSWORD: ${LIBREBOOKING_DB_PASSWORD:?Set LIBREBOOKING_DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${LIBREBOOKING_DB_ROOT_PASSWORD:?Set LIBREBOOKING_DB_ROOT_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ../../${LIBREBOOKING_DATABASE_DATA_PATH:-data/librebooking/mariadb}:/var/lib/mysql
+    networks:
+      - librebooking_internal
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--su-mysql", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: ${LIBREBOOKING_DATABASE_MEMORY_LIMIT:-512M}
+    cpus: ${LIBREBOOKING_DATABASE_CPU_LIMIT:-1}
+
+  librebooking:
+    image: community-stack/librebooking:${LIBREBOOKING_VERSION:-7.2.0-3.5.2}
+    build:
+      context: .
+      args:
+        LIBREBOOKING_VERSION: ${LIBREBOOKING_VERSION:-7.2.0-3.5.2}
+    container_name: community_librebooking
+    restart: unless-stopped
+    user: "33:${LIBREBOOKING_GID:-1000}"
+    environment:
+      LB_DATABASE_NAME: librebooking
+      LB_DATABASE_USER: librebooking
+      LB_DATABASE_PASSWORD: ${LIBREBOOKING_DB_PASSWORD:?Set LIBREBOOKING_DB_PASSWORD in .env}
+      LB_DATABASE_HOSTSPEC: librebooking-db
+      LB_INSTALL_PASSWORD: ${LIBREBOOKING_INSTALL_PASSWORD:?Set LIBREBOOKING_INSTALL_PASSWORD in .env}
+      LB_DEFAULT_TIMEZONE: ${LIBREBOOKING_TIMEZONE:-UTC}
+      LB_DEFAULT_LANGUAGE: ${LIBREBOOKING_LANGUAGE:-fr_fr}
+      LB_SCRIPT_URL: https://${LIBREBOOKING_DOMAIN:-booking.example.org}/Web
+      LB_ADMIN_EMAIL: ${LIBREBOOKING_ADMIN_EMAIL:-admin@example.org}
+      LB_REGISTRATION_ALLOW_SELF_REGISTRATION: ${LIBREBOOKING_ALLOW_REGISTRATION:-false}
+      LB_APP_TITLE: Community spaces
+      LB_LOGGING_FOLDER: /var/log/librebooking
+      LB_LOGGING_LEVEL: none
+    volumes:
+      - ../../${LIBREBOOKING_CONFIG_PATH:-data/librebooking/config}:/config
+      - ../../${LIBREBOOKING_UPLOADS_PATH:-data/librebooking/uploads}:/var/www/html/Web/uploads
+      - ../../${LIBREBOOKING_LOGS_PATH:-data/librebooking/logs}:/var/log/librebooking
+    networks:
+      - proxy_net
+      - librebooking_internal
+    depends_on:
+      librebooking-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - php
+        - -r
+        - "exit(@fsockopen('127.0.0.1', 8080) ? 0 : 1);"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: ${LIBREBOOKING_MEMORY_LIMIT:-512M}
+    cpus: ${LIBREBOOKING_CPU_LIMIT:-1}
+
+networks:
+  proxy_net:
+    external: true
+  librebooking_internal:
+    internal: true

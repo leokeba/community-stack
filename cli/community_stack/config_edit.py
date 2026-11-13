@@ -39,6 +39,23 @@ FACILMAP_DEFAULTS = """  facilmap:
     cpu_limit: 1
 """
 
+LIBREBOOKING_DEFAULTS = """  librebooking:
+    enabled: false
+    version: "7.2.0-3.5.2"
+    admin_email: "admin@example.org"
+    allow_registration: false
+    database:
+      version: "11.4.12"
+      data_path: "data/librebooking/mariadb"
+      memory_limit: "512M"
+      cpu_limit: 1
+    config_path: "data/librebooking/config"
+    uploads_path: "data/librebooking/uploads"
+    logs_path: "data/librebooking/logs"
+    memory_limit: "512M"
+    cpu_limit: 1
+"""
+
 
 def render_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -222,6 +239,31 @@ def ensure_facilmap_config(text: str) -> str:
             insert_at = index
             break
     lines.insert(insert_at, FACILMAP_DEFAULTS)
+    return "".join(lines)
+
+
+def ensure_librebooking_config(text: str) -> str:
+    """Add LibreBooking defaults to a legacy config without reserializing operator comments."""
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+        raise TypeError("Configuration must contain a services mapping.")
+    if "librebooking" in data["services"]:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    services_index = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
+        None,
+    )
+    if services_index is None:
+        raise ValueError("Configuration must contain a top-level services mapping.")
+    insert_at = len(lines)
+    for index in range(services_index + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith((" ", "\t", "#", "\n")):
+            insert_at = index
+            break
+    lines.insert(insert_at, LIBREBOOKING_DEFAULTS)
     return "".join(lines)
 
 

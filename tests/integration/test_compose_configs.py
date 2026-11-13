@@ -21,6 +21,7 @@ def test_compose_files_exist():
         "announcements",
         "vikunja",
         "facilmap",
+        "librebooking",
     }
     found_services = {f.parent.name for f in files}
     assert expected_services.issubset(found_services), (
@@ -108,6 +109,29 @@ def test_vikunja_database_and_application_are_private_and_pinned():
     assert "VIKUNJA_SERVICE_ENABLELINKSHARING" in app["environment"]
 
 
+def test_librebooking_database_and_application_are_private_and_pinned():
+    with open("services/librebooking/docker-compose.yml", "r", encoding="utf-8") as stream:
+        compose = yaml.safe_load(stream)
+    database = compose["services"]["librebooking-db"]
+    app = compose["services"]["librebooking"]
+    assert database["image"] == "mariadb:${LIBREBOOKING_DATABASE_VERSION:-11.4.12}"
+    assert database["networks"] == ["librebooking_internal"]
+    assert "ports" not in database
+    assert app["image"] == ("community-stack/librebooking:${LIBREBOOKING_VERSION:-7.2.0-3.5.2}")
+    assert app["build"]["args"]["LIBREBOOKING_VERSION"] == ("${LIBREBOOKING_VERSION:-7.2.0-3.5.2}")
+    assert "ports" not in app
+    assert set(app["networks"]) == {"proxy_net", "librebooking_internal"}
+    assert app["depends_on"]["librebooking-db"]["condition"] == "service_healthy"
+    assert database["healthcheck"]
+    assert app["healthcheck"]
+    assert compose["networks"]["librebooking_internal"]["internal"] is True
+    assert "LB_DATABASE_PASSWORD" in app["environment"]
+    assert "LB_INSTALL_PASSWORD" in app["environment"]
+    dockerfile = Path("services/librebooking/Dockerfile").read_text(encoding="utf-8")
+    assert "librebooking/librebooking:${LIBREBOOKING_VERSION}" in dockerfile
+    assert "sed -i 's/^set -ex$/set -e/'" in dockerfile
+
+
 def test_admin_app_is_internal_and_has_no_host_ports():
     app_compose = Path("services/announcements/docker-compose.yml")
     with open(app_compose, "r", encoding="utf-8") as stream:
@@ -165,6 +189,7 @@ def test_caddyfile_exists_and_contains_routes():
     assert "handle_path /app*" in content
     assert "handle /.well-known/matrix/client" in content
     assert "import /etc/caddy/vikunja.caddy" in content
+    assert "import /etc/caddy/librebooking.caddy" in content
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content
     assert "reverse_proxy community_announcements:8080" in content
@@ -174,7 +199,8 @@ def test_caddyfile_exists_and_contains_routes():
     development_caddyfile = Path("services/proxy/Caddyfile.dev").read_text(encoding="utf-8")
     assert "http://localhost" in development_caddyfile
     landing = Path("services/landing/html/index.html").read_text(encoding="utf-8")
-    assert 'href="/app/"' in landing
+    assert 'href="/connect/"' in landing
+    assert 'virtual="/connect/services.html"' in landing
 
 
 def test_caddy_healthcheck_uses_loopback_admin_api_without_success_fallback():
@@ -197,3 +223,6 @@ def test_element_uses_the_generated_config_and_caddy_gets_domains():
         caddy = yaml.safe_load(stream)["services"]["caddy"]
     assert set(caddy["environment"]) == {"WEB_DOMAIN", "MATRIX_DOMAIN", "ACME_EMAIL"}
     assert "../../data/proxy/vikunja.caddy:/etc/caddy/vikunja.caddy:ro" in caddy["volumes"]
+    assert (
+        "../../data/proxy/librebooking.caddy:/etc/caddy/librebooking.caddy:ro" in caddy["volumes"]
+    )

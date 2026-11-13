@@ -75,9 +75,9 @@ def run_upgrade(
     env_p = Path(env_path).resolve()
 
     # Step 2: Pull registry images or build the local publishing application.
-    is_local_app = dir_name == "announcements"
+    is_local_app = dir_name in ("announcements", "librebooking")
     if is_local_app:
-        print("[2/3] Building the local announcements application...")
+        print(f"[2/3] Building the local {service} image...")
     else:
         print(f"[2/3] Pulling updated container image for {service}...")
         pull_res = docker.run_compose(project_dir=svc_dir, args=["pull"], env_file=env_p)

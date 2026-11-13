@@ -66,6 +66,7 @@ http://localhost, http://127.0.0.1 {
     assert "handle /feed*" in migrated
     assert "import /etc/caddy/vikunja.caddy" in migrated
     assert "import /etc/caddy/facilmap.caddy" in migrated
+    assert "import /etc/caddy/librebooking.caddy" in migrated
     assert "http://localhost" not in migrated
     assert "admin 127.0.0.1:2019" in migrated
     assert migrated.count("Strict-Transport-Security") == 1

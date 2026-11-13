@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}LibreBooking first setup{% endblock %}
+{% block content %}
+<h1>Finish LibreBooking setup</h1>
+<p>These credentials are shown only on this password-confirmed, non-cacheable page. Do not share or save the installation password after setup.</p>
+<p><a href="{{ details.install_url }}" target="_blank" rel="noopener noreferrer">Open the LibreBooking database installer</a></p>
+<h2>Installer credentials</h2>
+<dl>
+  <dt>Installation password</dt><dd><code>{{ details.install_password }}</code></dd>
+  <dt>Database host</dt><dd><code>{{ details.database_host }}</code></dd>
+  <dt>Database name</dt><dd><code>{{ details.database_name }}</code></dd>
+  <dt>Database user</dt><dd><code>{{ details.database_user }}</code></dd>
+  <dt>Database password</dt><dd><code>{{ details.database_password }}</code></dd>
+</dl>
+<ol>
+  <li>In the installer, use the database settings above. Leave “Create database” and “Create database user” unchecked; Community Stack already created a dedicated database and account.</li>
+  <li>Before completing the installer, temporarily enable <strong>LibreBooking self-registration</strong> in <a href="/admin/services">Services and settings</a>.</li>
+  <li>Register the initial administrator with <code>{{ details.admin_email }}</code>. LibreBooking grants administrator privileges to this configured address.</li>
+  <li>Immediately turn self-registration off again in Services and settings. Then configure spaces, booking approval, schedules, and roles inside LibreBooking.</li>
+</ol>
+<p><a href="{{ details.app_url }}" target="_blank" rel="noopener noreferrer">Open LibreBooking</a> · <a href="/admin/services">Back to services and settings</a></p>
+{% endblock %}

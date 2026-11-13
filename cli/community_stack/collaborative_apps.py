@@ -15,6 +15,7 @@ class CollaborativeApp:
     database_path_default: str
     database_engine: str
     database_port: int
+    url_suffix: str = ""
 
     @property
     def container_name(self) -> str:
@@ -32,7 +33,7 @@ class CollaborativeApp:
         return settings.get("hostname") or f"{self.hostname_prefix}.{config['domain']['base']}"
 
     def public_url(self, config: dict) -> str:
-        return f"https://{self.public_hostname(config)}/"
+        return f"https://{self.public_hostname(config)}{self.url_suffix or '/'}"
 
 
 COLLABORATIVE_APPS = (
@@ -55,6 +56,17 @@ COLLABORATIVE_APPS = (
         database_path_default="data/facilmap/mariadb",
         database_engine="MariaDB",
         database_port=3306,
+    ),
+    CollaborativeApp(
+        key="librebooking",
+        label="LibreBooking",
+        hostname_prefix="booking",
+        aliases=("booking", "reservations"),
+        database_dump_file="mariadb_librebooking.sql",
+        database_path_default="data/librebooking/mariadb",
+        database_engine="MariaDB",
+        database_port=3306,
+        url_suffix="/Web/",
     ),
 )
 

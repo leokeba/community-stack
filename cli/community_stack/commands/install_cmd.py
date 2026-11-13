@@ -39,7 +39,7 @@ def run_install(
     services_root = get_services_dir()
     env_p = Path(env_path).resolve()
     route_changes = {}
-    for optional_service in ("vikunja", "facilmap"):
+    for optional_service in ("vikunja", "facilmap", "librebooking"):
         route_path = (
             Path(config_path).resolve().parent / "data" / "proxy" / f"{optional_service}.caddy"
         )
@@ -114,7 +114,7 @@ def run_install(
         if services_cfg.get(bridge_service, {}).get("enabled", False):
             services_to_deploy.append(bridge_service)
 
-    for optional_service in ("vikunja", "facilmap"):
+    for optional_service in ("vikunja", "facilmap", "librebooking"):
         if services_cfg.get(optional_service, {}).get("enabled", False):
             services_to_deploy.append(optional_service)
 

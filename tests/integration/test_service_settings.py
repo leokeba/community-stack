@@ -431,6 +431,60 @@ def test_console_provisions_and_deploys_facilmap(console):
     assert "anyone who reaches the service can create maps" in settings_page.text
 
 
+def test_console_provisions_librebooking_and_shows_setup_secrets_once(console, project):
+    root, client = console
+    _, fake = project
+    page = client.get("/admin/services")
+    assert "LibreBooking space reservations" in page.text
+    values = {
+        **form_values(page),
+        "setting:services.librebooking.enabled": "true",
+        "setting:services.librebooking.admin_email": "spaces@example.org",
+    }
+
+    review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
+    assert review.status_code == 200
+    assert "https://booking.example.org/Web/" in review.text
+    assert "self-registration" in review.text
+    assert "Confirm with your password" in review.text
+
+    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
+    applied = client.post(
+        "/admin/services/apply",
+        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+    )
+    assert applied.status_code == 200
+    config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
+    assert config["services"]["librebooking"]["enabled"] is True
+    assert config["services"]["librebooking"]["version"] == "7.2.0-3.5.2"
+    assert config["services"]["librebooking"]["admin_email"] == "spaces@example.org"
+
+    env = (root / ".env").read_text(encoding="utf-8")
+    assert "LIBREBOOKING_DB_PASSWORD=" in env
+    assert "LIBREBOOKING_DB_ROOT_PASSWORD=" in env
+    assert "LIBREBOOKING_INSTALL_PASSWORD=" in env
+    route = (root / "data/proxy/librebooking.caddy").read_text(encoding="utf-8")
+    assert "booking.example.org" in route
+
+    setup_form_page = client.get("/admin/services")
+    setup = client.post(
+        "/admin/librebooking/setup",
+        data={"csrf_token": csrf(setup_form_page), "password": PASSWORD},
+    )
+    assert setup.status_code == 200
+    assert setup.headers["cache-control"] == "no-store, private"
+    assert "spaces@example.org" in setup.text
+    root_password = re.search(r"LIBREBOOKING_DB_ROOT_PASSWORD=(\S+)", env).group(1)
+    install_password = re.search(r"LIBREBOOKING_INSTALL_PASSWORD=(\S+)", env).group(1)
+    assert root_password not in setup.text
+    assert install_password in setup.text
+    assert "Community Stack already created a dedicated database and account" in setup.text
+    audit_log = (root / "data/agent/audit.log").read_text(encoding="utf-8")
+    assert install_password not in audit_log
+
+    assert any(service == "librebooking" and "--build" in args for service, args in fake.calls)
+
+
 def test_console_asks_for_the_password_before_stopping_matrix(console):
     _, client = console
     page = client.get("/admin/services")

@@ -53,6 +53,7 @@ REQUIRED_SNAPSHOT_FILES = ("manifest.json", "community-stack.yaml")
 EXPECTED_SNAPSHOT_FILES = ("data.tar.gz", "postgres_synapse.dump")
 VIKUNJA_DUMP_FILE = COLLABORATIVE_APPS_BY_KEY["vikunja"].database_dump_file
 FACILMAP_DUMP_FILE = COLLABORATIVE_APPS_BY_KEY["facilmap"].database_dump_file
+LIBREBOOKING_DUMP_FILE = COLLABORATIVE_APPS_BY_KEY["librebooking"].database_dump_file
 
 
 def is_restic_available() -> bool:
@@ -127,7 +128,7 @@ def dump_vikunja_database(target_file: Path) -> bool:
         return False
 
 
-def dump_facilmap_database(target_file: Path) -> bool:
+def dump_mariadb_database(app: CollaborativeApp, target_file: Path) -> bool:
     """Create a MariaDB logical dump without exposing the database password in argv."""
     if not is_docker_available():
         return False
@@ -143,7 +144,7 @@ def dump_facilmap_database(target_file: Path) -> bool:
     cmd = [
         "docker",
         "exec",
-        COLLABORATIVE_APPS_BY_KEY["facilmap"].database_container_name,
+        app.database_container_name,
         "sh",
         "-ec",
         script,
@@ -156,11 +157,21 @@ def dump_facilmap_database(target_file: Path) -> bool:
         return False
 
 
+def dump_facilmap_database(target_file: Path) -> bool:
+    return dump_mariadb_database(COLLABORATIVE_APPS_BY_KEY["facilmap"], target_file)
+
+
+def dump_librebooking_database(target_file: Path) -> bool:
+    return dump_mariadb_database(COLLABORATIVE_APPS_BY_KEY["librebooking"], target_file)
+
+
 def dump_collaborative_database(app: CollaborativeApp, target_file: Path) -> bool:
     if app.key == "vikunja":
         return dump_vikunja_database(target_file)
     if app.key == "facilmap":
         return dump_facilmap_database(target_file)
+    if app.key == "librebooking":
+        return dump_librebooking_database(target_file)
     raise BackupError(f"No database dump implementation is configured for {app.label}.")
 
 
@@ -453,6 +464,9 @@ class BackupEngine:
                 "db_dumped": db_dumped,
                 "vikunja_dumped": vikunja_enabled,
                 "facilmap_dumped": facilmap_enabled,
+                "librebooking_dumped": COLLABORATIVE_APPS_BY_KEY["librebooking"].is_enabled(
+                    self.config
+                ),
             }
             manifest_file = staging_dir / "manifest.json"
             manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

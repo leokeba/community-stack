@@ -17,7 +17,7 @@ The Community Communications Stack is designed to survive total server loss, hos
 
 ### What is Backed Up
 Every snapshot created by `community-stack backup` captures:
-1. **Databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata. When FacilMap is enabled, `mariadb_facilmap.sql` contains its maps, settings, features, and calculated routes.
+1. **Databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata. When FacilMap is enabled, `mariadb_facilmap.sql` contains its maps, settings, features, and calculated routes. When LibreBooking is enabled, `mariadb_librebooking.sql` contains its users, spaces, reservations, and application settings.
 2. **Persistent Storage (`data/`):**
    - Synapse configuration, media store, and signing keys (`data/matrix`).
    - Caddy certificates and ACME state (`data/caddy`).
@@ -28,6 +28,7 @@ Every snapshot created by `community-stack backup` captures:
    - Element Web branding and client configuration (`data/element`).
    - Vikunja attachments (`data/vikunja/files`). Its live PostgreSQL directory is excluded; it is backed up as a consistent database dump instead.
    - FacilMap cache (`data/facilmap/cache`). Its live MariaDB directory is excluded; map data is backed up with `mariadb-dump`.
+   - LibreBooking configuration, uploads, and logs (`data/librebooking/config`, `uploads`, and `logs`). Its live MariaDB directory is excluded; application data is backed up with `mariadb-dump`.
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
 4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
 5. **Snapshot Manifest (`manifest.json`):** Timestamp, project identifier, and integrity checksum metadata.
@@ -52,6 +53,11 @@ map writes quiescent and avoids copying a live database directory. The dump
 failure or an app restart failure makes the whole snapshot fail. FacilMap does
 not upload photos; external image URLs are part of map text, but the externally
 hosted image files are not included.
+
+When LibreBooking is enabled, its application container is stopped while the
+MariaDB dump and persistent files are captured, then restarted. This keeps
+reservation changes and uploads aligned with the snapshot. A failed database
+dump or app restart fails the snapshot.
 
 ### Encryption
 

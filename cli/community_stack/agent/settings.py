@@ -20,6 +20,7 @@ from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.config import ConfigError, validate_config
 from community_stack.config_edit import (
     ensure_facilmap_config,
+    ensure_librebooking_config,
     ensure_vikunja_config,
     get_value,
     set_value,
@@ -42,7 +43,7 @@ class Setting:
     key: str
     label: str
     help: str
-    kind: str  # "bool", "int", "choice", "hostname", or "timezone"
+    kind: str  # "bool", "int", "choice", "hostname", "email", "version", or "timezone"
     default: Any
     choices: tuple[str, ...] = ()
     minimum: int | None = None
@@ -79,6 +80,17 @@ class Setting:
         if self.kind == "hostname":
             if not re.fullmatch(r"[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text):
                 raise SettingsError(f"{self.label}: enter a valid public hostname.")
+            return text
+        if self.kind == "email":
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@[A-Za-z0-9.-]{1,189}\.[A-Za-z]{2,63}",
+                text,
+            ):
+                raise SettingsError(f"{self.label}: enter a valid email address.")
+            return text
+        if self.kind == "version":
+            if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+", text):
+                raise SettingsError(f"{self.label}: enter a pinned app-container release tag.")
             return text
         try:
             ZoneInfo(text)
@@ -231,6 +243,53 @@ SETTINGS: dict[str, Setting] = {
             "",
             restart_service="facilmap",
         ),
+        Setting(
+            "services.librebooking.enabled",
+            "LibreBooking space reservations",
+            "Deploy booking.<community domain> with its own accounts and approval calendar. "
+            "Add the hostname's DNS record before enabling it.",
+            "bool",
+            False,
+            service="librebooking",
+            dangerous=True,
+        ),
+        Setting(
+            "services.librebooking.hostname",
+            "LibreBooking public hostname",
+            "The HTTPS hostname routed to LibreBooking. Add its DNS record before enabling it.",
+            "hostname",
+            "",
+            restart_service="librebooking",
+        ),
+        Setting(
+            "services.librebooking.admin_email",
+            "LibreBooking administrator email",
+            "The email address LibreBooking grants administrator privileges to during first setup.",
+            "email",
+            "admin@example.org",
+            restart_service="librebooking",
+        ),
+        Setting(
+            "services.librebooking.allow_registration",
+            "LibreBooking self-registration",
+            "Allow anyone to create a LibreBooking account. Enable temporarily for initial admin "
+            "registration, then turn it off.",
+            "bool",
+            False,
+            restart_service="librebooking",
+            dangerous=True,
+        ),
+        Setting(
+            "services.librebooking.version",
+            "LibreBooking container version",
+            "Pinned app-container release tag (app version-container version). Review upstream "
+            "releases before changing it; "
+            "the service is rebuilt and a safety backup is taken.",
+            "version",
+            "7.2.0-3.5.2",
+            restart_service="librebooking",
+            dangerous=True,
+        ),
     )
 }
 
@@ -247,12 +306,21 @@ def parse_changes(raw: Any) -> dict[str, Any]:
     return changes
 
 
-def current_values(config: dict) -> dict[str, Any]:
+def current_values(config: dict, env: dict[str, str] | None = None) -> dict[str, Any]:
     values = {key: get_value(config, s.path, s.default) for key, s in SETTINGS.items()}
+    if values["services.librebooking.admin_email"] == "admin@example.org":
+        values["services.librebooking.admin_email"] = (env or {}).get(
+            "ACME_EMAIL", "admin@example.org"
+        )
     values["services.facilmap.hostname"] = get_value(
         config,
         ("services", "facilmap", "hostname"),
         f"maps.{get_value(config, ('domain', 'base'), 'example.org')}",
+    )
+    values["services.librebooking.hostname"] = get_value(
+        config,
+        ("services", "librebooking", "hostname"),
+        f"booking.{get_value(config, ('domain', 'base'), 'example.org')}",
     )
     return values
 
@@ -262,7 +330,7 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     changes = parse_changes(raw_changes)
     old_text = context.config_path.read_text(encoding="utf-8")
     config = yaml.safe_load(old_text) or {}
-    current = current_values(config)
+    current = current_values(config, parse_env_file(context.env_path))
     effective = {key: value for key, value in changes.items() if current[key] != value}
 
     new_text = old_text
@@ -274,6 +342,11 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     if any(key.startswith("services.facilmap.") for key in effective):
         try:
             new_text = ensure_facilmap_config(new_text)
+        except (TypeError, ValueError) as exc:
+            raise SettingsError(str(exc)) from exc
+    if any(key.startswith("services.librebooking.") for key in effective):
+        try:
+            new_text = ensure_librebooking_config(new_text)
         except (TypeError, ValueError) as exc:
             raise SettingsError(str(exc)) from exc
     for key, value in effective.items():
@@ -349,6 +422,25 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
             "map admin/edit/read-only URLs are bearer credentials, anyone who reaches the "
             "service can create maps, and uploaded photos are not supported. Do not store "
             "sensitive locations."
+        )
+    if effective.get("services.librebooking.enabled") is True or (
+        any(key.startswith("services.librebooking.") for key in effective)
+        and get_value(proposed_config, ("services", "librebooking", "enabled"), False)
+    ):
+        hostname = get_value(
+            proposed_config,
+            ("services", "librebooking", "hostname"),
+            f"booking.{get_value(config, ('domain', 'base'), 'example.org')}",
+        )
+        warnings.append(
+            f"LibreBooking will be deployed at https://{hostname}/Web/. Configure each space's "
+            "approval rules in LibreBooking. For first setup, briefly enable self-registration "
+            "to create the administrator account, then turn it off."
+        )
+    if effective.get("services.librebooking.allow_registration") is True:
+        warnings.append(
+            "Anyone can create a LibreBooking account while self-registration is enabled. "
+            "Turn it off immediately after registering the initial administrator."
         )
 
     diff = "".join(
@@ -430,7 +522,7 @@ def set_service(context, service: str, running: bool) -> None:
     route_path = context.project_dir / "data" / "proxy" / f"{service}.caddy"
     previous_route = (
         route_path.read_text(encoding="utf-8")
-        if service in ("vikunja", "facilmap") and route_path.is_file()
+        if service in ("vikunja", "facilmap", "librebooking") and route_path.is_file()
         else None
     )
     if running:
@@ -440,7 +532,7 @@ def set_service(context, service: str, running: bool) -> None:
             "bridge_net"
         ):
             raise SettingsError("Docker could not create the isolated Matrix appservice network.")
-    if running or service in ("vikunja", "facilmap"):
+    if running or service in ("vikunja", "facilmap", "librebooking"):
         try:
             config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
             prepare_service(context.project_dir, service, config, context.env_path)
@@ -473,6 +565,8 @@ def set_service(context, service: str, running: bool) -> None:
         wait_for(context, "matrix", True)
     if running:
         args = ["up", "-d", "--remove-orphans"]
+        if service == "librebooking":
+            args.insert(-1, "--build")
     else:
         args = ["down"]
     try:
@@ -484,7 +578,7 @@ def set_service(context, service: str, running: bool) -> None:
     if result.returncode != 0:
         raise SettingsError(f"Docker could not {'start' if running else 'stop'} {service}.")
     wait_for(context, service, running)
-    if service in ("vikunja", "facilmap"):
+    if service in ("vikunja", "facilmap", "librebooking"):
         current_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
         if previous_route != current_route:
             try:

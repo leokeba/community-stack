@@ -66,6 +66,11 @@ it, set its hostname, and deploy it from **Admin → Services and settings**.
 Review its bearer-link permission model before enabling it; see the
 [FacilMap guide](facilmap.md).
 
+LibreBooking is optional and disabled by default. Enable it from
+**Admin → Services and settings** after adding the booking hostname's DNS
+record. The admin console provisions its database and storage, and provides a
+password-confirmed first-setup page; see the [LibreBooking guide](librebooking.md).
+
 The rest of this guide describes the same steps by hand.
 
 ---

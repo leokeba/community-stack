@@ -44,6 +44,17 @@
 {% if values.get("services.facilmap.enabled") and facilmap_url %}
 <p class="notice" role="status">FacilMap is enabled. <a href="{{ facilmap_url }}" target="_blank" rel="noopener noreferrer">Open FacilMap</a>. It has no user accounts: map links are bearer credentials, and anyone who reaches the service can create maps. Do not store sensitive locations.</p>
 {% endif %}
+{% if values.get("services.librebooking.enabled") and librebooking_url %}
+<div class="notice" role="status">
+  <p>LibreBooking is enabled. <a href="{{ librebooking_url }}" target="_blank" rel="noopener noreferrer">Open space reservations</a>.</p>
+  <form method="post" action="/admin/librebooking/setup">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="librebooking-setup-password">Confirm with your password to view installation credentials</label>
+    <input id="librebooking-setup-password" name="password" type="password" autocomplete="current-password" required>
+    <p><button type="submit">Show first-setup instructions</button></p>
+  </form>
+</div>
+{% endif %}
 {% if status and status.containers %}
 <h2>Running services</h2>
 <table>

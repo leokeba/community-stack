@@ -10,6 +10,7 @@ The Community Communications Stack is organized into four distinct architectural
 | - Matrix Homeserver (Synapse)    - Element Web Client                    |
 | - Public Landing Page            - Canonical Announcement Stream         |
 | - (Optional) Vikunja Tasks     - (Optional) FacilMap Maps               |
+| - (Optional) LibreBooking Space Reservations                            |
 +--------------------------------------------------------------------------+
                                      |
 +--------------------------------------------------------------------------+
@@ -56,6 +57,7 @@ Services are packaged as independent Docker Compose modules coordinated by the C
           [Synapse] <--- (bridge_net) ---> [mautrix-whatsapp] (Optional)
   [Caddy] <--- proxy_net ---> [Vikunja] ---> (vikunja_internal) [PostgreSQL]
   [Caddy] <--- proxy_net ---> [FacilMap] ---> (facilmap_internal) [MariaDB]
+  [Caddy] <--- proxy_net ---> [LibreBooking] ---> (librebooking_internal) [MariaDB]
 ```
 
 - **`proxy_net` (Bridge):** Connects Caddy to the HTTP ports of Landing Page, Element Web, Announcements API, and Synapse client endpoints.
@@ -63,6 +65,7 @@ Services are packaged as independent Docker Compose modules coordinated by the C
 - **`bridge_net` (Dedicated Bridge):** Connects only Synapse and mautrix-whatsapp. It is not attached to public ingress; the bridge still needs outbound internet access.
 - **`vikunja_internal` (Internal Bridge, `internal: true`):** Connects Vikunja to its dedicated PostgreSQL database. The database is never attached to ingress or published on the host. Vikunja itself is an independent optional Compose project.
 - **`facilmap_internal` (Internal Bridge, `internal: true`):** Connects FacilMap to its dedicated MariaDB database. Only the app joins `proxy_net`; neither service publishes a host port. FacilMap is an independent optional Compose project.
+- **`librebooking_internal` (Internal Bridge, `internal: true`):** Connects LibreBooking to its dedicated MariaDB database. Only the app joins `proxy_net`; neither service publishes a host port. LibreBooking is an independent optional Compose project.
 
 ---
 
@@ -111,9 +114,16 @@ FacilMap has no user accounts or OIDC: map URLs are bearer credentials, not
 authenticated private access. See [docs/facilmap.md](facilmap.md) for the
 permission model and operational limits.
 
+LibreBooking is disabled by default. Its pinned app/container release,
+hostname, admin email, registration policy, database, and persistent paths live
+under `services.librebooking`. The admin console prepares its Caddy route,
+database credentials, and writable storage. Its native accounts and resource
+approval/calendar features are managed in LibreBooking itself; see
+[docs/librebooking.md](librebooking.md).
+
 ## 5. Collaborative Application Operations
 
-Vikunja and FacilMap share a deliberately small operational catalog in
+Vikunja, FacilMap, and LibreBooking share a deliberately small operational catalog in
 `cli/community_stack/collaborative_apps.py`. It defines their CLI aliases,
 display names, default public hostnames, managed container names, and database
 backup metadata. Service lookup, status and URL reporting, database-port

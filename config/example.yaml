@@ -58,6 +58,22 @@ services:
       cpu_limit: 1
     memory_limit: "512M"
     cpu_limit: 1
+  librebooking:
+    enabled: false
+    version: "7.2.0-3.5.2"
+    # hostname: "booking.example.org" # defaults to booking.<domain.base>
+    admin_email: "admin@example.org"
+    allow_registration: false
+    database:
+      version: "11.4.12"
+      data_path: "data/librebooking/mariadb"
+      memory_limit: "512M"
+      cpu_limit: 1
+    config_path: "data/librebooking/config"
+    uploads_path: "data/librebooking/uploads"
+    logs_path: "data/librebooking/logs"
+    memory_limit: "512M"
+    cpu_limit: 1
 
 operations:
   backups:

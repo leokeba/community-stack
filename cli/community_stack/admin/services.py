@@ -32,10 +32,11 @@ def register_services(
         message: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
-        values, status, components, vikunja_url, facilmap_url, error = (
+        values, status, components, vikunja_url, facilmap_url, librebooking_url, error = (
             None,
             None,
             [],
+            None,
             None,
             None,
             None,
@@ -50,6 +51,7 @@ def register_services(
                 agent_outdated = len(settings) != len(SETTINGS)
                 vikunja_url = config.get("vikunja_url")
                 facilmap_url = config.get("facilmap_url")
+                librebooking_url = config.get("librebooking_url")
                 status = await run_in_threadpool(agent.call, "status.get", session["username"])
                 components = (
                     await run_in_threadpool(agent.call, "services.versions", session["username"])
@@ -69,6 +71,7 @@ def register_services(
                 components=components,
                 vikunja_url=vikunja_url,
                 facilmap_url=facilmap_url,
+                librebooking_url=librebooking_url,
                 timezones=sorted(available_timezones()),
                 error=error,
                 **({"flash": message} if message else {}),
@@ -100,6 +103,43 @@ def register_services(
         return redirect_with(
             request, "/admin/services", flash(f"Updated {service}.", details=result["steps"])
         )
+
+    @app.post("/admin/librebooking/setup")
+    async def librebooking_setup(request: Request) -> Response:
+        session, form = await checked_form(request, "system")
+        try:
+            details = await run_in_threadpool(
+                agent.call,
+                "librebooking.setup_details",
+                session["username"],
+                {},
+                form.get("password") or None,
+            )
+        except (AgentUnavailable, AgentRefused) as exc:
+            audit(
+                request,
+                session["username"],
+                "system.librebooking.setup",
+                outcome="failed",
+            )
+            return await services_page(
+                request, session, flash(f"LibreBooking setup details: {exc}", "error"), 400
+            )
+        audit(
+            request,
+            session["username"],
+            "system.librebooking.setup",
+            outcome="succeeded",
+        )
+        response = render(
+            request,
+            "librebooking_setup.html",
+            page(session, details=details),
+        )
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
 
     @app.post("/admin/services/review")
     async def review_services(request: Request) -> Response:

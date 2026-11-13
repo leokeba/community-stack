@@ -254,6 +254,92 @@ def audit_facilmap(
     return healthy, messages
 
 
+def audit_librebooking(
+    config: dict, config_path: Path | str, env_path: Path | str
+) -> tuple[bool, list[str]]:
+    """Check LibreBooking containers, persistent storage, HTTPS installer, and backup."""
+    settings = config.get("services", {}).get("librebooking", {})
+    if not settings.get("enabled", False):
+        return True, ["[INFO] LibreBooking is disabled; optional-service checks skipped."]
+
+    messages: list[str] = []
+    healthy = True
+    containers = {item.get("name"): item for item in list_community_containers()}
+    app = COLLABORATIVE_APPS_BY_KEY["librebooking"]
+    for container_name, label in (
+        (app.container_name, "application"),
+        (app.database_container_name, "database"),
+    ):
+        container = containers.get(container_name)
+        if not container:
+            messages.append(f"[FAIL] LibreBooking {label} container is not deployed.")
+            healthy = False
+        elif container.get("state") != "running":
+            messages.append(f"[FAIL] LibreBooking {label} container is not running.")
+            healthy = False
+        elif "(healthy)" in container.get("status", ""):
+            messages.append(f"[OK] LibreBooking {label} container is healthy.")
+        else:
+            messages.append(f"[FAIL] LibreBooking {label} container is running but not healthy.")
+            healthy = False
+
+    project_root = Path(config_path).resolve().parent
+    paths = (
+        project_root / settings.get("config_path", "data/librebooking/config"),
+        project_root / settings.get("uploads_path", "data/librebooking/uploads"),
+        project_root / settings.get("logs_path", "data/librebooking/logs"),
+        project_root / settings.get("database", {}).get("data_path", app.database_path_default),
+    )
+    try:
+        if all(path.is_dir() for path in paths) and all(os.access(path, os.W_OK) for path in paths):
+            if all(shutil.disk_usage(path).free > 0 for path in paths):
+                messages.append("[OK] LibreBooking persistent storage is present and writable.")
+            else:
+                messages.append("[FAIL] LibreBooking persistent storage has no free space.")
+                healthy = False
+        else:
+            messages.append("[FAIL] LibreBooking persistent storage is missing or not writable.")
+            healthy = False
+    except OSError as exc:
+        messages.append(f"[FAIL] LibreBooking persistent storage check failed: {exc}")
+        healthy = False
+
+    hostname = app.public_hostname(config)
+    if hostname.endswith(("example.org", ".test", ".local", "localhost")):
+        messages.append(f"[WARN] Skipping HTTPS reachability for placeholder host {hostname}.")
+        healthy = False
+    else:
+        try:
+            with urllib.request.urlopen(f"https://{hostname}/Web/install/", timeout=10) as response:
+                if response.status == 200:
+                    messages.append("[OK] LibreBooking installer is reachable through HTTPS.")
+                else:
+                    messages.append(
+                        f"[FAIL] LibreBooking HTTPS installer returned {response.status}."
+                    )
+                    healthy = False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            messages.append(f"[FAIL] LibreBooking is not reachable through HTTPS: {exc}")
+            healthy = False
+
+    try:
+        engine = BackupEngine(config_path=config_path, env_path=env_path)
+        backup_ok, backup_messages = engine.verify_backup()
+        if backup_ok:
+            messages.append(
+                "[OK] A LibreBooking-inclusive backup is present and structurally valid."
+            )
+        else:
+            messages.append(
+                "[FAIL] LibreBooking backup check failed: " + "; ".join(backup_messages)
+            )
+            healthy = False
+    except (BackupError, ConfigError, OSError) as exc:
+        messages.append(f"[FAIL] LibreBooking backup check failed: {exc}")
+        healthy = False
+    return healthy, messages
+
+
 def run_doctor(
     config_path: Path | str = "community-stack.yaml", env_path: Path | str = ".env"
 ) -> int:
@@ -309,9 +395,14 @@ def run_doctor(
 
     vikunja_ok = True
     facilmap_ok = True
+    librebooking_ok = True
     if cfg:
         print("\n--- VIKUNJA SERVICE DIAGNOSTICS ---")
         vikunja_ok, messages = audit_vikunja(cfg, config_path, env_path)
+        for message in messages:
+            print(f"  {message}")
+        print("\n--- LIBREBOOKING SERVICE DIAGNOSTICS ---")
+        librebooking_ok, messages = audit_librebooking(cfg, config_path, env_path)
         for message in messages:
             print(f"  {message}")
         print("\n--- FACILMAP SERVICE DIAGNOSTICS ---")
@@ -322,4 +413,4 @@ def run_doctor(
     print("\n================================================================================")
     print("Doctor report complete. All sensitive tokens and passwords have been redacted.")
     print("================================================================================")
-    return 0 if checks.ok and vikunja_ok and facilmap_ok else 1
+    return 0 if checks.ok and vikunja_ok and facilmap_ok and librebooking_ok else 1

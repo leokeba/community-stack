@@ -122,10 +122,18 @@ The Community Communications Stack is designed for public movements and communit
   - Vikunja webhooks are delivered once, signed HMAC is supported, and default outgoing-request protections reject private, loopback, and link-local destinations. Matrix delivery is not configured.
   - Vikunja's database is isolated from ingress and its application runs without a host-published port.
 
+### 2.12 LibreBooking Account Exposure and Setup Secrets
+- **Threat:** Public self-registration remains enabled, or initial database credentials are exposed during setup.
+- **Impact:** Unauthorized accounts or loss of reservation and user data.
+- **Mitigation:**
+  - Self-registration is off by default and enabling it requires password confirmation; the first administrator setup flow instructs operators to turn it off immediately after account creation.
+  - Database and installer credentials are only returned through an authenticated, password-confirmed, non-cacheable admin response. The database root password is never returned, and the derived image disables upstream shell xtrace before it can log environment values.
+  - LibreBooking's application and database have no host-published ports; MariaDB is isolated on an internal network. Backups use a logical database dump and preserve `.env`.
+
 ---
 
 ## 3. Explicit Operational Assumptions & Non-Guarantees
 
 1. **Not an Anonymous Whistleblowing Platform:** This stack is built for open community coordination. It does not replace SecureDrop or Tor-based anonymity tools.
-2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp, and optional Vikunja). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
+2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp, and optional Vikunja, FacilMap, and LibreBooking). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
 3. **Physical Host Security:** Host security depends on proper hardware hygiene, strong SSH keys, and encrypted storage.

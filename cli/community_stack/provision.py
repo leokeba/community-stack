@@ -357,6 +357,112 @@ def prepare_facilmap(project_dir: Path, config: dict, env_path: Path) -> str | N
     return f"Prepared FacilMap storage and deployment settings for https://{hostname}/."
 
 
+def prepare_librebooking(project_dir: Path, config: dict, env_path: Path) -> str | None:
+    """Provision LibreBooking's private database, persistent paths, secrets, and Caddy route."""
+    settings = config.get("services", {}).get("librebooking", {})
+    root = project_dir.resolve()
+    hostname = settings.get("hostname") or f"booking.{config['domain']['base']}"
+    route_path = root / "data" / "proxy" / "librebooking.caddy"
+    if settings.get("enabled", False):
+        route_content = (
+            f"{hostname} {{\n"
+            "    encode zstd gzip\n"
+            "    reverse_proxy community_librebooking:8080\n"
+            "}\n"
+        )
+    else:
+        route_content = "# LibreBooking is disabled; no public route is configured.\n"
+    route_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if not route_path.is_file() or route_path.read_text(encoding="utf-8") != route_content:
+        route_path.write_text(route_content, encoding="utf-8")
+        route_path.chmod(0o644)
+
+    if not settings.get("enabled", False):
+        return None
+
+    database = settings.get("database", {})
+    paths = {
+        "database": root / database.get("data_path", "data/librebooking/mariadb"),
+        "configuration": root / settings.get("config_path", "data/librebooking/config"),
+        "uploads": root / settings.get("uploads_path", "data/librebooking/uploads"),
+        "logs": root / settings.get("logs_path", "data/librebooking/logs"),
+    }
+    for path in paths.values():
+        if not path.resolve().is_relative_to(root):
+            raise ProvisionError(
+                "LibreBooking persistent paths must remain inside the project directory."
+            )
+
+    env_values = parse_env_file(env_path)
+    required = (
+        "LIBREBOOKING_DB_PASSWORD",
+        "LIBREBOOKING_DB_ROOT_PASSWORD",
+        "LIBREBOOKING_INSTALL_PASSWORD",
+    )
+    missing = [key for key in required if not env_values.get(key)]
+    if missing:
+        try:
+            existing_data = any(path.is_dir() and any(path.iterdir()) for path in paths.values())
+        except OSError as exc:
+            raise ProvisionError(
+                "LibreBooking credentials are missing and persistent storage cannot be inspected. "
+                "Restore its original .env credentials before starting it."
+            ) from exc
+        if existing_data:
+            raise ProvisionError(
+                "LibreBooking credentials are missing from .env while persistent data exists. "
+                "Restore LIBREBOOKING_DB_PASSWORD, LIBREBOOKING_DB_ROOT_PASSWORD, and "
+                "LIBREBOOKING_INSTALL_PASSWORD before starting it."
+            )
+
+    generated = {key: generate_secret(32) for key in required if not env_values.get(key)}
+    values = {
+        **generated,
+        "LIBREBOOKING_VERSION": settings.get("version", "7.2.0-3.5.2"),
+        "LIBREBOOKING_DOMAIN": hostname,
+        "LIBREBOOKING_ADMIN_EMAIL": (
+            env_values.get("ACME_EMAIL", "admin@example.org")
+            if settings.get("admin_email", "admin@example.org") == "admin@example.org"
+            else settings["admin_email"]
+        ),
+        "LIBREBOOKING_ALLOW_REGISTRATION": str(settings.get("allow_registration", False)).lower(),
+        "LIBREBOOKING_TIMEZONE": config.get("project", {}).get("timezone", "UTC"),
+        "LIBREBOOKING_LANGUAGE": "fr_fr",
+        "LIBREBOOKING_DATABASE_VERSION": database.get("version", "11.4.12"),
+        "LIBREBOOKING_DATABASE_DATA_PATH": settings.get("database", {}).get(
+            "data_path", "data/librebooking/mariadb"
+        ),
+        "LIBREBOOKING_CONFIG_PATH": settings.get("config_path", "data/librebooking/config"),
+        "LIBREBOOKING_UPLOADS_PATH": settings.get("uploads_path", "data/librebooking/uploads"),
+        "LIBREBOOKING_LOGS_PATH": settings.get("logs_path", "data/librebooking/logs"),
+        "LIBREBOOKING_MEMORY_LIMIT": settings.get("memory_limit", "512M"),
+        "LIBREBOOKING_CPU_LIMIT": str(settings.get("cpu_limit", 1)),
+        "LIBREBOOKING_DATABASE_MEMORY_LIMIT": database.get("memory_limit", "512M"),
+        "LIBREBOOKING_DATABASE_CPU_LIMIT": str(database.get("cpu_limit", 1)),
+        "LIBREBOOKING_GID": env_values.get("COMMUNITY_STACK_GID")
+        or str(os.getgid() if hasattr(os, "getgid") else 1000),
+    }
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    if not env_path.exists():
+        env_path.touch(mode=0o600)
+    set_env_values(env_path, values)
+    if os.name == "posix":
+        env_path.chmod(0o600)
+
+    gid = int(values["LIBREBOOKING_GID"])
+    try:
+        for path in paths.values():
+            path.mkdir(mode=0o770, parents=True, exist_ok=True)
+            if os.name == "posix":
+                if path.stat().st_gid != gid:
+                    os.chown(path, -1, gid)
+                path.chmod(0o770)
+    except (OSError, ValueError) as exc:
+        raise ProvisionError(f"Could not prepare LibreBooking storage: {exc}") from exc
+
+    return f"Prepared LibreBooking storage and deployment settings for https://{hostname}/Web/."
+
+
 def _bridge_secrets(env_path: Path, spec: BridgeSpec, create_missing: bool) -> dict[str, str]:
     """The bridge's appservice tokens, kept in .env under its own prefix."""
     keys = (f"{spec.secret_prefix}_AS_TOKEN", f"{spec.secret_prefix}_HS_TOKEN")
@@ -562,6 +668,8 @@ def prepare_service(
         return prepare_vikunja(project_dir, config, env_path)
     if service == "facilmap":
         return prepare_facilmap(project_dir, config, env_path)
+    if service == "librebooking":
+        return prepare_librebooking(project_dir, config, env_path)
     if service == "safemode":
         from community_stack.safemode.provision import prepare_safemode
 

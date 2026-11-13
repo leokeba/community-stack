@@ -27,8 +27,9 @@ from community_stack.agent import safemode as safemode_ops
 from community_stack.agent import settings as settings_catalog
 from community_stack.backup import BackupEngine
 from community_stack.bridges.catalogue import LOGIN_COMMAND, BridgeSpec, supported
-from community_stack.collaborative_apps import COLLABORATIVE_APPS
+from community_stack.collaborative_apps import COLLABORATIVE_APPS, COLLABORATIVE_APPS_BY_KEY
 from community_stack.config import ConfigError, load_config
+from community_stack.secrets import parse_env_file
 
 READ = "read"
 CHANGE = "change"
@@ -236,10 +237,37 @@ def _vikunja_call(handler):
 
 def config_get(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
     config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
-    result = {"values": settings_catalog.current_values(config)}
+    result = {"values": settings_catalog.current_values(config, parse_env_file(context.env_path))}
     for app in COLLABORATIVE_APPS:
         result[f"{app.key}_url"] = app.public_url(config) if app.is_enabled(config) else None
     return result
+
+
+def librebooking_setup_details(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
+    config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
+    app = COLLABORATIVE_APPS_BY_KEY["librebooking"]
+    if not app.is_enabled(config):
+        raise OperationError("Enable LibreBooking before viewing its setup credentials.")
+    env = parse_env_file(context.env_path)
+    required = ("LIBREBOOKING_INSTALL_PASSWORD", "LIBREBOOKING_DB_PASSWORD")
+    if any(not env.get(key) for key in required):
+        raise OperationError("LibreBooking credentials are not ready. Enable and deploy it first.")
+    hostname = app.public_hostname(config)
+    admin_email = (
+        config.get("services", {}).get("librebooking", {}).get("admin_email", "admin@example.org")
+    )
+    if admin_email == "admin@example.org":
+        admin_email = env.get("ACME_EMAIL", admin_email)
+    return {
+        "app_url": app.public_url(config),
+        "install_url": f"https://{hostname}/Web/install/",
+        "admin_email": admin_email,
+        "database_host": "librebooking-db",
+        "database_name": "librebooking",
+        "database_user": "librebooking",
+        "database_password": env["LIBREBOOKING_DB_PASSWORD"],
+        "install_password": env["LIBREBOOKING_INSTALL_PASSWORD"],
+    }
 
 
 def config_plan(context: AgentContext, params: dict[str, Any]) -> dict[str, Any]:
@@ -559,6 +587,13 @@ CATALOG: dict[str, Operation] = {
             _update_call,
             params=(Param("service", re.compile("|".join(updates.UPDATABLE)), required=True),),
             summary="Back up, update one service to its pinned version, roll back on failure.",
+        ),
+        Operation(
+            "librebooking.setup_details",
+            DANGEROUS,
+            "system",
+            librebooking_setup_details,
+            summary="Show LibreBooking's setup credentials after password confirmation.",
         ),
         Operation(
             "matrix.users.list",

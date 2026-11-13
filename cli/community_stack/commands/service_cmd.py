@@ -13,6 +13,7 @@ from community_stack.commands.status_cmd import run_status
 from community_stack.config import ConfigError, load_config, validate_config
 from community_stack.config_edit import (
     ensure_facilmap_config,
+    ensure_librebooking_config,
     ensure_vikunja_config,
     set_value,
     write_in_place,
@@ -26,6 +27,8 @@ def _set_enabled(config_path: Path, service: str, enabled: bool) -> None:
         candidate = ensure_vikunja_config(original)
     elif service == "facilmap":
         candidate = ensure_facilmap_config(original)
+    elif service == "librebooking":
+        candidate = ensure_librebooking_config(original)
     else:
         raise ValueError(f"Enable/disable is not supported for {service}.")
     candidate = set_value(candidate, ("services", service, "enabled"), enabled)

@@ -193,12 +193,13 @@ uv run community-stack bridge disable --confirm
 |---|---|
 | 📋 [**Design Specification**](docs/DESIGN.md) | Architectural baseline, principles, and roadmap milestones |
 | 🏛️ [**System Architecture**](docs/architecture.md) | Four-layer architecture, profiles, and service topologies |
-| 🛡️ [**Threat Model**](docs/threat-model.md) | 10 threat vectors, mitigations, residual risks, and non-guarantees |
+| 🛡️ [**Threat Model**](docs/threat-model.md) | Threat vectors, mitigations, residual risks, and non-guarantees |
 | 🚀 [**Deployment Guide**](docs/deployment.md) | Step-by-step installation on clean Debian 12 / Ubuntu VPS |
 | 💾 [**Backup & Recovery Runbook**](docs/backup-restore.md) | Disaster recovery, off-host S3 backups, and restore drills |
 | 💬 [**WhatsApp Integration Guide**](docs/whatsapp-integration.md) | mautrix-whatsapp setup, allowlisted bridging, and privacy risks |
 | ✅ [**Vikunja Collaborative Tasks**](docs/vikunja.md) | Optional project/task management, operations, authentication, and recovery |
 | ✅ [**FacilMap Collaborative Maps**](docs/facilmap.md) | Optional collaborative mapping, bearer-link permissions, exports, and recovery |
+| ✅ [**LibreBooking Space Reservations**](docs/librebooking.md) | Optional room booking, approval workflow, calendar, and recovery |
 | 📡 [**Accessible Channels**](docs/accessible-channels.md) | Channel prototypes and evaluation for ActivityPub, email, SMS, and IVR |
 | 🌐 [**Multi-Host Resilience & Offline Continuity**](docs/multi-host-resilience.md) | Warm standby host provisioning, captive portals, and Meshtastic |
 | 📘 [**Operator Handbook**](docs/operations.md) | Daily maintenance, incident response runbooks, and decommissioning |
