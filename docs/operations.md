@@ -19,6 +19,7 @@ This handbook is written for volunteer infrastructure operators managing a live 
 | Safe upgrade | `uv run community-stack upgrade matrix` | Takes backup, pulls image, restarts |
 | Vikunja lifecycle | `uv run community-stack service restart vikunja` | Optional task service; see [Vikunja operations](vikunja.md) |
 | FacilMap lifecycle | `uv run community-stack service restart facilmap` | Optional maps service; see [FacilMap operations](facilmap.md) |
+| Field Map lifecycle | `uv run community-stack service restart field-map` | Optional field observations; see [Field Map operations](field-map.md) |
 | LibreBooking lifecycle | `uv run community-stack service restart librebooking` | Optional reservations; see [LibreBooking operations](librebooking.md) |
 | Draft announcement | `uv run community-stack announce draft -t "Title" -b "Body"` | Saves privately without dispatch |
 | Preview/publish | `uv run community-stack announce preview <id>` then `announce publish <id>` | Default output is local public HTML and feeds |

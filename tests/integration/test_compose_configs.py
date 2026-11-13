@@ -22,6 +22,7 @@ def test_compose_files_exist():
         "vikunja",
         "facilmap",
         "librebooking",
+        "field_map",
     }
     found_services = {f.parent.name for f in files}
     assert expected_services.issubset(found_services), (
@@ -132,6 +133,33 @@ def test_librebooking_database_and_application_are_private_and_pinned():
     assert "sed -i 's/^set -ex$/set -e/'" in dockerfile
 
 
+def test_field_map_database_and_application_are_private_and_pinned():
+    with open("services/field_map/docker-compose.yml", "r", encoding="utf-8") as stream:
+        compose = yaml.safe_load(stream)
+    database = compose["services"]["field_map-db"]
+    app = compose["services"]["field_map"]
+    assert database["image"] == "postgis/postgis:${FIELD_MAP_DATABASE_VERSION:-16-3.4}"
+    assert database["networks"] == ["field_map_internal"]
+    assert "ports" not in database
+    assert (
+        app["image"]
+        == "community-stack/field-map:${FIELD_MAP_VERSION:?Set FIELD_MAP_VERSION in .env}"
+    )
+    assert app["build"]["context"].startswith(
+        "https://github.com/leokeba/field-map.git#${FIELD_MAP_SOURCE_REF:"
+    )
+    assert "ports" not in app
+    assert set(app["networks"]) == {"proxy_net", "field_map_internal"}
+    assert app["depends_on"]["field_map-db"]["condition"] == "service_healthy"
+    assert database["healthcheck"]
+    assert app["healthcheck"]
+    assert compose["networks"]["field_map_internal"]["internal"] is True
+    assert "../../${FIELD_MAP_UPLOADS_PATH:-data/field_map/uploads}:/data/uploads" in app["volumes"]
+    assert app["environment"]["ANONYMOUS_LINKS_ENABLED"] == (
+        "${FIELD_MAP_ANONYMOUS_LINKS_ENABLED:-true}"
+    )
+
+
 def test_admin_app_is_internal_and_has_no_host_ports():
     app_compose = Path("services/announcements/docker-compose.yml")
     with open(app_compose, "r", encoding="utf-8") as stream:
@@ -190,6 +218,7 @@ def test_caddyfile_exists_and_contains_routes():
     assert "handle /.well-known/matrix/client" in content
     assert "import /etc/caddy/vikunja.caddy" in content
     assert "import /etc/caddy/librebooking.caddy" in content
+    assert "import /etc/caddy/field_map.caddy" in content
     assert "reverse_proxy community_synapse:8008" in content
     assert "handle /admin*" in content
     assert "reverse_proxy community_announcements:8080" in content
@@ -226,3 +255,4 @@ def test_element_uses_the_generated_config_and_caddy_gets_domains():
     assert (
         "../../data/proxy/librebooking.caddy:/etc/caddy/librebooking.caddy:ro" in caddy["volumes"]
     )
+    assert "../../data/proxy/field_map.caddy:/etc/caddy/field_map.caddy:ro" in caddy["volumes"]

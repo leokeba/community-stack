@@ -66,6 +66,12 @@ it, set its hostname, and deploy it from **Admin → Services and settings**.
 Review its bearer-link permission model before enabling it; see the
 [FacilMap guide](facilmap.md).
 
+Field Map is an optional, separately maintained application with its own
+PostGIS database and photo storage. Enable it from **Admin → Services and
+settings** after adding the hostname's DNS record. Review its bearer-link and
+anonymous map creation settings before enabling it; see the
+[Field Map guide](field-map.md).
+
 LibreBooking is optional and disabled by default. Enable it from
 **Admin → Services and settings** after adding the booking hostname's DNS
 record. The admin console provisions its database and storage, and provides a

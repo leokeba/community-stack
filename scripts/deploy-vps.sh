@@ -65,6 +65,11 @@ LIBREBOOKING_DB_PASSWORD=compose-check \
 LIBREBOOKING_DB_ROOT_PASSWORD=compose-check \
 LIBREBOOKING_INSTALL_PASSWORD=compose-check \
 docker compose -f services/librebooking/docker-compose.yml config --quiet
+FIELD_MAP_DB_PASSWORD=compose-check \
+FIELD_MAP_VERSION=107595ae25d0ea197efb6ee8fddc29047bc6c623 \
+FIELD_MAP_SOURCE_REF=107595ae25d0ea197efb6ee8fddc29047bc6c623 \
+FIELD_MAP_ORIGIN=https://field-map.example.org \
+docker compose -f services/field_map/docker-compose.yml config --quiet
 
 printf 'Checking SSH, backup, and Docker prerequisites on %s...\n' "$target"
 ssh "${ssh_opts[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$target" bash -s -- "$remote_dir" <<'REMOTE'
@@ -136,13 +141,19 @@ from pathlib import Path
 import sys
 
 from community_stack.config import load_config
-from community_stack.provision import prepare_facilmap, prepare_librebooking, prepare_vikunja
+from community_stack.provision import (
+    prepare_facilmap,
+    prepare_field_map,
+    prepare_librebooking,
+    prepare_vikunja,
+)
 
 root = Path(sys.argv[1])
 config = load_config(root / "community-stack.yaml")
 prepare_vikunja(root, config, root / ".env")
 prepare_facilmap(root, config, root / ".env")
 prepare_librebooking(root, config, root / ".env")
+prepare_field_map(root, config, root / ".env")
 PY
 # Keep the bridge from syncing while its persistent config is migrated. The
 # helper preserves the existing login, secrets, and explicitly selected groups.
@@ -341,6 +352,7 @@ route_imports = [
     "import /etc/caddy/vikunja.caddy",
     "import /etc/caddy/facilmap.caddy",
     "import /etc/caddy/librebooking.caddy",
+    "import /etc/caddy/field_map.caddy",
 ]
 missing_imports = [entry for entry in route_imports if entry not in text]
 if missing_imports:
@@ -369,7 +381,7 @@ fi
 
 proxy_mounts="$("${docker_cmd[@]}" inspect community_proxy \
     --format '{{range .Mounts}}{{println .Destination}}{{end}}')"
-for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy; do
+for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy /etc/caddy/field_map.caddy; do
     if ! printf '%s\n' "$proxy_mounts" | grep -qx "$route"; then
         "${docker_cmd[@]}" logs --tail 80 community_proxy || true
         printf 'Caddy is missing the generated route mount: %s\n' "$route" >&2
@@ -415,7 +427,7 @@ compose_landing=(sudo -n docker compose -f "$project_dir/services/landing/docker
 proxy_mounts="$("${docker_cmd[@]}" inspect community_proxy \
     --format '{{range .Mounts}}{{println .Destination}}{{end}}')"
 missing_route=false
-for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy; do
+for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy /etc/caddy/field_map.caddy; do
     if ! printf '%s\n' "$proxy_mounts" | grep -qx "$route"; then
         missing_route=true
     fi
@@ -426,7 +438,7 @@ if [[ "$missing_route" == true ]]; then
         up -d --force-recreate --no-deps caddy
     proxy_mounts="$("${docker_cmd[@]}" inspect community_proxy \
         --format '{{range .Mounts}}{{println .Destination}}{{end}}')"
-    for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy; do
+    for route in /etc/caddy/vikunja.caddy /etc/caddy/facilmap.caddy /etc/caddy/librebooking.caddy /etc/caddy/field_map.caddy; do
         if ! printf '%s\n' "$proxy_mounts" | grep -qx "$route"; then
             "${docker_cmd[@]}" logs --tail 80 community_proxy || true
             printf 'Caddy is missing the generated route mount: %s\n' "$route" >&2

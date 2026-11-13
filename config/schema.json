@@ -508,6 +508,85 @@
               "type": "boolean"
             }
           }
+        },
+        "field_map": {
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$",
+              "default": "107595ae25d0ea197efb6ee8fddc29047bc6c623",
+              "description": "Pinned full Git commit from leokeba/field-map"
+            },
+            "hostname": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+              "description": "Public hostname; defaults to field-map.<domain.base>"
+            },
+            "tile_url": {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^https://[^\\s{}]+/.*\\{z\\}.*\\{x\\}.*\\{y\\}.*$",
+              "default": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+              "description": "Public HTTPS tile template; the app build embeds this URL"
+            },
+            "anonymous_links_enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Allow unauthenticated users to create maps"
+            },
+            "uploads_path": {
+              "type": "string",
+              "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+              "default": "data/field_map/uploads"
+            },
+            "database": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^[0-9]+-[0-9]+\\.[0-9]+$",
+                  "default": "16-3.4"
+                },
+                "data_path": {
+                  "type": "string",
+                  "pattern": "^data/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$",
+                  "default": "data/field_map/postgres"
+                },
+                "memory_limit": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*[MG]$",
+                  "default": "512M"
+                },
+                "cpu_limit": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 16,
+                  "default": 1
+                }
+              }
+            },
+            "memory_limit": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*[MG]$",
+              "default": "512M"
+            },
+            "cpu_limit": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 16,
+              "default": 1
+            }
+          }
         }
       }
     },

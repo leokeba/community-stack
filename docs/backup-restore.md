@@ -17,7 +17,7 @@ The Community Communications Stack is designed to survive total server loss, hos
 
 ### What is Backed Up
 Every snapshot created by `community-stack backup` captures:
-1. **Databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata. When FacilMap is enabled, `mariadb_facilmap.sql` contains its maps, settings, features, and calculated routes. When LibreBooking is enabled, `mariadb_librebooking.sql` contains its users, spaces, reservations, and application settings.
+1. **Databases:** `postgres_synapse.dump` contains Matrix Synapse state, accounts, joined rooms, key material, and messages. When Vikunja is enabled, `postgres_vikunja.dump` contains its projects, tasks, users, and application metadata. When FacilMap is enabled, `mariadb_facilmap.sql` contains its maps, settings, features, and calculated routes. When Field Map is enabled, `postgres_field_map.dump` contains its maps, layers, points, and photo metadata. When LibreBooking is enabled, `mariadb_librebooking.sql` contains its users, spaces, reservations, and application settings.
 2. **Persistent Storage (`data/`):**
    - Synapse configuration, media store, and signing keys (`data/matrix`).
    - Caddy certificates and ACME state (`data/caddy`).
@@ -28,6 +28,7 @@ Every snapshot created by `community-stack backup` captures:
    - Element Web branding and client configuration (`data/element`).
    - Vikunja attachments (`data/vikunja/files`). Its live PostgreSQL directory is excluded; it is backed up as a consistent database dump instead.
    - FacilMap cache (`data/facilmap/cache`). Its live MariaDB directory is excluded; map data is backed up with `mariadb-dump`.
+   - Field Map original photo uploads (`data/field_map/uploads`). Its live PostGIS directory is excluded; map data is backed up with `pg_dump`.
    - LibreBooking configuration, uploads, and logs (`data/librebooking/config`, `uploads`, and `logs`). Its live MariaDB directory is excluded; application data is backed up with `mariadb-dump`.
 3. **Deployment Configuration (`community-stack.yaml`):** Exact profile, domains, and service parameters.
 4. **Secrets (`.env`):** Database passwords, session keys, and registration secrets (restored with restricted `0600` permissions).
@@ -58,6 +59,11 @@ When LibreBooking is enabled, its application container is stopped while the
 MariaDB dump and persistent files are captured, then restarted. This keeps
 reservation changes and uploads aligned with the snapshot. A failed database
 dump or app restart fails the snapshot.
+
+When Field Map is enabled, its application container is stopped while the
+PostGIS dump and uploaded photos are captured, then restarted. This keeps point
+and photo changes aligned. A failed database dump or app restart fails the
+snapshot.
 
 ### Encryption
 

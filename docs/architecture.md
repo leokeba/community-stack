@@ -10,7 +10,7 @@ The Community Communications Stack is organized into four distinct architectural
 | - Matrix Homeserver (Synapse)    - Element Web Client                    |
 | - Public Landing Page            - Canonical Announcement Stream         |
 | - (Optional) Vikunja Tasks     - (Optional) FacilMap Maps               |
-| - (Optional) LibreBooking Space Reservations                            |
+| - (Optional) Field Map         - (Optional) LibreBooking Reservations    |
 +--------------------------------------------------------------------------+
                                      |
 +--------------------------------------------------------------------------+
@@ -58,6 +58,7 @@ Services are packaged as independent Docker Compose modules coordinated by the C
   [Caddy] <--- proxy_net ---> [Vikunja] ---> (vikunja_internal) [PostgreSQL]
   [Caddy] <--- proxy_net ---> [FacilMap] ---> (facilmap_internal) [MariaDB]
   [Caddy] <--- proxy_net ---> [LibreBooking] ---> (librebooking_internal) [MariaDB]
+  [Caddy] <--- proxy_net ---> [Field Map] ---> (field_map_internal) [PostGIS]
 ```
 
 - **`proxy_net` (Bridge):** Connects Caddy to the HTTP ports of Landing Page, Element Web, Announcements API, and Synapse client endpoints.
@@ -66,6 +67,7 @@ Services are packaged as independent Docker Compose modules coordinated by the C
 - **`vikunja_internal` (Internal Bridge, `internal: true`):** Connects Vikunja to its dedicated PostgreSQL database. The database is never attached to ingress or published on the host. Vikunja itself is an independent optional Compose project.
 - **`facilmap_internal` (Internal Bridge, `internal: true`):** Connects FacilMap to its dedicated MariaDB database. Only the app joins `proxy_net`; neither service publishes a host port. FacilMap is an independent optional Compose project.
 - **`librebooking_internal` (Internal Bridge, `internal: true`):** Connects LibreBooking to its dedicated MariaDB database. Only the app joins `proxy_net`; neither service publishes a host port. LibreBooking is an independent optional Compose project.
+- **`field_map_internal` (Internal Bridge, `internal: true`):** Connects Field Map to its dedicated PostGIS database. Only the app joins `proxy_net`; neither service publishes a host port. Field Map is maintained in a separate repository and built from a reviewed, pinned commit.
 
 ---
 
@@ -121,9 +123,16 @@ database credentials, and writable storage. Its native accounts and resource
 approval/calendar features are managed in LibreBooking itself; see
 [docs/librebooking.md](librebooking.md).
 
+Field Map is disabled by default. Its source commit, hostname, tile URL,
+anonymous map creation policy, PostGIS database, and photo path are configured
+under `services.field_map`. The admin console prepares its Caddy route and
+secret, builds the pinned source, and includes the database dump and photos in
+backups. It has no integrated Community Stack accounts; map share URLs are
+bearer credentials. See [docs/field-map.md](field-map.md).
+
 ## 5. Collaborative Application Operations
 
-Vikunja, FacilMap, and LibreBooking share a deliberately small operational catalog in
+Vikunja, FacilMap, Field Map, and LibreBooking share a deliberately small operational catalog in
 `cli/community_stack/collaborative_apps.py`. It defines their CLI aliases,
 display names, default public hostnames, managed container names, and database
 backup metadata. Service lookup, status and URL reporting, database-port

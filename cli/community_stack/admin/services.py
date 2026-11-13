@@ -32,10 +32,20 @@ def register_services(
         message: dict[str, Any] | None = None,
         status_code: int = 200,
     ) -> HTMLResponse:
-        values, status, components, vikunja_url, facilmap_url, librebooking_url, error = (
+        (
+            values,
+            status,
+            components,
+            vikunja_url,
+            facilmap_url,
+            librebooking_url,
+            field_map_url,
+            error,
+        ) = (
             None,
             None,
             [],
+            None,
             None,
             None,
             None,
@@ -52,6 +62,7 @@ def register_services(
                 vikunja_url = config.get("vikunja_url")
                 facilmap_url = config.get("facilmap_url")
                 librebooking_url = config.get("librebooking_url")
+                field_map_url = config.get("field_map_url")
                 status = await run_in_threadpool(agent.call, "status.get", session["username"])
                 components = (
                     await run_in_threadpool(agent.call, "services.versions", session["username"])
@@ -72,6 +83,7 @@ def register_services(
                 vikunja_url=vikunja_url,
                 facilmap_url=facilmap_url,
                 librebooking_url=librebooking_url,
+                field_map_url=field_map_url,
                 timezones=sorted(available_timezones()),
                 error=error,
                 **({"flash": message} if message else {}),

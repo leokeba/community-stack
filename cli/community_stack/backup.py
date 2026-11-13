@@ -128,6 +128,30 @@ def dump_vikunja_database(target_file: Path) -> bool:
         return False
 
 
+def dump_field_map_database(target_file: Path) -> bool:
+    """Create an application-consistent custom-format PostGIS dump."""
+    if not is_docker_available():
+        return False
+    cmd = [
+        "docker",
+        "exec",
+        COLLABORATIVE_APPS_BY_KEY["field_map"].database_container_name,
+        "pg_dump",
+        "-U",
+        "fieldmap",
+        "-d",
+        "fieldmap",
+        "-F",
+        "c",
+    ]
+    try:
+        with open(target_file, "wb") as target:
+            result = subprocess.run(cmd, stdout=target, stderr=subprocess.PIPE, check=False)
+        return result.returncode == 0 and target_file.stat().st_size > 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
 def dump_mariadb_database(app: CollaborativeApp, target_file: Path) -> bool:
     """Create a MariaDB logical dump without exposing the database password in argv."""
     if not is_docker_available():
@@ -168,6 +192,8 @@ def dump_librebooking_database(target_file: Path) -> bool:
 def dump_collaborative_database(app: CollaborativeApp, target_file: Path) -> bool:
     if app.key == "vikunja":
         return dump_vikunja_database(target_file)
+    if app.key == "field_map":
+        return dump_field_map_database(target_file)
     if app.key == "facilmap":
         return dump_facilmap_database(target_file)
     if app.key == "librebooking":
@@ -467,6 +493,7 @@ class BackupEngine:
                 "librebooking_dumped": COLLABORATIVE_APPS_BY_KEY["librebooking"].is_enabled(
                     self.config
                 ),
+                "field_map_dumped": COLLABORATIVE_APPS_BY_KEY["field_map"].is_enabled(self.config),
             }
             manifest_file = staging_dir / "manifest.json"
             manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

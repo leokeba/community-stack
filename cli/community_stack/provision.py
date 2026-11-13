@@ -463,6 +463,111 @@ def prepare_librebooking(project_dir: Path, config: dict, env_path: Path) -> str
     return f"Prepared LibreBooking storage and deployment settings for https://{hostname}/Web/."
 
 
+def prepare_field_map(project_dir: Path, config: dict, env_path: Path) -> str | None:
+    """Provision Field Map's route, stable database credentials, and persistent storage."""
+    settings = config.get("services", {}).get("field_map", {})
+    root = project_dir.resolve()
+    hostname = settings.get("hostname") or f"field-map.{config['domain']['base']}"
+    route_path = root / "data" / "proxy" / "field_map.caddy"
+    if settings.get("enabled", False):
+        route_content = (
+            f"{hostname} {{\n"
+            "    encode zstd gzip\n"
+            "    request_body {\n"
+            "        max_size 12MB\n"
+            "    }\n"
+            "    reverse_proxy community_field_map:8000\n"
+            "}\n"
+        )
+    else:
+        route_content = "# Field Map is disabled; no public route is configured.\n"
+    route_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if not route_path.is_file() or route_path.read_text(encoding="utf-8") != route_content:
+        route_path.write_text(route_content, encoding="utf-8")
+        route_path.chmod(0o644)
+
+    if not settings.get("enabled", False):
+        return None
+
+    database = settings.get("database", {})
+    uploads_path = root / settings.get("uploads_path", "data/field_map/uploads")
+    database_path = root / database.get("data_path", "data/field_map/postgres")
+    for path in (uploads_path, database_path):
+        if not path.resolve().is_relative_to(root):
+            raise ProvisionError(
+                "Field Map persistent paths must remain inside the project directory."
+            )
+
+    env_values = parse_env_file(env_path)
+    required = ("FIELD_MAP_DB_PASSWORD",)
+    missing = [key for key in required if not env_values.get(key)]
+    if missing:
+        try:
+            existing_data = (database_path / "PG_VERSION").is_file()
+            if uploads_path.is_dir():
+                existing_data = existing_data or any(uploads_path.iterdir())
+        except OSError as exc:
+            raise ProvisionError(
+                "Field Map credentials are missing and persistent storage cannot be inspected. "
+                "Restore FIELD_MAP_DB_PASSWORD before starting it."
+            ) from exc
+        if existing_data:
+            raise ProvisionError(
+                "Field Map database credentials are missing from .env while persistent data "
+                "exists. Restore FIELD_MAP_DB_PASSWORD before starting it."
+            )
+
+    generated = {key: generate_secret(32) for key in missing}
+    stack_uid = env_values.get("COMMUNITY_STACK_UID") or str(
+        os.getuid() if hasattr(os, "getuid") else 1000
+    )
+    stack_gid = env_values.get("COMMUNITY_STACK_GID") or str(
+        os.getgid() if hasattr(os, "getgid") else 1000
+    )
+    if not stack_uid.isdigit() or not stack_gid.isdigit():
+        raise ProvisionError("COMMUNITY_STACK_UID and COMMUNITY_STACK_GID must be numeric.")
+    values = {
+        **generated,
+        "FIELD_MAP_VERSION": settings.get("version", "107595ae25d0ea197efb6ee8fddc29047bc6c623"),
+        "FIELD_MAP_SOURCE_REF": settings.get("version", "107595ae25d0ea197efb6ee8fddc29047bc6c623"),
+        "FIELD_MAP_DOMAIN": hostname,
+        "FIELD_MAP_ORIGIN": f"https://{hostname}",
+        "FIELD_MAP_TILE_URL": settings.get(
+            "tile_url", "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        ),
+        "FIELD_MAP_ANONYMOUS_LINKS_ENABLED": str(
+            settings.get("anonymous_links_enabled", True)
+        ).lower(),
+        "FIELD_MAP_UPLOADS_PATH": settings.get("uploads_path", "data/field_map/uploads"),
+        "FIELD_MAP_DATABASE_DATA_PATH": database.get("data_path", "data/field_map/postgres"),
+        "FIELD_MAP_DATABASE_VERSION": database.get("version", "16-3.4"),
+        "FIELD_MAP_MEMORY_LIMIT": settings.get("memory_limit", "512M"),
+        "FIELD_MAP_CPU_LIMIT": str(settings.get("cpu_limit", 1)),
+        "FIELD_MAP_DATABASE_MEMORY_LIMIT": database.get("memory_limit", "512M"),
+        "FIELD_MAP_DATABASE_CPU_LIMIT": str(database.get("cpu_limit", 1)),
+        "FIELD_MAP_UID": stack_uid,
+        "FIELD_MAP_GID": stack_gid,
+    }
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    if not env_path.exists():
+        env_path.touch(mode=0o600)
+    set_env_values(env_path, values)
+    if os.name == "posix":
+        env_path.chmod(0o600)
+    try:
+        uploads_path.mkdir(mode=0o770, parents=True, exist_ok=True)
+        if os.name == "posix":
+            gid = int(stack_gid)
+            if uploads_path.stat().st_gid != gid:
+                os.chown(uploads_path, -1, gid)
+            uploads_path.chmod(0o770)
+        database_path.mkdir(mode=0o750, parents=True, exist_ok=True)
+    except (OSError, ValueError) as exc:
+        raise ProvisionError(f"Could not prepare Field Map storage: {exc}") from exc
+
+    return f"Prepared Field Map storage and deployment settings for https://{hostname}/."
+
+
 def _bridge_secrets(env_path: Path, spec: BridgeSpec, create_missing: bool) -> dict[str, str]:
     """The bridge's appservice tokens, kept in .env under its own prefix."""
     keys = (f"{spec.secret_prefix}_AS_TOKEN", f"{spec.secret_prefix}_HS_TOKEN")
@@ -670,6 +775,8 @@ def prepare_service(
         return prepare_facilmap(project_dir, config, env_path)
     if service == "librebooking":
         return prepare_librebooking(project_dir, config, env_path)
+    if service == "field_map":
+        return prepare_field_map(project_dir, config, env_path)
     if service == "safemode":
         from community_stack.safemode.provision import prepare_safemode
 

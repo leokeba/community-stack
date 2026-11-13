@@ -75,6 +75,9 @@ def get_required_secrets(config: dict[str, Any]) -> list[str]:
     if services.get("facilmap", {}).get("enabled", False):
         required.extend(["FACILMAP_DB_PASSWORD", "FACILMAP_DB_ROOT_PASSWORD"])
 
+    if services.get("field_map", {}).get("enabled", False):
+        required.append("FIELD_MAP_DB_PASSWORD")
+
     backups = operations.get("backups", {})
     if backups.get("enabled", False):
         required.append("RESTIC_PASSWORD")

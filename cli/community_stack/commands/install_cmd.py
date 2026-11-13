@@ -39,7 +39,7 @@ def run_install(
     services_root = get_services_dir()
     env_p = Path(env_path).resolve()
     route_changes = {}
-    for optional_service in ("vikunja", "facilmap", "librebooking"):
+    for optional_service in ("vikunja", "facilmap", "librebooking", "field_map"):
         route_path = (
             Path(config_path).resolve().parent / "data" / "proxy" / f"{optional_service}.caddy"
         )
@@ -114,7 +114,7 @@ def run_install(
         if services_cfg.get(bridge_service, {}).get("enabled", False):
             services_to_deploy.append(bridge_service)
 
-    for optional_service in ("vikunja", "facilmap", "librebooking"):
+    for optional_service in ("vikunja", "facilmap", "librebooking", "field_map"):
         if services_cfg.get(optional_service, {}).get("enabled", False):
             services_to_deploy.append(optional_service)
 
@@ -144,9 +144,12 @@ def run_install(
             return 1
         if prepared:
             print(f"  {prepared}")
+        compose_args = ["up", "-d", "--remove-orphans"]
+        if svc == "field_map":
+            compose_args.insert(-1, "--build")
         res = docker.run_compose(
             project_dir=svc_dir,
-            args=["up", "-d", "--remove-orphans"],
+            args=compose_args,
             env_file=env_p,
             capture_output=False,
         )

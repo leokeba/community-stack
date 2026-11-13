@@ -10,6 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -20,6 +21,7 @@ from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.config import ConfigError, validate_config
 from community_stack.config_edit import (
     ensure_facilmap_config,
+    ensure_field_map_config,
     ensure_librebooking_config,
     ensure_vikunja_config,
     get_value,
@@ -91,6 +93,31 @@ class Setting:
         if self.kind == "version":
             if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+", text):
                 raise SettingsError(f"{self.label}: enter a pinned app-container release tag.")
+            return text
+        if self.kind == "git_ref":
+            if not re.fullmatch(r"[a-f0-9]{40}", text):
+                raise SettingsError(f"{self.label}: enter a full lowercase Git commit SHA.")
+            return text
+        if self.kind == "tile_url":
+            try:
+                parsed = urlsplit(text)
+                hostname = parsed.hostname
+            except ValueError:
+                parsed = None
+                hostname = None
+            if (
+                parsed is None
+                or parsed.scheme != "https"
+                or not hostname
+                or parsed.username
+                or parsed.password
+                or parsed.fragment
+                or any(char.isspace() for char in text)
+                or not all(f"{{{axis}}}" in text for axis in ("z", "x", "y"))
+            ):
+                raise SettingsError(
+                    f"{self.label}: enter an HTTPS tile URL containing {{z}}, {{x}}, and {{y}}."
+                )
             return text
         try:
             ZoneInfo(text)
@@ -244,6 +271,53 @@ SETTINGS: dict[str, Setting] = {
             restart_service="facilmap",
         ),
         Setting(
+            "services.field_map.enabled",
+            "Field Map mobile mapping",
+            "Deploy Field Map at its public hostname. Maps are private by default, but share "
+            "URLs are bearer credentials. Confirm the anonymous-map setting before enabling it.",
+            "bool",
+            False,
+            service="field_map",
+            dangerous=True,
+        ),
+        Setting(
+            "services.field_map.hostname",
+            "Field Map public hostname",
+            "The HTTPS hostname routed to Field Map. Add its DNS record before enabling the service.",
+            "hostname",
+            "",
+            restart_service="field_map",
+        ),
+        Setting(
+            "services.field_map.tile_url",
+            "Field Map tile URL",
+            "HTTPS tile template containing {z}, {x}, and {y}. The URL is embedded in the "
+            "public frontend; use a provider that permits your expected traffic.",
+            "tile_url",
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            restart_service="field_map",
+        ),
+        Setting(
+            "services.field_map.anonymous_links_enabled",
+            "Field Map anonymous map creation",
+            "Anyone who can reach Field Map can create maps when this is on. Share links are "
+            "bearer credentials; disable this setting unless anonymous creation is intended.",
+            "bool",
+            True,
+            restart_service="field_map",
+            dangerous=True,
+        ),
+        Setting(
+            "services.field_map.version",
+            "Field Map source commit",
+            "Pinned full Git commit SHA from leokeba/field-map. Changing it rebuilds the app "
+            "after a safety backup.",
+            "git_ref",
+            "107595ae25d0ea197efb6ee8fddc29047bc6c623",
+            restart_service="field_map",
+            dangerous=True,
+        ),
+        Setting(
             "services.librebooking.enabled",
             "LibreBooking space reservations",
             "Deploy booking.<community domain> with its own accounts and approval calendar. "
@@ -322,6 +396,11 @@ def current_values(config: dict, env: dict[str, str] | None = None) -> dict[str,
         ("services", "librebooking", "hostname"),
         f"booking.{get_value(config, ('domain', 'base'), 'example.org')}",
     )
+    values["services.field_map.hostname"] = get_value(
+        config,
+        ("services", "field_map", "hostname"),
+        f"field-map.{get_value(config, ('domain', 'base'), 'example.org')}",
+    )
     return values
 
 
@@ -347,6 +426,11 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     if any(key.startswith("services.librebooking.") for key in effective):
         try:
             new_text = ensure_librebooking_config(new_text)
+        except (TypeError, ValueError) as exc:
+            raise SettingsError(str(exc)) from exc
+    if any(key.startswith("services.field_map.") for key in effective):
+        try:
+            new_text = ensure_field_map_config(new_text)
         except (TypeError, ValueError) as exc:
             raise SettingsError(str(exc)) from exc
     for key, value in effective.items():
@@ -388,6 +472,23 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
     ):
         warnings.append("Matrix announcements will fail while Matrix is off.")
     proposed_config = yaml.safe_load(new_text)
+    field_map = proposed_config.get("services", {}).get("field_map", {})
+    facilmap = proposed_config.get("services", {}).get("facilmap", {})
+    field_map_host = field_map.get("hostname") or (
+        f"field-map.{proposed_config.get('domain', {}).get('base', 'example.org')}"
+    )
+    facilmap_host = facilmap.get("hostname") or (
+        f"maps.{proposed_config.get('domain', {}).get('base', 'example.org')}"
+    )
+    if (
+        field_map.get("enabled")
+        and facilmap.get("enabled")
+        and field_map_host.casefold() == facilmap_host.casefold()
+    ):
+        raise SettingsError(
+            "Field Map and FacilMap cannot use the same hostname. Disable FacilMap before "
+            "moving its hostname to Field Map."
+        )
     if effective.get("services.vikunja.enabled") is True:
         hostname = get_value(
             proposed_config,
@@ -441,6 +542,29 @@ def build_plan(context, raw_changes: Any) -> dict[str, Any]:
         warnings.append(
             "Anyone can create a LibreBooking account while self-registration is enabled. "
             "Turn it off immediately after registering the initial administrator."
+        )
+    if effective.get("services.field_map.enabled") is True or (
+        any(key.startswith("services.field_map.") for key in effective) and field_map.get("enabled")
+    ):
+        warnings.append(
+            f"Field Map will be deployed at https://{field_map_host}/. Map share URLs are "
+            "bearer credentials. Its photos and locations may be sensitive; do not add "
+            "sensitive observations to this test instance."
+        )
+    if effective.get("services.field_map.anonymous_links_enabled") is True or (
+        field_map.get("enabled") and field_map.get("anonymous_links_enabled", True)
+    ):
+        warnings.append(
+            "Anyone who can reach Field Map can create maps and consume storage while "
+            "anonymous map creation is enabled."
+        )
+    if field_map.get("tile_url") == "https://tile.openstreetmap.org/{z}/{x}/{y}.png" and (
+        effective.get("services.field_map.enabled") is True
+        or "services.field_map.tile_url" in effective
+    ):
+        warnings.append(
+            "The OpenStreetMap tile URL is for low-volume testing only; use an appropriate "
+            "tile provider before production."
         )
 
     diff = "".join(
@@ -522,7 +646,7 @@ def set_service(context, service: str, running: bool) -> None:
     route_path = context.project_dir / "data" / "proxy" / f"{service}.caddy"
     previous_route = (
         route_path.read_text(encoding="utf-8")
-        if service in ("vikunja", "facilmap", "librebooking") and route_path.is_file()
+        if service in ("vikunja", "facilmap", "librebooking", "field_map") and route_path.is_file()
         else None
     )
     if running:
@@ -532,7 +656,7 @@ def set_service(context, service: str, running: bool) -> None:
             "bridge_net"
         ):
             raise SettingsError("Docker could not create the isolated Matrix appservice network.")
-    if running or service in ("vikunja", "facilmap", "librebooking"):
+    if running or service in ("vikunja", "facilmap", "librebooking", "field_map"):
         try:
             config = yaml.safe_load(context.config_path.read_text(encoding="utf-8")) or {}
             prepare_service(context.project_dir, service, config, context.env_path)
@@ -565,7 +689,7 @@ def set_service(context, service: str, running: bool) -> None:
         wait_for(context, "matrix", True)
     if running:
         args = ["up", "-d", "--remove-orphans"]
-        if service == "librebooking":
+        if service in ("librebooking", "field_map"):
             args.insert(-1, "--build")
     else:
         args = ["down"]
@@ -578,7 +702,7 @@ def set_service(context, service: str, running: bool) -> None:
     if result.returncode != 0:
         raise SettingsError(f"Docker could not {'start' if running else 'stop'} {service}.")
     wait_for(context, service, running)
-    if service in ("vikunja", "facilmap", "librebooking"):
+    if service in ("vikunja", "facilmap", "librebooking", "field_map"):
         current_route = route_path.read_text(encoding="utf-8") if route_path.is_file() else None
         if previous_route != current_route:
             try:
@@ -639,21 +763,27 @@ def apply_changes(context, raw_changes: Any) -> dict[str, Any]:
                 if item[2] == "whatsapp_bridge" and item[1]
                 else 0
                 if item[2] == "whatsapp_bridge" and not item[1]
+                else 2
+                if item[2] in ("facilmap", "field_map") and not item[1]
+                else 3
+                if item[2] in ("facilmap", "field_map") and item[1]
                 else 1
             ),
         )
+        previous_config = yaml.safe_load(plan["_old_text"]) or {}
         for key, value, service in ordered_service_changes:
             if service:
-                attempted.append((service, bool(value)))
+                was_enabled = get_value(previous_config, ("services", service, "enabled"), False)
+                attempted.append((service, bool(was_enabled)))
                 set_service(context, service, bool(value))
                 steps.append(f"{SETTINGS[key].label} is now {'running' if value else 'stopped'}.")
     except SettingsError as exc:
         write_in_place(context.config_path, plan["_old_text"])
         restore_errors = []
         # Put every touched service back, the one that failed included, newest first.
-        for service, value in reversed(attempted):
+        for service, was_enabled in reversed(attempted):
             try:
-                set_service(context, service, not value)
+                set_service(context, service, was_enabled)
             except SettingsError as restore_exc:
                 restore_errors.append(str(restore_exc))
         message = f"{exc} The previous configuration was restored."

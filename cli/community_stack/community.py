@@ -146,6 +146,7 @@ def load_profile(config: dict[str, Any], domain_web: str | None = None) -> Commu
     for key, label, description, prefix in (
         ("vikunja", "Vikunja", "Coordinate tasks and shared projects.", "tasks"),
         ("facilmap", "FacilMap", "Explore and share community maps.", "maps"),
+        ("field_map", "Field Map", "Collect location-based observations and photos.", "field-map"),
     ):
         settings = services.get(key, {})
         if settings.get("enabled", False):

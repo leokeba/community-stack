@@ -28,7 +28,7 @@
   </select>
   {% elif setting.kind == "int" %}
   <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="number" min="{{ setting.minimum }}" max="{{ setting.maximum }}" value="{{ values[setting.key] }}" required>
-  {% elif setting.kind == "hostname" %}
+  {% elif setting.kind in ("hostname", "tile_url", "git_ref", "version") %}
   <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" value="{{ values[setting.key] }}" required>
   {% else %}
   <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" list="timezones" value="{{ values[setting.key] }}" required>
@@ -43,6 +43,9 @@
 {% endif %}
 {% if values.get("services.facilmap.enabled") and facilmap_url %}
 <p class="notice" role="status">FacilMap is enabled. <a href="{{ facilmap_url }}" target="_blank" rel="noopener noreferrer">Open FacilMap</a>. It has no user accounts: map links are bearer credentials, and anyone who reaches the service can create maps. Do not store sensitive locations.</p>
+{% endif %}
+{% if values.get("services.field_map.enabled") and field_map_url %}
+<p class="notice" role="status">Field Map is enabled. <a href="{{ field_map_url }}" target="_blank" rel="noopener noreferrer">Open Field Map</a>. Map links are bearer credentials. Anonymous map creation is {{ "on" if values.get("services.field_map.anonymous_links_enabled") else "off" }}; when on, anyone who reaches the service can create maps. Treat precise locations and photos as sensitive.</p>
 {% endif %}
 {% if values.get("services.librebooking.enabled") and librebooking_url %}
 <div class="notice" role="status">

@@ -40,6 +40,12 @@ def test_whatsapp_appservice_tokens_are_provisioned_automatically():
     assert "WHATSAPP_HS_TOKEN" not in required
 
 
+def test_field_map_requires_its_database_secret_when_enabled():
+    config = {"services": {"field_map": {"enabled": True}}}
+
+    assert "FIELD_MAP_DB_PASSWORD" in get_required_secrets(config)
+
+
 def test_get_required_secrets_includes_configured_matrix_announcement_token():
     config = {
         "services": {

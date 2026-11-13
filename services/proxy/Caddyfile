@@ -102,6 +102,7 @@
 import /etc/caddy/vikunja.caddy
 import /etc/caddy/facilmap.caddy
 import /etc/caddy/librebooking.caddy
+import /etc/caddy/field_map.caddy
 
 # Federation is served on 443 via /.well-known/matrix/server delegation. Do not
 # add a bare ":8448" site: it has no hostname, so Caddy would serve it over

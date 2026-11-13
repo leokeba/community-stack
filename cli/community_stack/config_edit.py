@@ -56,6 +56,21 @@ LIBREBOOKING_DEFAULTS = """  librebooking:
     cpu_limit: 1
 """
 
+FIELD_MAP_DEFAULTS = """  field_map:
+    enabled: false
+    version: "107595ae25d0ea197efb6ee8fddc29047bc6c623"
+    tile_url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    anonymous_links_enabled: true
+    uploads_path: "data/field_map/uploads"
+    database:
+      version: "16-3.4"
+      data_path: "data/field_map/postgres"
+      memory_limit: "512M"
+      cpu_limit: 1
+    memory_limit: "512M"
+    cpu_limit: 1
+"""
+
 
 def render_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -264,6 +279,31 @@ def ensure_librebooking_config(text: str) -> str:
             insert_at = index
             break
     lines.insert(insert_at, LIBREBOOKING_DEFAULTS)
+    return "".join(lines)
+
+
+def ensure_field_map_config(text: str) -> str:
+    """Add Field Map defaults to a legacy config without reserializing operator comments."""
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+        raise TypeError("Configuration must contain a services mapping.")
+    if "field_map" in data["services"]:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    services_index = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
+        None,
+    )
+    if services_index is None:
+        raise ValueError("Configuration must contain a top-level services mapping.")
+    insert_at = len(lines)
+    for index in range(services_index + 1, len(lines)):
+        line = lines[index]
+        if line and not line.startswith((" ", "\t", "#", "\n")):
+            insert_at = index
+            break
+    lines.insert(insert_at, FIELD_MAP_DEFAULTS)
     return "".join(lines)
 
 

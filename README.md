@@ -199,6 +199,7 @@ uv run community-stack bridge disable --confirm
 | 💬 [**WhatsApp Integration Guide**](docs/whatsapp-integration.md) | mautrix-whatsapp setup, allowlisted bridging, and privacy risks |
 | ✅ [**Vikunja Collaborative Tasks**](docs/vikunja.md) | Optional project/task management, operations, authentication, and recovery |
 | ✅ [**FacilMap Collaborative Maps**](docs/facilmap.md) | Optional collaborative mapping, bearer-link permissions, exports, and recovery |
+| ✅ [**Field Map**](docs/field-map.md) | Optional mobile field observations, photos, access limits, and recovery |
 | ✅ [**LibreBooking Space Reservations**](docs/librebooking.md) | Optional room booking, approval workflow, calendar, and recovery |
 | 📡 [**Accessible Channels**](docs/accessible-channels.md) | Channel prototypes and evaluation for ActivityPub, email, SMS, and IVR |
 | 🌐 [**Multi-Host Resilience & Offline Continuity**](docs/multi-host-resilience.md) | Warm standby host provisioning, captive portals, and Meshtastic |

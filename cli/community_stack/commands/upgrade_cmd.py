@@ -75,7 +75,7 @@ def run_upgrade(
     env_p = Path(env_path).resolve()
 
     # Step 2: Pull registry images or build the local publishing application.
-    is_local_app = dir_name in ("announcements", "librebooking")
+    is_local_app = dir_name in ("announcements", "librebooking", "field_map")
     if is_local_app:
         print(f"[2/3] Building the local {service} image...")
     else:

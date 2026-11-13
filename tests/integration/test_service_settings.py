@@ -165,6 +165,33 @@ def test_invalid_changes_are_explained(project, changes, message):
         agent_settings.build_plan(context(root), changes)
 
 
+def test_field_map_rejects_an_invalid_tile_template_and_git_ref(project):
+    root, _ = project
+    with pytest.raises(agent_settings.SettingsError, match="HTTPS tile URL"):
+        agent_settings.build_plan(
+            context(root), {"services.field_map.tile_url": "http://tiles.example.org/{z}/{x}/{y}"}
+        )
+    with pytest.raises(agent_settings.SettingsError, match="full lowercase Git commit SHA"):
+        agent_settings.build_plan(context(root), {"services.field_map.version": "main"})
+
+
+def test_field_map_cannot_share_a_hostname_with_enabled_facilmap(project):
+    root, _ = project
+    config_path = root / "community-stack.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["services"]["facilmap"].update(enabled=True, hostname="maps.example.org")
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(agent_settings.SettingsError, match="Disable FacilMap"):
+        agent_settings.build_plan(
+            context(root),
+            {
+                "services.field_map.enabled": "true",
+                "services.field_map.hostname": "maps.example.org",
+            },
+        )
+
+
 def test_restic_encryption_needs_restic_on_the_server(project, monkeypatch):
     root, _ = project
     monkeypatch.setattr(agent_settings.shutil, "which", lambda name: None)
@@ -429,6 +456,48 @@ def test_console_provisions_and_deploys_facilmap(console):
     settings_page = client.get("/admin/services")
     assert 'href="https://maps.example.org/"' in settings_page.text
     assert "anyone who reaches the service can create maps" in settings_page.text
+
+
+def test_console_provisions_and_deploys_field_map(console, project):
+    root, client = console
+    _, fake = project
+    page = client.get("/admin/services")
+    assert "Field Map mobile mapping" in page.text
+    values = {
+        **form_values(page),
+        "setting:services.field_map.enabled": "true",
+        "setting:services.field_map.hostname": "maps.example.org",
+    }
+
+    review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
+    assert review.status_code == 200
+    assert "https://maps.example.org/" in review.text
+    assert "bearer credentials" in review.text
+    assert "anyone who can reach field map can create maps" in review.text.lower()
+    assert "low-volume testing only" in review.text
+    assert "Confirm with your password" in review.text
+
+    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
+    applied = client.post(
+        "/admin/services/apply",
+        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+    )
+    assert applied.status_code == 200
+    assert "Changes applied" in applied.text
+
+    config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
+    assert config["services"]["field_map"]["enabled"] is True
+    assert config["services"]["field_map"]["anonymous_links_enabled"] is True
+    env = (root / ".env").read_text(encoding="utf-8")
+    assert "FIELD_MAP_DB_PASSWORD=" in env
+    assert "FIELD_MAP_SOURCE_REF=107595ae25d0ea197efb6ee8fddc29047bc6c623" in env
+    route = (root / "data/proxy/field_map.caddy").read_text(encoding="utf-8")
+    assert "maps.example.org" in route
+
+    settings_page = client.get("/admin/services")
+    assert 'href="https://maps.example.org/"' in settings_page.text
+    assert "anonymous map creation is on" in settings_page.text.lower()
+    assert any(service == "field_map" and "--build" in args for service, args in fake.calls)
 
 
 def test_console_provisions_librebooking_and_shows_setup_secrets_once(console, project):

@@ -124,6 +124,22 @@ def run_plan(
     else:
         print("  [DISABLED] FacilMap (not deployed)")
 
+    field_map_cfg = services.get("field_map", {})
+    if field_map_cfg.get("enabled", False):
+        hostname = field_map_cfg.get("hostname") or f"field-map.{domain.get('base')}"
+        print(
+            f"  [ENABLED]  Field Map (source commit {field_map_cfg.get('version', 'not configured')})"
+        )
+        print(f"             - URL: https://{hostname}/")
+        print("             - Database: dedicated PostGIS (private internal network)")
+        print("             - Map share URLs are bearer credentials.")
+        if field_map_cfg.get("anonymous_links_enabled", True):
+            print("             - Anonymous map creation: enabled")
+        if field_map_cfg.get("tile_url") == "https://tile.openstreetmap.org/{z}/{x}/{y}.png":
+            print("             - OpenStreetMap tiles: low-volume testing only")
+    else:
+        print("  [DISABLED] Field Map (not deployed)")
+
     print("\n--- OPERATIONS & PERSISTENCE ---")
     backups_cfg = operations.get("backups", {})
     if backups_cfg.get("enabled"):

@@ -74,6 +74,20 @@ services:
     logs_path: "data/librebooking/logs"
     memory_limit: "512M"
     cpu_limit: 1
+  field_map:
+    enabled: false
+    version: "107595ae25d0ea197efb6ee8fddc29047bc6c623"
+    # hostname: "field-map.example.org" # defaults to field-map.<domain.base>
+    tile_url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    anonymous_links_enabled: true
+    uploads_path: "data/field_map/uploads"
+    database:
+      version: "16-3.4"
+      data_path: "data/field_map/postgres"
+      memory_limit: "512M"
+      cpu_limit: 1
+    memory_limit: "512M"
+    cpu_limit: 1
 
 operations:
   backups:

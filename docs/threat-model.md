@@ -130,10 +130,16 @@ The Community Communications Stack is designed for public movements and communit
   - Database and installer credentials are only returned through an authenticated, password-confirmed, non-cacheable admin response. The database root password is never returned, and the derived image disables upstream shell xtrace before it can log environment values.
   - LibreBooking's application and database have no host-published ports; MariaDB is isolated on an internal network. Backups use a logical database dump and preserve `.env`.
 
+### 2.13 Field Map Location, Link, and Resource Exposure
+- **Threat:** A shared map link is forwarded, a photo reveals metadata, or anonymous visitors create maps and uploads.
+- **Impact:** Disclosure of sensitive coordinates or photos, unauthorized edits, or exhausted storage.
+- **Mitigation:** The admin review warns that map links are bearer credentials and that anonymous map creation is public. Map creation can be disabled; photos are protected by map permissions, uploads are size-limited, and backups include both PostGIS data and photo files. Use an appropriate tile provider and restrict sensitive test data.
+- **Residual Risk:** The app has no integrated Community Stack accounts or site-wide access gate. Anonymous map creation is enabled in the initial configuration for testing, and original uploads may retain EXIF metadata.
+
 ---
 
 ## 3. Explicit Operational Assumptions & Non-Guarantees
 
 1. **Not an Anonymous Whistleblowing Platform:** This stack is built for open community coordination. It does not replace SecureDrop or Tor-based anonymity tools.
-2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp, and optional Vikunja, FacilMap, and LibreBooking). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
+2. **Upstream Software Dependencies:** We rely on upstream projects (Synapse, Element, Caddy, Restic, mautrix-whatsapp, and optional Vikunja, FacilMap, Field Map, and LibreBooking). Security patches released by upstream must be applied promptly using `community-stack upgrade`.
 3. **Physical Host Security:** Host security depends on proper hardware hygiene, strong SSH keys, and encrypted storage.

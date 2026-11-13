@@ -68,6 +68,16 @@ COLLABORATIVE_APPS = (
         database_port=3306,
         url_suffix="/Web/",
     ),
+    CollaborativeApp(
+        key="field_map",
+        label="Field Map",
+        hostname_prefix="field-map",
+        aliases=("field-map", "fieldmap"),
+        database_dump_file="postgres_field_map.dump",
+        database_path_default="data/field_map/postgres",
+        database_engine="PostgreSQL/PostGIS",
+        database_port=5432,
+    ),
 )
 
 COLLABORATIVE_APPS_BY_KEY = {app.key: app for app in COLLABORATIVE_APPS}

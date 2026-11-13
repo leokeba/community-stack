@@ -16,6 +16,7 @@ services:
       - ../../data/proxy/vikunja.caddy:/etc/caddy/vikunja.caddy:ro
       - ../../data/proxy/facilmap.caddy:/etc/caddy/facilmap.caddy:ro
       - ../../data/proxy/librebooking.caddy:/etc/caddy/librebooking.caddy:ro
+      - ../../data/proxy/field_map.caddy:/etc/caddy/field_map.caddy:ro
       - ../../data/caddy/data:/data
       - ../../data/caddy/config:/config
     networks:

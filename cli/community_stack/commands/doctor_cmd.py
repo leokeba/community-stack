@@ -340,6 +340,91 @@ def audit_librebooking(
     return healthy, messages
 
 
+def audit_field_map(
+    config: dict, config_path: Path | str, env_path: Path | str
+) -> tuple[bool, list[str]]:
+    """Check Field Map containers, persistent storage, HTTPS readiness, and backup."""
+    settings = config.get("services", {}).get("field_map", {})
+    if not settings.get("enabled", False):
+        return True, ["[INFO] Field Map is disabled; optional-service checks skipped."]
+
+    messages: list[str] = []
+    healthy = True
+    containers = {item.get("name"): item for item in list_community_containers()}
+    app = COLLABORATIVE_APPS_BY_KEY["field_map"]
+    for container_name, label in (
+        (app.container_name, "application"),
+        (app.database_container_name, "database"),
+    ):
+        container = containers.get(container_name)
+        if not container:
+            messages.append(f"[FAIL] Field Map {label} container is not deployed.")
+            healthy = False
+        elif container.get("state") != "running":
+            messages.append(f"[FAIL] Field Map {label} container is not running.")
+            healthy = False
+        elif "(healthy)" in container.get("status", ""):
+            messages.append(f"[OK] Field Map {label} container is healthy.")
+        else:
+            messages.append(f"[FAIL] Field Map {label} container is running but not healthy.")
+            healthy = False
+
+    project_root = Path(config_path).resolve().parent
+    uploads_path = project_root / settings.get("uploads_path", "data/field_map/uploads")
+    database_path = project_root / settings.get("database", {}).get(
+        "data_path", app.database_path_default
+    )
+    try:
+        if (
+            uploads_path.is_dir()
+            and database_path.is_dir()
+            and os.access(uploads_path, os.W_OK)
+            and shutil.disk_usage(uploads_path).free > 0
+            and shutil.disk_usage(database_path).free > 0
+        ):
+            messages.append("[OK] Field Map photo and database storage are present.")
+        else:
+            messages.append("[FAIL] Field Map storage is missing, unwritable, or out of space.")
+            healthy = False
+    except OSError as exc:
+        messages.append(f"[FAIL] Field Map storage check failed: {exc}")
+        healthy = False
+
+    hostname = app.public_hostname(config)
+    if hostname.endswith(("example.org", ".test", ".local", "localhost")):
+        messages.append(f"[WARN] Skipping HTTPS readiness for placeholder host {hostname}.")
+        healthy = False
+    else:
+        try:
+            with urllib.request.urlopen(
+                f"https://{hostname}/api/health/ready", timeout=10
+            ) as response:
+                body = response.read(128).decode("utf-8", errors="replace")
+                if response.status == 200 and '"status":"ready"' in body.replace(" ", ""):
+                    messages.append("[OK] Field Map database readiness is reachable through HTTPS.")
+                else:
+                    messages.append(
+                        f"[FAIL] Field Map HTTPS readiness returned {response.status}: {body[:128]}"
+                    )
+                    healthy = False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            messages.append(f"[FAIL] Field Map is not reachable through HTTPS: {exc}")
+            healthy = False
+
+    try:
+        engine = BackupEngine(config_path=config_path, env_path=env_path)
+        backup_ok, backup_messages = engine.verify_backup()
+        if backup_ok:
+            messages.append("[OK] A Field Map-inclusive backup is present and structurally valid.")
+        else:
+            messages.append("[FAIL] Field Map backup check failed: " + "; ".join(backup_messages))
+            healthy = False
+    except (BackupError, ConfigError, OSError) as exc:
+        messages.append(f"[FAIL] Field Map backup check failed: {exc}")
+        healthy = False
+    return healthy, messages
+
+
 def run_doctor(
     config_path: Path | str = "community-stack.yaml", env_path: Path | str = ".env"
 ) -> int:
@@ -396,9 +481,14 @@ def run_doctor(
     vikunja_ok = True
     facilmap_ok = True
     librebooking_ok = True
+    field_map_ok = True
     if cfg:
         print("\n--- VIKUNJA SERVICE DIAGNOSTICS ---")
         vikunja_ok, messages = audit_vikunja(cfg, config_path, env_path)
+        for message in messages:
+            print(f"  {message}")
+        print("\n--- FIELD MAP SERVICE DIAGNOSTICS ---")
+        field_map_ok, messages = audit_field_map(cfg, config_path, env_path)
         for message in messages:
             print(f"  {message}")
         print("\n--- LIBREBOOKING SERVICE DIAGNOSTICS ---")
@@ -413,4 +503,4 @@ def run_doctor(
     print("\n================================================================================")
     print("Doctor report complete. All sensitive tokens and passwords have been redacted.")
     print("================================================================================")
-    return 0 if checks.ok and vikunja_ok and facilmap_ok and librebooking_ok else 1
+    return 0 if checks.ok and vikunja_ok and facilmap_ok and librebooking_ok and field_map_ok else 1
