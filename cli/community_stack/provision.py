@@ -497,6 +497,7 @@ def prepare_field_map(project_dir: Path, config: dict, env_path: Path) -> str | 
             raise ProvisionError(
                 "Field Map persistent paths must remain inside the project directory."
             )
+    storage_root = Path(os.path.commonpath((uploads_path.resolve(), database_path.resolve())))
 
     env_values = parse_env_file(env_path)
     required = ("FIELD_MAP_DB_PASSWORD",)
@@ -555,6 +556,14 @@ def prepare_field_map(project_dir: Path, config: dict, env_path: Path) -> str | 
     if os.name == "posix":
         env_path.chmod(0o600)
     try:
+        if storage_root not in (root, root / "data"):
+            storage_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+            if os.name == "posix":
+                uid, gid = int(stack_uid), int(stack_gid)
+                storage_stat = storage_root.stat()
+                if (storage_stat.st_uid, storage_stat.st_gid) != (uid, gid):
+                    os.chown(storage_root, uid, gid)
+                storage_root.chmod(0o750)
         uploads_path.mkdir(mode=0o770, parents=True, exist_ok=True)
         if os.name == "posix":
             gid = int(stack_gid)

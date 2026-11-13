@@ -1,6 +1,7 @@
 """Field Map provisioning and backup coverage."""
 
 import io
+import stat
 import subprocess
 import tarfile
 from pathlib import Path
@@ -42,6 +43,11 @@ def test_prepare_field_map_generates_stable_secret_storage_and_route(tmp_path):
     assert "https://maps.community.org/" in message
     assert (tmp_path / "data/field_map/uploads").is_dir()
     assert (tmp_path / "data/field_map/postgres").is_dir()
+    storage_root = tmp_path / "data/field_map"
+    storage_stat = storage_root.stat()
+    assert stat.S_IMODE(storage_stat.st_mode) == 0o750
+    assert storage_stat.st_uid == int(values["FIELD_MAP_UID"])
+    assert storage_stat.st_gid == int(values["FIELD_MAP_GID"])
     route = (tmp_path / "data/proxy/field_map.caddy").read_text(encoding="utf-8")
     assert "maps.community.org" in route
     assert "max_size 12MB" in route
