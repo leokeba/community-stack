@@ -1,5 +1,6 @@
 """Integration tests validating Docker Compose services, pinning, and network isolation."""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -230,6 +231,9 @@ def test_caddyfile_exists_and_contains_routes():
     landing = Path("services/landing/html/index.html").read_text(encoding="utf-8")
     assert 'href="/connect/"' in landing
     assert 'virtual="/connect/services.html"' in landing
+    blocks = set(re.findall(r'<!--# block name="([^"]+)"', landing))
+    stubs = set(re.findall(r'\bstub="([^"]+)"', landing))
+    assert stubs and stubs <= blocks
 
 
 def test_caddy_healthcheck_uses_loopback_admin_api_without_success_fallback():

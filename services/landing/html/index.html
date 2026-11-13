@@ -19,7 +19,9 @@
   </header>
 
   <main class="container">
-    <!--#include virtual="/connect/continuity-notice.html" stub=" " -->
+    <!--# block name="continuity-notice-stub" --><!--# endblock -->
+    <!--# block name="services-stub" --><p class='empty-state'>No web apps are enabled right now.</p><!--# endblock -->
+    <!--#include virtual="/connect/continuity-notice.html" stub="continuity-notice-stub" -->
 
     <section class="hero" aria-labelledby="welcome-heading">
       <p class="eyebrow">Community hub</p>
@@ -39,7 +41,7 @@
         </div>
         <p>Web apps enabled for this community.</p>
       </div>
-      <!--#include virtual="/connect/services.html" stub="<p class='empty-state'>No web apps are enabled right now.</p>" -->
+      <!--#include virtual="/connect/services.html" stub="services-stub" -->
     </section>
 
     <section class="about" aria-labelledby="about-heading">
