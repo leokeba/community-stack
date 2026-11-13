@@ -10,6 +10,7 @@ import hmac
 import json
 import os
 import re
+import stat
 import string
 from pathlib import Path
 from typing import Any
@@ -556,20 +557,22 @@ def prepare_field_map(project_dir: Path, config: dict, env_path: Path) -> str | 
     if os.name == "posix":
         env_path.chmod(0o600)
     try:
+        uid, gid = int(stack_uid), int(stack_gid)
         if storage_root not in (root, root / "data"):
             storage_root.mkdir(mode=0o750, parents=True, exist_ok=True)
             if os.name == "posix":
-                uid, gid = int(stack_uid), int(stack_gid)
                 storage_stat = storage_root.stat()
                 if (storage_stat.st_uid, storage_stat.st_gid) != (uid, gid):
                     os.chown(storage_root, uid, gid)
                 storage_root.chmod(0o750)
         uploads_path.mkdir(mode=0o770, parents=True, exist_ok=True)
         if os.name == "posix":
-            gid = int(stack_gid)
-            if uploads_path.stat().st_gid != gid:
+            uploads_stat = uploads_path.stat()
+            if uploads_stat.st_gid != gid:
                 os.chown(uploads_path, -1, gid)
-            uploads_path.chmod(0o770)
+                uploads_stat = uploads_path.stat()
+            if stat.S_IMODE(uploads_stat.st_mode) != 0o770:
+                uploads_path.chmod(0o770)
         database_path.mkdir(mode=0o750, parents=True, exist_ok=True)
     except (OSError, ValueError) as exc:
         raise ProvisionError(f"Could not prepare Field Map storage: {exc}") from exc

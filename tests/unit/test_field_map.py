@@ -45,13 +45,34 @@ def test_prepare_field_map_generates_stable_secret_storage_and_route(tmp_path):
     assert (tmp_path / "data/field_map/postgres").is_dir()
     storage_root = tmp_path / "data/field_map"
     storage_stat = storage_root.stat()
+    uploads_stat = (storage_root / "uploads").stat()
     assert stat.S_IMODE(storage_stat.st_mode) == 0o750
     assert storage_stat.st_uid == int(values["FIELD_MAP_UID"])
     assert storage_stat.st_gid == int(values["FIELD_MAP_GID"])
+    assert stat.S_IMODE(uploads_stat.st_mode) == 0o770
+    assert uploads_stat.st_gid == int(values["FIELD_MAP_GID"])
     route = (tmp_path / "data/proxy/field_map.caddy").read_text(encoding="utf-8")
     assert "maps.community.org" in route
     assert "max_size 12MB" in route
     assert "reverse_proxy community_field_map:8000" in route
+
+
+def test_prepare_field_map_preserves_group_writable_upload_directory(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("")
+    config = enabled_config()
+    uploads_path = tmp_path / "data/field_map/uploads"
+    prepare_field_map(tmp_path, config, env_file)
+
+    original_chmod = Path.chmod
+
+    def reject_upload_chmod(path, mode):
+        if path == uploads_path:
+            raise AssertionError("an already-correct upload directory should not be chmodded")
+        original_chmod(path, mode)
+
+    monkeypatch.setattr(Path, "chmod", reject_upload_chmod)
+    prepare_field_map(tmp_path, config, env_file)
     assert env_file.stat().st_mode & 0o777 == 0o600
 
 
