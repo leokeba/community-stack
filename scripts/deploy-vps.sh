@@ -61,6 +61,9 @@ uv run ruff format --check .
 docker compose -f services/announcements/docker-compose.yml config --quiet
 docker compose -f services/proxy/docker-compose.yml config --quiet
 docker compose -f services/landing/docker-compose.yml config --quiet
+LIBREBOOKING_DB_PASSWORD=compose-check \
+LIBREBOOKING_DB_ROOT_PASSWORD=compose-check \
+LIBREBOOKING_INSTALL_PASSWORD=compose-check \
 docker compose -f services/librebooking/docker-compose.yml config --quiet
 
 printf 'Checking SSH, backup, and Docker prerequisites on %s...\n' "$target"
