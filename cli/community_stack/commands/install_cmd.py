@@ -7,6 +7,7 @@ from pathlib import Path
 from community_stack import docker
 from community_stack.bridges.catalogue import BRIDGE_SERVICES
 from community_stack.config import ConfigError, load_config
+from community_stack.continuity.connect_page import write_service_directory
 from community_stack.provision import ProvisionError, prepare_service
 from community_stack.validator import run_checks
 
@@ -179,6 +180,15 @@ def run_install(
     from community_stack.commands.status_cmd import run_status
 
     run_status()
+    try:
+        write_service_directory(config_path)
+    except (ConfigError, OSError, ValueError) as exc:
+        print(
+            "[ERROR] Services were deployed, but the landing-page directory "
+            f"could not update: {exc}"
+        )
+        return 1
+    print("Landing-page service directory refreshed.")
 
     print("\n[4/4] Next steps:")
     print("  - Check logs: community-stack logs <service>")

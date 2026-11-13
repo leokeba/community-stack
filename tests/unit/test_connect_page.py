@@ -2,6 +2,7 @@
 
 import io
 import json
+import stat
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -11,6 +12,7 @@ from community_stack.community import (
     CommunityProfile,
     IndependentChannel,
     SocialAccount,
+    load_profile,
 )
 from community_stack.continuity.connect_page import (
     ConnectError,
@@ -22,6 +24,7 @@ from community_stack.continuity.connect_page import (
     render_page,
     store_profile_image,
     write_files,
+    write_service_directory,
 )
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -102,6 +105,63 @@ def test_page_includes_cover_image():
     assert '<div class="cover"><img src="cover.jpg" alt=""></div>' in page
 
 
+def test_enabled_web_apps_are_available_to_the_landing_page():
+    profile = load_profile(
+        {
+            "domain": {"base": "example.org", "web": "community.example.org"},
+            "services": {
+                "matrix": {"enabled": True},
+                "element": {"enabled": True},
+                "announcements": {"enabled": True},
+                "vikunja": {"enabled": True, "hostname": "tasks.community.example.org"},
+                "facilmap": {"enabled": False},
+                "librebooking": {"enabled": True},
+            },
+        }
+    )
+
+    assert [(service.label, service.url) for service in profile.web_services] == [
+        ("Community chat", "https://community.example.org/app/"),
+        ("Public announcements", "https://community.example.org/feed/announcements.html"),
+        ("Vikunja", "https://tasks.community.example.org/"),
+        ("Space reservations", "https://booking.example.org/Web/"),
+    ]
+    fragment = build_site(profile, ChannelResolution([], []), [], None, GENERATED)["services.html"]
+    assert b"Open Community chat" in fragment
+    assert b"Open Vikunja" in fragment
+    assert b"Open Space reservations" in fragment
+    assert b"FacilMap" not in fragment
+
+
+def test_service_directory_refreshes_enabled_apps_as_public_html(tmp_path):
+    config_path = tmp_path / "community-stack.yaml"
+    config_path.write_text(
+        "project:\n  name: test-community\n  profile: starter\n"
+        "domain:\n  base: example.org\n  web: community.example.org\n"
+        "services:\n  matrix:\n    enabled: true\n  element:\n    enabled: true\n"
+        "  announcements:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+
+    page_path = write_service_directory(config_path)
+    page = page_path.read_text(encoding="utf-8")
+    assert "Community chat" in page
+    assert "Public announcements" in page
+    assert stat.S_IMODE(page_path.stat().st_mode) == 0o644
+
+    config_path.write_text(
+        "project:\n  name: test-community\n  profile: starter\n"
+        "domain:\n  base: example.org\n  web: community.example.org\n"
+        "services:\n  matrix:\n    enabled: false\n  element:\n    enabled: false\n"
+        "  announcements:\n    enabled: false\n",
+        encoding="utf-8",
+    )
+    updated = write_service_directory(config_path).read_text(encoding="utf-8")
+    assert "Community chat" not in updated
+    assert "Public announcements" not in updated
+    assert "No web apps are enabled" in updated
+
+
 def test_page_is_printable_and_declares_its_stable_address():
     page = render_page(_profile(), _resolution(), [], None, GENERATED)
     assert "@media print" in page
@@ -135,7 +195,7 @@ def test_page_omits_emergency_section_when_not_configured():
 def test_page_gives_the_address_as_plain_text_for_print():
     page = render_page(_profile(), _resolution(), [], None, GENERATED)
     assert "https://community.example.org/connect/" in page
-    assert "Social networks can change their rules" in page
+    assert "For the most reliable updates" in page
 
 
 def test_page_renders_channel_states_and_multilingual_continuity_notice():
@@ -230,6 +290,7 @@ def test_bundle_contains_identity_files_and_no_private_data():
     assert set(bundle) == {
         "index.html",
         "continuity-notice.html",
+        "services.html",
         "community.json",
         "qr.svg",
         "qr.png",
@@ -260,7 +321,7 @@ def test_bundle_contains_cover_image_and_metadata():
 def test_build_site_includes_logo_when_given(tmp_path):
     profile = _profile()
     files = build_site(profile, _resolution(), [], ("logo.jpg", b"jpegbytes"), GENERATED)
-    assert set(files) == {"index.html", "continuity-notice.html", "logo.jpg"}
+    assert set(files) == {"index.html", "continuity-notice.html", "services.html", "logo.jpg"}
     assert b'src="logo.jpg"' in files["index.html"]
 
 

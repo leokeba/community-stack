@@ -128,11 +128,23 @@ class WebFeedAdapter(ChannelAdapter):
             'style="max-width:100%;height:auto"></figure>'
         )
 
+    @staticmethod
+    def _excerpt(body: str, limit: int = 280) -> str:
+        text = to_plain_text(body).strip()
+        if len(text) <= limit:
+            return text
+        excerpt = text[: limit - 1]
+        if " " in excerpt:
+            excerpt = excerpt.rsplit(" ", 1)[0]
+        excerpt = excerpt.rstrip(".,;: ")
+        return f"{excerpt}…"
+
     def _generate_html(self, announcements: list[Announcement]) -> None:
         items_html = ""
         for a in announcements:
             author_badge = f"<span class='badge'>{html.escape(a.author)}</span>" if a.author else ""
             detail_url = a.canonical_url or f"announcements/{a.id}/"
+            excerpt = html.escape(self._excerpt(a.body))
             items_html += f"""
             <article class="announcement-item card">
               <header>
@@ -144,9 +156,8 @@ class WebFeedAdapter(ChannelAdapter):
                 </div>
               </header>
               {self._figure(a, f"media/{a.image.filename}" if a.image else "")}
-              <div class="body">
-                {render_html(a.body)}
-              </div>
+              <p class="announcement-summary">{excerpt}</p>
+              <a class="read-more" href="{detail_url}">Read announcement <span aria-hidden="true">→</span></a>
             </article>
             """
 
@@ -163,12 +174,19 @@ class WebFeedAdapter(ChannelAdapter):
 </head>
 <body>
   <div class="container">
-    <header>
+    <header class="feed-header">
       <h1>Public Announcements</h1>
-      <p><a href="/">&larr; Back to Portal</a> &bull; <a href="rss.xml">RSS Feed</a> &bull; <a href="atom.xml">Atom Feed</a> &bull; <a href="feed.json">JSON Feed</a></p>
+      <nav class="page-nav" aria-label="Announcement navigation">
+        <a href="/">Home</a>
+        <a href="/connect/">Contact</a>
+        <a href="rss.xml">RSS</a>
+        <a href="atom.xml">Atom</a>
+        <a href="feed.json">JSON Feed</a>
+      </nav>
+      <p class="feed-intro">Verified public updates from {html.escape(self.community_name)}. Read here or follow along in your feed reader.</p>
     </header>
     <main>
-      {items_html if items_html else "<p>No active public announcements at this time.</p>"}
+      {items_html if items_html else '<p class="empty-state">There are no active public announcements right now. <a href="/connect/">Choose another way to stay in touch.</a></p>'}
     </main>
   </div>
 </body>
@@ -192,6 +210,7 @@ class WebFeedAdapter(ChannelAdapter):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(announcement.title)} - {html.escape(self.community_name)}</title>
+  <link rel="stylesheet" href="/style.css">
   <link rel="canonical" href="{html.escape(self.canonical_url_for(announcement))}">
   <meta property="og:type" content="article">
   <meta property="og:title" content="{html.escape(announcement.title, quote=True)}">
@@ -200,22 +219,24 @@ class WebFeedAdapter(ChannelAdapter):
   {self._og_image(announcement)}
 </head>
 <body>
-  <main>
-    <p><a href="/feed/announcements.html">&larr; All announcements</a></p>
-    <article>
+  <main class="container">
+    <p class="page-nav"><a href="/feed/announcements.html">&larr; All announcements</a></p>
+    <article class="card announcement-detail">
       <h1>{html.escape(announcement.title)}</h1>
-      <time datetime="{html.escape(announcement.published_at)}">{html.escape(announcement.published_at[:10])}</time>
-      {"<p>Updated <time datetime='" + html.escape(announcement.updated_at) + "'>" + html.escape(announcement.updated_at[:10]) + "</time></p>" if announcement.updated_at != announcement.published_at else ""}
+      <div class="meta">
+        <time datetime="{html.escape(announcement.published_at)}">{html.escape(announcement.published_at[:10])}</time>
+        {f"<span>Updated {html.escape(announcement.updated_at[:10])}</span>" if announcement.updated_at != announcement.published_at else ""}
+      </div>
       {author}
       {self._figure(announcement, f"/feed/media/{announcement.image.filename}" if announcement.image else "")}
-      <div>{body}</div>
+      <div class="announcement-body">{body}</div>
     </article>
-    <nav aria-label="Announcement feeds">
+    <nav class="page-nav" aria-label="Announcement feeds">
       <a href="/feed/rss.xml">RSS</a> ·
       <a href="/feed/atom.xml">Atom</a> ·
       <a href="/feed/feed.json">JSON Feed</a>
     </nav>
-    {"<nav aria-label='Other community channels'>" + channel_links + "</nav>" if channel_links else ""}
+    {"<nav class='page-nav' aria-label='Other community channels'>" + channel_links + "</nav>" if channel_links else ""}
   </main>
 </body>
 </html>

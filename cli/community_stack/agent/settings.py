@@ -17,7 +17,7 @@ import yaml
 from community_stack import docker
 from community_stack.backup import BackupError
 from community_stack.bridges.catalogue import BRIDGE_SERVICES
-from community_stack.config import validate_config
+from community_stack.config import ConfigError, validate_config
 from community_stack.config_edit import (
     ensure_facilmap_config,
     ensure_vikunja_config,
@@ -25,6 +25,7 @@ from community_stack.config_edit import (
     set_value,
     write_in_place,
 )
+from community_stack.continuity.connect_page import write_service_directory
 from community_stack.provision import ProvisionError, prepare_service
 from community_stack.secrets import parse_env_file
 
@@ -565,4 +566,13 @@ def apply_changes(context, raw_changes: Any) -> dict[str, Any]:
         if restore_errors:
             message += " Some services could not be put back: " + " ".join(restore_errors)
         raise SettingsError(message) from exc
+    try:
+        write_service_directory(context.config_path)
+    except (ConfigError, OSError, ValueError) as exc:
+        steps.append(
+            "Warning: settings were applied, but the landing-page service directory "
+            f"could not refresh: {exc}"
+        )
+    else:
+        steps.append("Landing-page service directory refreshed.")
     return {"applied": True, "steps": steps}

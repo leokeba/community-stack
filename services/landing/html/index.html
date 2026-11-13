@@ -2,68 +2,62 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Community Communications Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Find community chat, announcements and other ways to stay connected.">
+  <title>Community Communications</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
+  <header class="site-header">
     <div class="container header-content">
-      <h1>Community Communications</h1>
-      <p class="tagline">Resilient, independent infrastructure for community coordination and public updates.</p>
+      <a class="brand" href="/" aria-label="Community Communications home">Community Communications</a>
+      <nav aria-label="Primary navigation">
+        <a href="/feed/announcements.html">Announcements</a>
+        <a href="/connect/">Contact</a>
+      </nav>
     </div>
   </header>
 
   <main class="container">
     <!--#include virtual="/connect/continuity-notice.html" stub=" " -->
 
-    <section class="services-grid">
-      <div class="card service-card">
-        <h3>💬 Community Chat</h3>
-        <p>Join discussion rooms and coordinate with the community via Matrix & Element Web.</p>
-        <a href="/app/" class="btn btn-primary" target="_blank" rel="noopener">Open Web Chat</a>
-      </div>
-
-      <div class="card service-card">
-        <h3>📢 Public Announcements</h3>
-        <p>Read authoritative, verified public announcements without requiring an account.</p>
-        <div class="btn-group">
-          <a href="/feed/announcements.html" class="btn btn-secondary">Read Feed</a>
-          <a href="/feed/atom.xml" class="btn btn-outline" target="_blank">RSS / Atom</a>
-        </div>
-      </div>
-
-      <div class="card service-card">
-        <h3>🔗 Find Us Elsewhere</h3>
-        <p>Our official channels and social network accounts, all on one stable page.</p>
-        <a href="/connect/" class="btn btn-outline">Open the contact page</a>
-      </div>
-
-      <div class="card service-card">
-        <h3>🛡️ Privacy & Infrastructure</h3>
-        <p>Self-hosted on independent servers. Encrypted, federated, and free of commercial tracking.</p>
-        <a href="#about" class="btn btn-outline">Learn More</a>
+    <section class="hero" aria-labelledby="welcome-heading">
+      <p class="eyebrow">Community hub</p>
+      <h1 id="welcome-heading">Stay connected. Stay informed.</h1>
+      <p>Join the conversation, read verified updates, or choose another way to keep in touch.</p>
+      <div class="btn-group">
+        <a href="#services" class="btn btn-primary">Browse community services</a>
+        <a href="/connect/" class="btn btn-outline">Contact options</a>
       </div>
     </section>
 
-    <section class="card" id="about">
-      <h2>About This Infrastructure</h2>
-      <p>
-        This portal operates on the <strong>Community Communications Stack</strong>, an open-source,
-        self-hosted infrastructure layer combining Matrix Synapse, Element Web, Caddy, and independent
-        announcement distribution channels.
-      </p>
-      <ul>
-        <li><strong>Independence:</strong> Operates independently of commercial corporate messaging platforms.</li>
-        <li><strong>Resilience:</strong> Public updates remain readable even during external outages.</li>
-        <li><strong>Separation:</strong> Public news, community rooms, and internal coordination remain distinct.</li>
-      </ul>
+    <section aria-labelledby="services-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">The stack</p>
+          <h2 id="services-heading">Community services</h2>
+        </div>
+        <p>Web apps enabled for this community.</p>
+      </div>
+      <!--#include virtual="/connect/services.html" stub="<p class='empty-state'>No web apps are enabled right now.</p>" -->
+    </section>
+
+    <section class="about" aria-labelledby="about-heading">
+      <div>
+        <p class="eyebrow">Built for resilience</p>
+        <h2 id="about-heading">One stable place to find us</h2>
+      </div>
+      <div>
+        <p>This community runs independent communication tools. Public updates and contact details remain easy to find even when a social network changes or goes offline.</p>
+        <a class="text-link" href="/connect/">See all contact options and backup channels <span aria-hidden="true">→</span></a>
+      </div>
     </section>
   </main>
 
   <footer>
     <div class="container footer-content">
-      <p>Powered by Community Communications Stack &bull; Open Source (AGPLv3)</p>
+      <p>Powered by Community Communications Stack · Open source (AGPLv3)</p>
+      <a href="/feed/rss.xml">Subscribe with RSS</a>
     </div>
   </footer>
 </body>

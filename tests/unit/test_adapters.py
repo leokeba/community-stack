@@ -82,6 +82,31 @@ def test_web_feed_adapter_generates_all_formats(tmp_path):
     assert json_feed["items"][0]["date_modified"] == ann.updated_at
 
 
+def test_web_feed_archive_uses_excerpts_and_details_keep_full_content(tmp_path):
+    output_dir = tmp_path / "feed"
+    adapter = WebFeedAdapter(output_dir=output_dir)
+    long_body = "Opening detail. " + ("More context for readers. " * 20) + "Full detail marker."
+    announcement = Announcement(
+        title="A long public update",
+        body=long_body,
+        status=AnnouncementStatus.PUBLISHED,
+        published_at="2025-01-02T03:04:05+00:00",
+    )
+
+    adapter.storage.save_announcement(announcement)
+    adapter.publish(announcement)
+
+    archive = (output_dir / "announcements.html").read_text(encoding="utf-8")
+    detail = (output_dir / "announcements" / announcement.id / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "Opening detail." in archive
+    assert "Read announcement" in archive
+    assert "Full detail marker." not in archive
+    assert "Full detail marker." in detail
+    assert 'href="/style.css"' in detail
+
+
 def test_web_feed_adapter_withdrawal(tmp_path):
     output_dir = tmp_path / "feed"
     adapter = WebFeedAdapter(output_dir=output_dir)

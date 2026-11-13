@@ -34,28 +34,46 @@ from community_stack.config import ConfigError
 RECENT_LIMIT = 10
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 PAGE_CSS = """
-:root { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.55; color: #17212b; background: #f7f8f9; }
+:root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #17212b; background: #f4f7fa; }
+@media (prefers-color-scheme: dark) { :root { color-scheme: dark; color: #edf4f8; background: #111820; } }
+* { box-sizing: border-box; }
 body { margin: 0; }
-main, header, footer { max-width: 42rem; margin: 0 auto; padding: 1rem; }
-header { padding-top: 1.5rem; }
-.cover img { display: block; width: 100%; max-height: 12rem; object-fit: cover; border-radius: .5rem; }
-.identity { display: flex; gap: 1rem; align-items: center; padding-top: .75rem; }
+main, header, footer { max-width: 54rem; margin: 0 auto; padding: 1rem; }
+header { padding-top: 1rem; }
+header nav { display: flex; flex-wrap: wrap; gap: 1rem; padding-bottom: 1.2rem; }
+.cover img { display: block; width: 100%; max-height: 14rem; object-fit: cover; border-radius: .9rem; }
+.identity { display: flex; gap: 1rem; align-items: center; padding: .75rem 0 1rem; }
 .identity img { width: 4.5rem; height: 4.5rem; object-fit: contain; flex: none; }
-h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
-h2 { font-size: 1.2rem; margin: 0 0 .5rem; }
-section { background: #fff; border: 1px solid #d5dde2; border-radius: .5rem; padding: 1rem 1.2rem; margin: 1rem 0; }
-ul { padding-left: 1.2rem; margin: .5rem 0 0; }
-li { margin: .4rem 0; }
-a { color: #174f71; font-weight: 600; }
+h1 { font-size: clamp(1.8rem, 5vw, 2.5rem); line-height: 1.12; margin: 0 0 .4rem; letter-spacing: -.025em; }
+h2 { font-size: 1.3rem; line-height: 1.25; margin: 0 0 .5rem; }
+section { background: #fff; border: 1px solid #d3dee6; border-radius: .85rem; padding: 1.25rem clamp(1rem, 4vw, 1.6rem); margin: 1rem 0; }
+@media (prefers-color-scheme: dark) { section { background: #1a2530; border-color: #354754; } }
+ul { padding-left: 1.2rem; margin: .6rem 0 0; }
+li { margin: .55rem 0; }
+a { color: #075b8d; font-weight: 650; text-underline-offset: .2em; }
+a:focus-visible { outline: 3px solid #e2a72e; outline-offset: 3px; border-radius: .15rem; }
+@media (prefers-color-scheme: dark) { a { color: #80c9f2; } }
+.site-nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+.site-nav a { color: #52616d; font-size: .95rem; }
+@media (prefers-color-scheme: dark) { .site-nav a { color: #bccbd5; } }
+.channel-list, .announcement-list { padding: 0; list-style: none; }
+.channel-list li { padding: .9rem 0; margin: 0; border-bottom: 1px solid #e4ebf0; }
+.channel-list li:last-child { border-bottom: 0; }
+@media (prefers-color-scheme: dark) { .channel-list li { border-color: #354754; } }
 .address { font-size: 1.05rem; overflow-wrap: anywhere; }
-.muted { color: #4a5963; }
-.warning { border-left: .3rem solid #b42318; background: #fff1f0; padding: .75rem 1rem; }
-footer { font-size: .9rem; color: #4a5963; }
+.muted { color: #52616d; }
+@media (prefers-color-scheme: dark) { .muted { color: #bccbd5; } }
+.warning { border-left: .3rem solid #b42318; background: #fff1f0; color: #61201b; }
+.warning h2 { color: #8e2018; }
+@media (prefers-color-scheme: dark) { .warning { background: #351f22; color: #ffd9d4; } .warning h2 { color: #ffb4a9; } }
+footer { color: #52616d; font-size: .9rem; }
+@media (prefers-color-scheme: dark) { footer { color: #bccbd5; } }
 @media print {
   body { background: #fff; color: #000; }
   section { border: 1px solid #000; break-inside: avoid; }
   a { color: #000; text-decoration: none; }
   a::after { content: " (" attr(href) ")"; font-weight: normal; font-size: .85em; }
+  header nav { display: none; }
 }
 """
 
@@ -106,6 +124,19 @@ def recent_announcements(storage: AnnouncementStorage) -> list[Announcement]:
     public = (AnnouncementStatus.PUBLISHED, AnnouncementStatus.UPDATED)
     items = [a for a in storage.list_announcements(limit=None) if a.status in public]
     return items[:RECENT_LIMIT]
+
+
+def render_services_fragment(profile: CommunityProfile) -> str:
+    if not profile.web_services:
+        return '<p class="empty-state">No web apps are enabled right now.</p>'
+    cards = "".join(
+        f'<article class="service-card"><p class="service-kicker">Enabled</p>'
+        f'<h3><a href="{_e(service.url)}">{_e(service.label)}</a></h3>'
+        f"<p>{_e(service.description)}</p>"
+        f'<a class="btn btn-primary" href="{_e(service.url)}">Open {_e(service.label)}</a></article>'
+        for service in profile.web_services
+    )
+    return f'<div class="services-grid">{cards}</div>'
 
 
 def prepare_logo(path: Path) -> tuple[str, bytes]:
@@ -194,7 +225,7 @@ def render_page(
         for ch in resolution.shown
     )
     independent_html = (
-        f"<ul>{channels}</ul>"
+        f'<ul class="channel-list">{channels}</ul>'
         if channels
         else '<p class="muted">No independent channels are set up yet.</p>'
     )
@@ -207,7 +238,7 @@ def render_page(
         for acc in profile.social
     )
     social_html = (
-        f"<ul>{social_items}</ul>"
+        f'<ul class="channel-list">{social_items}</ul>'
         if social_items
         else '<p class="muted">No social network accounts are listed.</p>'
     )
@@ -219,7 +250,7 @@ def render_page(
         for a in announcements
     )
     recent_html = (
-        f"<ul>{recent_items}</ul>"
+        f'<ul class="announcement-list">{recent_items}</ul>'
         if recent_items
         else '<p class="muted">No announcements have been published yet.</p>'
     )
@@ -265,6 +296,10 @@ def render_page(
 </head>
 <body>
   <header>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a href="/">Home</a>
+      <a href="/feed/announcements.html">Announcements</a>
+    </nav>
     {cover_html}
     <div class="identity">
       {logo_html}
@@ -279,31 +314,19 @@ def render_page(
     {notice_html}
     <section aria-labelledby="address">
       <h2 id="address">Bookmark this page</h2>
-      <p>This address stays the same, even if we change social networks:</p>
+      <p>Our stable address, even if social networks change:</p>
       <p class="address"><a href="{_e(profile.connect_url)}">{_e(profile.connect_url)}</a></p>
-      <p class="muted">Social networks can change their rules or stop working. Our own channels below do not depend on them.</p>
+      <p class="muted">For the most reliable updates, use one of our community-owned channels below.</p>
     </section>
     <section aria-labelledby="independent">
       <h2 id="independent">Our independent channels</h2>
-      <p>These belong to the community. They keep working if a social network becomes unavailable.</p>
       {independent_html}
     </section>
-    <section aria-labelledby="choose">
-      <h2 id="choose">Which should I choose?</h2>
-      <ul>
-        <li><strong>Email</strong>: announcements arrive in your inbox. You confirm once, and you can stop with one click.</li>
-        <li><strong>Feeds</strong>: no sign-up at all. A feed reader app shows new announcements for you.</li>
-        <li><strong>Chat</strong>: follow announcements in a Matrix app such as Element, if you already use one.</li>
-        <li><strong>Fediverse</strong>: follow us from Mastodon or a similar app, like any other account.</li>
-      </ul>
-      <p class="muted">Pick whichever you already use. You can change your mind at any time.</p>
-    </section>
+    {emergency_html}
     <section aria-labelledby="social">
       <h2 id="social">Find us on social networks</h2>
-      <p>Social networks are good for news and conversation. Use the channels above to make sure you do not miss anything.</p>
       {social_html}
     </section>
-    {emergency_html}
     <section aria-labelledby="recent">
       <h2 id="recent">Recent announcements</h2>
       {recent_html}
@@ -357,6 +380,7 @@ def build_site(
     files = {
         "index.html": page.encode("utf-8"),
         "continuity-notice.html": render_continuity_notice(notice).encode("utf-8"),
+        "services.html": render_services_fragment(profile).encode("utf-8"),
     }
     if logo:
         files[logo[0]] = logo[1]
@@ -487,3 +511,32 @@ def write_files(directory: Path | str, files: dict[str, bytes]) -> None:
         for stale in target.glob(f"{kind}.*"):
             if stale.name not in files:
                 stale.unlink(missing_ok=True)
+
+
+def write_service_directory(
+    config_path: Path | str,
+    output_dir: Path | str | None = None,
+) -> Path:
+    """Refresh the landing-page web app list from the current enabled-service configuration."""
+    profile, _ = load_community(config_path)
+    target_dir = (
+        Path(output_dir)
+        if output_dir is not None
+        else Path(config_path).resolve().parent / "data/landing/connect"
+    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "services.html"
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target_dir, prefix=".services-", delete=False
+        ) as stream:
+            temporary_path = Path(stream.name)
+            stream.write(render_services_fragment(profile))
+        assert temporary_path is not None
+        temporary_path.chmod(0o644)
+        os.replace(temporary_path, target)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return target

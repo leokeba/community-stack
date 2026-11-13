@@ -51,6 +51,14 @@ class SocialAccount:
 
 
 @dataclass(frozen=True)
+class PublicWebService:
+    key: str
+    label: str
+    description: str
+    url: str
+
+
+@dataclass(frozen=True)
 class CommunityProfile:
     name: str
     url: str
@@ -64,6 +72,7 @@ class CommunityProfile:
     emergency_instructions: str = ""
     social: tuple[SocialAccount, ...] = ()
     independent: dict[str, bool] = field(default_factory=dict)
+    web_services: tuple[PublicWebService, ...] = ()
 
     @property
     def connect_url(self) -> str:
@@ -109,6 +118,57 @@ def load_profile(config: dict[str, Any], domain_web: str | None = None) -> Commu
         )
         for item in community.get("social", [])
     )
+    services = config.get("services", {})
+    web_services = []
+    if services.get("matrix", {}).get("enabled", True) and services.get("element", {}).get(
+        "enabled", True
+    ):
+        web_services.append(
+            PublicWebService(
+                key="element",
+                label="Community chat",
+                description="Join community discussion rooms in Element.",
+                url=f"{url}/app/",
+            )
+        )
+    announcements = services.get("announcements", {})
+    if announcements.get("enabled", True) and announcements.get("channels", {}).get(
+        "web_feed", {}
+    ).get("enabled", True):
+        web_services.append(
+            PublicWebService(
+                key="announcements",
+                label="Public announcements",
+                description="Read verified community updates without an account.",
+                url=f"{url}/feed/announcements.html",
+            )
+        )
+    for key, label, description, prefix in (
+        ("vikunja", "Vikunja", "Coordinate tasks and shared projects.", "tasks"),
+        ("facilmap", "FacilMap", "Explore and share community maps.", "maps"),
+    ):
+        settings = services.get(key, {})
+        if settings.get("enabled", False):
+            hostname = settings.get("hostname") or f"{prefix}.{base_domain}"
+            web_services.append(
+                PublicWebService(
+                    key=key,
+                    label=label,
+                    description=description,
+                    url=f"https://{hostname}/",
+                )
+            )
+    librebooking = services.get("librebooking", {})
+    if librebooking.get("enabled", False):
+        hostname = librebooking.get("hostname") or f"booking.{base_domain}"
+        web_services.append(
+            PublicWebService(
+                key="librebooking",
+                label="Space reservations",
+                description="Browse and reserve community spaces.",
+                url=f"https://{hostname}/Web/",
+            )
+        )
     return CommunityProfile(
         name=community.get("name") or project.get("name") or "Community",
         url=url,
@@ -122,6 +182,7 @@ def load_profile(config: dict[str, Any], domain_web: str | None = None) -> Commu
         emergency_instructions=community.get("emergency_instructions", ""),
         social=social,
         independent=independent,
+        web_services=tuple(web_services),
     )
 
 

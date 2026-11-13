@@ -17,6 +17,7 @@ from community_stack.config_edit import (
     set_value,
     write_in_place,
 )
+from community_stack.continuity.connect_page import write_service_directory
 
 
 def _set_enabled(config_path: Path, service: str, enabled: bool) -> None:
@@ -63,6 +64,14 @@ def run_service(
             print(f"[ERROR] Could not update configuration: {exc}")
             return 1
         if action == "enable":
+            try:
+                write_service_directory(config_file)
+            except (ConfigError, OSError, ValueError) as exc:
+                print(
+                    "[ERROR] The service is enabled, but the landing-page directory "
+                    f"could not update: {exc}"
+                )
+                return 1
             print(f"{service} is enabled in configuration. Deploy it with: community-stack install")
             return 0
         try:
@@ -110,6 +119,14 @@ def run_service(
             if proxy_result.returncode != 0:
                 print(f"[ERROR] {service} is stopped, but Caddy could not reload its route.")
                 return 1
+        try:
+            write_service_directory(config_file)
+        except (ConfigError, OSError, ValueError) as exc:
+            print(
+                f"[ERROR] {service} is stopped, but the landing-page directory "
+                f"could not update: {exc}"
+            )
+            return 1
         print(
             f"{service} is disabled and its containers are stopped. Persistent data was preserved."
         )
