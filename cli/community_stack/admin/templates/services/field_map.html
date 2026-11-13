@@ -1,0 +1,3 @@
+{% if card.enabled and card.url %}
+<p class="notice" role="status"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">Open Field Map</a>. Map links are bearer credentials. Anonymous map creation is {{ "on" if card["values"]["services.field_map.anonymous_links_enabled"] else "off" }}; when on, anyone who reaches the service can create maps. Treat precise locations and photos as sensitive.</p>
+{% endif %}

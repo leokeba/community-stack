@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_settings_card.html" import settings_card with context %}
 {% block title %}Community profile{% endblock %}
 {% block content %}
 <h1>Community profile</h1>
@@ -54,4 +55,11 @@
   {% endfor %}
   <p><button type="submit">Save profile</button></p>
 </form>
+{% if settings_error %}<p class="error" role="alert">{{ settings_error }}</p>{% endif %}
+{% if settings_cards %}
+<h2>Scheduling</h2>
+<div class="channel-list">
+  {% for card in settings_cards %}{{ settings_card(card, open=True) }}{% endfor %}
+</div>
+{% endif %}
 {% endblock %}

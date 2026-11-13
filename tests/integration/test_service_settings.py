@@ -13,6 +13,7 @@ import pytest
 import yaml
 from community_stack.admin.app import create_app
 from community_stack.admin.store import AdminStore
+from community_stack.agent import service_catalogue
 from community_stack.agent import settings as agent_settings
 from community_stack.agent.operations import AgentContext
 from community_stack.agent.server import AgentService, AgentSocketServer
@@ -194,7 +195,7 @@ def test_field_map_cannot_share_a_hostname_with_enabled_facilmap(project):
 
 def test_restic_encryption_needs_restic_on_the_server(project, monkeypatch):
     root, _ = project
-    monkeypatch.setattr(agent_settings.shutil, "which", lambda name: None)
+    monkeypatch.setattr(service_catalogue.shutil, "which", lambda name: None)
     with pytest.raises(agent_settings.SettingsError, match="Install restic"):
         agent_settings.build_plan(context(root), {"operations.backups.encryption": "restic"})
 
@@ -332,36 +333,96 @@ def csrf(response) -> str:
     return re.search(r'name="csrf_token" value="([^"]+)"', response.text).group(1)
 
 
-def form_values(page) -> dict[str, str]:
-    values = dict(re.findall(r'name="(setting:[^"]+)"[^>]*value="([^"]*)"', page.text))
+def card_values(page, key: str) -> dict[str, str]:
+    """The fields one service's card would submit, the hidden service key included."""
+    section = re.search(
+        rf'<section[^>]*id="settings-{key}".*?</section>', page.text, re.DOTALL
+    ).group(0)
+    form = re.search(r'<form class="service-form".*?</form>', section, re.DOTALL).group(0)
+    values = dict(re.findall(r'name="(setting:[^"]+|service)"[^>]*value="([^"]*)"', form))
     for name, body in re.findall(
-        r'<select[^>]*name="(setting:[^"]+)">(.*?)</select>', page.text, re.DOTALL
+        r'<select[^>]*name="(setting:[^"]+)">(.*?)</select>', form, re.DOTALL
     ):
         values[name] = re.search(r'value="([^"]+)" selected', body).group(1)
     return values
 
 
+def hidden_values(review) -> dict[str, str]:
+    return dict(
+        re.findall(r'type="hidden" name="(setting:[^"]+|service)" value="([^"]*)"', review.text)
+    )
+
+
+def follow(client, response):
+    assert response.status_code == 303, response.text
+    return client.get(response.headers["location"])
+
+
 def test_console_reviews_and_applies_a_change(console):
     root, client = console
-    page = client.get("/admin/services")
-    assert "Community time zone" in page.text
-    values = form_values(page)
+    page = client.get("/admin/community")
+    assert 'id="settings-general"' in page.text
+    values = card_values(page, "general")
+    assert values["service"] == "general"
     values["setting:project.timezone"] = "Europe/Paris"
 
     review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
     assert review.status_code == 200
+    assert "Review changes to Time zone" in review.text
     assert "Europe/Paris" in review.text
     assert "Confirm with your password" not in review.text
 
-    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
+    hidden = hidden_values(review)
     applied = client.post("/admin/services/apply", data={"csrf_token": csrf(review), **hidden})
-    assert applied.status_code == 200
-    assert "Changes applied" in applied.text
+    assert applied.headers["location"] == "/admin/community#settings-general"
+    assert "Time zone: changes applied." in follow(client, applied).text
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["project"]["timezone"] == "Europe/Paris"
 
     unchanged = client.post("/admin/services/review", data={"csrf_token": csrf(page), **hidden})
-    assert "Nothing was changed." in unchanged.text
+    assert "Nothing was changed." in follow(client, unchanged).text
+
+
+def test_each_card_reviews_only_its_own_settings(console):
+    _, client = console
+    page = client.get("/admin/services")
+    for key in ("matrix", "element", "whatsapp_bridge", "vikunja", "facilmap", "librebooking"):
+        assert f'id="settings-{key}"' in page.text
+    # General settings live on their own pages, not in the services list.
+    assert 'id="settings-general"' not in page.text
+    assert 'id="settings-backups"' not in page.text
+    values = {
+        **card_values(page, "element"),
+        "setting:services.element.enabled": "false",
+        # A setting from another card is ignored rather than changed alongside.
+        "setting:project.timezone": "Europe/Paris",
+    }
+
+    review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
+
+    assert review.status_code == 200
+    assert "Element web chat" in review.text
+    assert "Europe/Paris" not in review.text
+    assert set(hidden_values(review)) == {"service", "setting:services.element.enabled"}
+
+
+def test_review_refuses_an_unknown_service(console):
+    _, client = console
+    page = client.get("/admin/services")
+    review = client.post(
+        "/admin/services/review",
+        data={"csrf_token": csrf(page), "service": "nope", "setting:project.timezone": "UTC"},
+    )
+    assert review.status_code == 400
+
+
+def test_backups_page_has_its_own_settings_card(console):
+    _, client = console
+    page = client.get("/admin/backups")
+    values = card_values(page, "backups")
+    assert values["service"] == "backups"
+    assert values["setting:operations.backups.schedule"] == "daily"
+    assert values["setting:operations.backups.retention_days"] == "14"
 
 
 def test_console_warns_and_hides_settings_unsupported_by_a_stale_agent(console, monkeypatch):
@@ -379,17 +440,15 @@ def test_console_warns_and_hides_settings_unsupported_by_a_stale_agent(console, 
     assert page.status_code == 200
     assert "control agent is running older code" in page.text
     assert "Vikunja task management" not in page.text
-    assert "Community time zone" in page.text
+    assert 'id="settings-matrix"' in page.text
 
 
 def test_console_provisions_and_deploys_vikunja(console):
     root, client = console
     page = client.get("/admin/services")
     assert "Vikunja task management" in page.text
-    assert "Vikunja self-registration" in page.text
-    assert "Vikunja public project sharing" in page.text
     values = {
-        **form_values(page),
+        **card_values(page, "vikunja"),
         "setting:services.vikunja.enabled": "true",
         "setting:services.vikunja.allow_registration": "true",
         "setting:services.vikunja.enable_link_sharing": "true",
@@ -402,13 +461,13 @@ def test_console_provisions_and_deploys_vikunja(console):
     assert "Read &amp; Write" in review.text
     assert "Confirm with your password" in review.text
 
-    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
     applied = client.post(
         "/admin/services/apply",
-        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+        data={"csrf_token": csrf(review), **hidden_values(review), "password": PASSWORD},
     )
-    assert applied.status_code == 200
-    assert "Changes applied" in applied.text
+    assert applied.headers["location"] == "/admin/services#settings-vikunja"
+    settings_page = follow(client, applied)
+    assert "Vikunja task management: changes applied." in settings_page.text
 
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["services"]["vikunja"]["enabled"] is True
@@ -420,16 +479,17 @@ def test_console_provisions_and_deploys_vikunja(console):
     route = (root / "data" / "proxy" / "vikunja.caddy").read_text(encoding="utf-8")
     assert "tasks.example.org" in route
 
-    settings_page = client.get("/admin/services")
     assert 'href="https://tasks.example.org/"' in settings_page.text
     assert "Self-registration is on; public project sharing is on." in settings_page.text
+    # The flash names the service, so its card comes back open.
+    assert re.search(r'id="settings-vikunja"[^>]*>\s*<details open', settings_page.text)
 
 
 def test_console_provisions_and_deploys_facilmap(console):
     root, client = console
     page = client.get("/admin/services")
     assert "FacilMap collaborative maps" in page.text
-    values = {**form_values(page), "setting:services.facilmap.enabled": "true"}
+    values = {**card_values(page, "facilmap"), "setting:services.facilmap.enabled": "true"}
 
     review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
     assert review.status_code == 200
@@ -437,13 +497,12 @@ def test_console_provisions_and_deploys_facilmap(console):
     assert "bearer credentials" in review.text
     assert "Confirm with your password" in review.text
 
-    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
     applied = client.post(
         "/admin/services/apply",
-        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+        data={"csrf_token": csrf(review), **hidden_values(review), "password": PASSWORD},
     )
-    assert applied.status_code == 200
-    assert "Changes applied" in applied.text
+    settings_page = follow(client, applied)
+    assert "changes applied" in settings_page.text
 
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["services"]["facilmap"]["enabled"] is True
@@ -453,7 +512,6 @@ def test_console_provisions_and_deploys_facilmap(console):
     route = (root / "data" / "proxy" / "facilmap.caddy").read_text(encoding="utf-8")
     assert "maps.example.org" in route
 
-    settings_page = client.get("/admin/services")
     assert 'href="https://maps.example.org/"' in settings_page.text
     assert "anyone who reaches the service can create maps" in settings_page.text
 
@@ -464,10 +522,12 @@ def test_console_provisions_and_deploys_field_map(console, project):
     page = client.get("/admin/services")
     assert "Field Map mobile mapping" in page.text
     values = {
-        **form_values(page),
+        **card_values(page, "field_map"),
         "setting:services.field_map.enabled": "true",
         "setting:services.field_map.hostname": "maps.example.org",
     }
+    # The tile URL and source commit are under "Advanced" but still sent with the card.
+    assert "setting:services.field_map.tile_url" in values
 
     review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
     assert review.status_code == 200
@@ -477,13 +537,12 @@ def test_console_provisions_and_deploys_field_map(console, project):
     assert "low-volume testing only" in review.text
     assert "Confirm with your password" in review.text
 
-    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
     applied = client.post(
         "/admin/services/apply",
-        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+        data={"csrf_token": csrf(review), **hidden_values(review), "password": PASSWORD},
     )
-    assert applied.status_code == 200
-    assert "Changes applied" in applied.text
+    settings_page = follow(client, applied)
+    assert "changes applied" in settings_page.text
 
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["services"]["field_map"]["enabled"] is True
@@ -494,7 +553,6 @@ def test_console_provisions_and_deploys_field_map(console, project):
     route = (root / "data/proxy/field_map.caddy").read_text(encoding="utf-8")
     assert "maps.example.org" in route
 
-    settings_page = client.get("/admin/services")
     assert 'href="https://maps.example.org/"' in settings_page.text
     assert "anonymous map creation is on" in settings_page.text.lower()
     assert any(service == "field_map" and "--build" in args for service, args in fake.calls)
@@ -506,7 +564,7 @@ def test_console_provisions_librebooking_and_shows_setup_secrets_once(console, p
     page = client.get("/admin/services")
     assert "LibreBooking space reservations" in page.text
     values = {
-        **form_values(page),
+        **card_values(page, "librebooking"),
         "setting:services.librebooking.enabled": "true",
         "setting:services.librebooking.admin_email": "spaces@example.org",
     }
@@ -517,12 +575,11 @@ def test_console_provisions_librebooking_and_shows_setup_secrets_once(console, p
     assert "self-registration" in review.text
     assert "Confirm with your password" in review.text
 
-    hidden = dict(re.findall(r'type="hidden" name="(setting:[^"]+)" value="([^"]*)"', review.text))
     applied = client.post(
         "/admin/services/apply",
-        data={"csrf_token": csrf(review), **hidden, "password": PASSWORD},
+        data={"csrf_token": csrf(review), **hidden_values(review), "password": PASSWORD},
     )
-    assert applied.status_code == 200
+    assert applied.status_code == 303
     config = yaml.safe_load((root / "community-stack.yaml").read_text(encoding="utf-8"))
     assert config["services"]["librebooking"]["enabled"] is True
     assert config["services"]["librebooking"]["version"] == "7.2.0-3.5.2"
@@ -557,16 +614,21 @@ def test_console_provisions_librebooking_and_shows_setup_secrets_once(console, p
 def test_console_asks_for_the_password_before_stopping_matrix(console):
     _, client = console
     page = client.get("/admin/services")
-    values = {**form_values(page), "setting:services.matrix.enabled": "false"}
+    values = {**card_values(page, "matrix"), "setting:services.matrix.enabled": "false"}
     review = client.post("/admin/services/review", data={"csrf_token": csrf(page), **values})
     assert "Confirm with your password" in review.text
 
     refused = client.post(
         "/admin/services/apply",
-        data={"csrf_token": csrf(review), "setting:services.matrix.enabled": "false"},
+        data={
+            "csrf_token": csrf(review),
+            "service": "matrix",
+            "setting:services.matrix.enabled": "false",
+        },
     )
     assert refused.status_code == 400
     assert "Password confirmation failed." in refused.text
+    assert 'href="/admin/services#settings-matrix"' in refused.text
 
 
 def test_get_started_checklist_tracks_progress(console):

@@ -52,7 +52,7 @@ from community_stack.admin.matrix_users import register_matrix_users
 from community_stack.admin.mirroring import register_mirroring
 from community_stack.admin.request_limits import RequestBodyLimitMiddleware
 from community_stack.admin.safemode import register_safemode
-from community_stack.admin.services import register_services
+from community_stack.admin.services import load_settings, register_services, settings_cards
 from community_stack.admin.settings import register_settings
 from community_stack.admin.store import PERMISSIONS, SESSION_TTL, AdminStore, can, tokens_match
 from community_stack.admin.subscriptions import register_subscriptions
@@ -586,12 +586,12 @@ def create_app(
             {
                 "label": "Set the community time zone",
                 "done": "timezone" in config.get("project", {}),
-                "link": "/admin/services",
+                "link": "/admin/community#settings-general",
             },
             {
                 "label": "Turn on encrypted backups",
                 "done": get_value(config, ("operations", "backups", "encryption")) == "restic",
-                "link": "/admin/services",
+                "link": "/admin/backups#settings-backups",
             },
             {
                 "label": "Run a restore drill",
@@ -622,6 +622,7 @@ def create_app(
                 status = await run_in_threadpool(agent.call, "backups.status", session["username"])
             except (AgentUnavailable, AgentRefused) as exc:
                 error = str(exc)
+        config, settings_error = await load_settings(agent, session["username"])
         return render(
             request,
             "backups.html",
@@ -629,7 +630,8 @@ def create_app(
                 session,
                 agent_available=agent.available(),
                 status=status,
-                error=error,
+                error=error or settings_error,
+                settings_cards=settings_cards("backups", config),
                 **({"flash": outcome} if outcome else {}),
             ),
             status_code=status_code,

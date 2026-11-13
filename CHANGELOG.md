@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safe Mode: the bot says when it cannot read an encrypted message, and that Safe Mode has not changed, instead of staying silent.
 
 ### Changed
+- Services and updates: one card per service, each with its own settings, form, review and software versions, instead of one form for everything. The time zone moved to **Community profile** and the backup schedule, retention and encryption to **Backups**. Every service's settings, checks, warnings and start/stop rules are one entry in `community_stack.agent.service_catalogue`.
 - One console page for every bridge at `/admin/bridges/<name>`, and a **Bridges** overview under a new **Chat** menu section. `/admin/whatsapp` redirects to the new page. The menu is regrouped into Publishing, Chat, Continuity, Server and Accounts.
 - The chat allowlist, required settings and command prefix are handled by shared code for every bridge (`community_stack.bridges.config`); per-bridge differences are data in the catalogue.
 - The WhatsApp announcements adapter moved to `community_stack.announcements.adapters.whatsapp`.

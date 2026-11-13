@@ -1,0 +1,3 @@
+{% if card.enabled and card.url %}
+<p class="notice" role="status"><a href="{{ card.url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a> · <a href="/admin/vikunja-users">Create a Vikunja account</a>. Self-registration is {{ "on" if card["values"]["services.vikunja.allow_registration"] else "off" }}; public project sharing is {{ "on" if card["values"]["services.vikunja.enable_link_sharing"] else "off" }}. Configure each project's share permission in Vikunja; choose Read for a public to-do list.</p>
+{% endif %}

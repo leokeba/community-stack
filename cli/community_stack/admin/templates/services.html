@@ -1,80 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Services and settings{% endblock %}
+{% from "_settings_card.html" import settings_card with context %}
+{% block title %}Services and updates{% endblock %}
 {% block content %}
-<h1>Services and settings</h1>
+<h1>Services and updates</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-<p class="muted">Bridges to other chat apps are switched on here, then set up under <a href="/admin/bridges">Chat → Bridges</a>.</p>
 {% if not agent_available %}
 <div class="panel">
   <h2>The system agent is not running</h2>
   <p>Service settings are changed by a separate, privileged agent on the server, so this page never needs direct access to the server itself.</p>
   <p class="muted">Ask the person who manages the server to install and start it; the steps are in docs/operations.md under "Control agent".</p>
 </div>
-{% elif values %}
-<p>Changes are previewed before they are made. The server takes a backup first, and if a service does not come back healthy the previous settings are restored automatically.</p>
+{% elif loaded %}
+<p class="page-intro">Each service has its own settings. Changes are previewed before they are made; the server takes a backup first, and if a service does not come back healthy the previous settings are restored automatically. The time zone is on the <a href="/admin/community#settings-general">Community profile</a> page and the backup schedule on the <a href="/admin/backups#settings-backups">Backups</a> page.</p>
 {% if agent_outdated %}<p class="notice" role="status">The control agent is running older code. Some settings are unavailable until the agent is updated and restarted.</p>{% endif %}
-<form class="card" method="post" action="/admin/services/review">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  {% for setting in settings %}
-  <label for="setting-{{ loop.index }}">{{ setting.label }}{% if setting.dangerous %} (needs your password){% endif %}</label>
-  {% if setting.kind == "bool" %}
-  <select id="setting-{{ loop.index }}" name="setting:{{ setting.key }}">
-    <option value="true" {% if values[setting.key] %}selected{% endif %}>On</option>
-    <option value="false" {% if not values[setting.key] %}selected{% endif %}>Off</option>
-  </select>
-  {% elif setting.kind == "choice" %}
-  <select id="setting-{{ loop.index }}" name="setting:{{ setting.key }}">
-    {% for choice in setting.choices %}<option value="{{ choice }}" {% if values[setting.key] == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}
-  </select>
-  {% elif setting.kind == "int" %}
-  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="number" min="{{ setting.minimum }}" max="{{ setting.maximum }}" value="{{ values[setting.key] }}" required>
-  {% elif setting.kind in ("hostname", "tile_url", "git_ref", "version") %}
-  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" value="{{ values[setting.key] }}" required>
-  {% else %}
-  <input id="setting-{{ loop.index }}" name="setting:{{ setting.key }}" type="text" list="timezones" value="{{ values[setting.key] }}" required>
-  {% endif %}
-  <p class="muted">{{ setting.help }}</p>
-  {% endfor %}
-  <datalist id="timezones">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
-  <p><button type="submit">Review changes</button></p>
-</form>
-{% if values.get("services.vikunja.enabled") and vikunja_url %}
-<p class="notice" role="status">Vikunja is enabled. <a href="{{ vikunja_url }}" target="_blank" rel="noopener noreferrer">Open Vikunja</a>. <a href="/admin/vikunja-users">Create a Vikunja account</a>. Self-registration is {{ "on" if values.get("services.vikunja.allow_registration") else "off" }}; public project sharing is {{ "on" if values.get("services.vikunja.enable_link_sharing") else "off" }}. Configure each project's share permission in Vikunja; choose Read for a public to-do list.</p>
-{% endif %}
-{% if values.get("services.facilmap.enabled") and facilmap_url %}
-<p class="notice" role="status">FacilMap is enabled. <a href="{{ facilmap_url }}" target="_blank" rel="noopener noreferrer">Open FacilMap</a>. It has no user accounts: map links are bearer credentials, and anyone who reaches the service can create maps. Do not store sensitive locations.</p>
-{% endif %}
-{% if values.get("services.field_map.enabled") and field_map_url %}
-<p class="notice" role="status">Field Map is enabled. <a href="{{ field_map_url }}" target="_blank" rel="noopener noreferrer">Open Field Map</a>. Map links are bearer credentials. Anonymous map creation is {{ "on" if values.get("services.field_map.anonymous_links_enabled") else "off" }}; when on, anyone who reaches the service can create maps. Treat precise locations and photos as sensitive.</p>
-{% endif %}
-{% if values.get("services.librebooking.enabled") and librebooking_url %}
-<div class="notice" role="status">
-  <p>LibreBooking is enabled. <a href="{{ librebooking_url }}" target="_blank" rel="noopener noreferrer">Open space reservations</a>.</p>
-  <form method="post" action="/admin/librebooking/setup">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label for="librebooking-setup-password">Confirm with your password to view installation credentials</label>
-    <input id="librebooking-setup-password" name="password" type="password" autocomplete="current-password" required>
-    <p><button type="submit">Show first-setup instructions</button></p>
-  </form>
+{% set open_key = flash.service if flash else none %}
+{% for group, cards in groups %}
+<h2>{{ group }}</h2>
+{% if group == "Bridges and messaging" %}<p class="muted">Bridges are switched on here, then linked to an account under <a href="/admin/bridges">Chat → Bridges</a>.</p>{% endif %}
+<div class="channel-list">
+  {% for card in cards %}{{ settings_card(card, open=(open_key == card.spec.key)) }}{% endfor %}
 </div>
-{% endif %}
-{% if status and status.containers %}
-<h2>Running services</h2>
-<table>
-  <thead><tr><th>Service</th><th>State</th><th>Status</th></tr></thead>
-  <tbody>
-  {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ badge(container.state, tone="success" if container.state == "running" else "danger") }}</td><td>{{ container.status }}</td></tr>{% endfor %}
-  </tbody>
-</table>
-{% endif %}
-{% if components %}
-<h2>Software versions</h2>
-<p>Each release of the stack pins tested versions of the software it runs. Updating takes a backup first and goes back to the previous version if the new one does not start healthy.</p>
+{% endfor %}
+{% if core_components %}
+<h2>Core components</h2>
+<p class="muted">The web proxy and landing page have no settings here. Each release of the stack pins tested versions of the software it runs; updating takes a backup first and goes back to the previous version if the new one does not start healthy.</p>
+<div class="table-wrap">
 <table>
   <thead><tr><th>Component</th><th>Running</th><th>This release</th><th></th></tr></thead>
   <tbody>
-  {% for row in components %}
-  <tr>
+  {% for row in core_components %}
+  <tr id="settings-{{ row.service }}">
     <td>{{ row.component }}</td>
     <td>{{ row.running or "not running" }}</td>
     <td>{{ row.pinned }}{% if row.release_notes and row.update_available %} (<a href="{{ row.release_notes }}" rel="noopener noreferrer">release notes</a>){% endif %}</td>
@@ -92,6 +47,20 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
+{% endif %}
+{% if status and status.containers %}
+<details class="card">
+  <summary>All containers ({{ status.containers|length }})</summary>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Container</th><th>State</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for container in status.containers %}<tr><td>{{ container.name }}</td><td>{{ badge(container.state, tone="success" if container.state == "running" else "danger") }}</td><td>{{ container.status }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
 {% endif %}
 {% endif %}
 {% endblock %}

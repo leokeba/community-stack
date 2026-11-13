@@ -71,6 +71,14 @@ FIELD_MAP_DEFAULTS = """  field_map:
     cpu_limit: 1
 """
 
+# Default blocks for the optional services, added when a legacy configuration lacks them.
+SERVICE_DEFAULTS = {
+    "vikunja": VIKUNJA_DEFAULTS,
+    "facilmap": FACILMAP_DEFAULTS,
+    "librebooking": LIBREBOOKING_DEFAULTS,
+    "field_map": FIELD_MAP_DEFAULTS,
+}
+
 
 def render_value(value: Any) -> str:
     if isinstance(value, bool):
@@ -207,12 +215,12 @@ def get_value(config: dict, path: tuple[str, ...], default: Any = None) -> Any:
     return node
 
 
-def ensure_vikunja_config(text: str) -> str:
-    """Add Vikunja defaults to a legacy config without reserializing operator comments."""
+def ensure_service_config(text: str, service: str) -> str:
+    """Add a service's defaults to a legacy config without reserializing operator comments."""
     data = yaml.safe_load(text)
     if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
         raise TypeError("Configuration must contain a services mapping.")
-    if "vikunja" in data["services"]:
+    if service in data["services"]:
         return text
 
     lines = text.splitlines(keepends=True)
@@ -228,82 +236,7 @@ def ensure_vikunja_config(text: str) -> str:
         if line and not line.startswith((" ", "\t", "#", "\n")):
             insert_at = index
             break
-    lines.insert(insert_at, VIKUNJA_DEFAULTS)
-    return "".join(lines)
-
-
-def ensure_facilmap_config(text: str) -> str:
-    """Add FacilMap defaults to a legacy config without reserializing operator comments."""
-    data = yaml.safe_load(text)
-    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
-        raise TypeError("Configuration must contain a services mapping.")
-    if "facilmap" in data["services"]:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    services_index = next(
-        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
-        None,
-    )
-    if services_index is None:
-        raise ValueError("Configuration must contain a top-level services mapping.")
-    insert_at = len(lines)
-    for index in range(services_index + 1, len(lines)):
-        line = lines[index]
-        if line and not line.startswith((" ", "\t", "#", "\n")):
-            insert_at = index
-            break
-    lines.insert(insert_at, FACILMAP_DEFAULTS)
-    return "".join(lines)
-
-
-def ensure_librebooking_config(text: str) -> str:
-    """Add LibreBooking defaults to a legacy config without reserializing operator comments."""
-    data = yaml.safe_load(text)
-    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
-        raise TypeError("Configuration must contain a services mapping.")
-    if "librebooking" in data["services"]:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    services_index = next(
-        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
-        None,
-    )
-    if services_index is None:
-        raise ValueError("Configuration must contain a top-level services mapping.")
-    insert_at = len(lines)
-    for index in range(services_index + 1, len(lines)):
-        line = lines[index]
-        if line and not line.startswith((" ", "\t", "#", "\n")):
-            insert_at = index
-            break
-    lines.insert(insert_at, LIBREBOOKING_DEFAULTS)
-    return "".join(lines)
-
-
-def ensure_field_map_config(text: str) -> str:
-    """Add Field Map defaults to a legacy config without reserializing operator comments."""
-    data = yaml.safe_load(text)
-    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
-        raise TypeError("Configuration must contain a services mapping.")
-    if "field_map" in data["services"]:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    services_index = next(
-        (index for index, line in enumerate(lines) if re.fullmatch(r"services:\s*\n?", line)),
-        None,
-    )
-    if services_index is None:
-        raise ValueError("Configuration must contain a top-level services mapping.")
-    insert_at = len(lines)
-    for index in range(services_index + 1, len(lines)):
-        line = lines[index]
-        if line and not line.startswith((" ", "\t", "#", "\n")):
-            insert_at = index
-            break
-    lines.insert(insert_at, FIELD_MAP_DEFAULTS)
+    lines.insert(insert_at, SERVICE_DEFAULTS[service])
     return "".join(lines)
 
 

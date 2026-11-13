@@ -17,7 +17,7 @@ container logs.
 
 1. Add a DNS record for `booking.<domain.base>` (or the hostname you will use)
    pointing to the Community Stack server.
-2. In **Admin → Services and settings**, set the LibreBooking administrator
+2. In **Admin → Services and updates**, set the LibreBooking administrator
    email to the address that should receive LibreBooking administrator rights,
    then turn on **LibreBooking space reservations**. Review and apply the
    change. The agent creates stable database and installer credentials,

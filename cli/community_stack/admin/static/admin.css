@@ -535,6 +535,15 @@ td.mono, td .mono { color: var(--ink-2); white-space: nowrap; }
 .bridged-rooms > li:first-child { border-top: 0; }
 .bridged-rooms form { margin: 0; }
 
+/* Services --------------------------------------------------------------- */
+
+.service-card .channel-body > .notice { margin: .9rem 0 0; }
+.service-form { margin: 0; }
+.service-form > label:first-of-type { margin-top: .9rem; }
+.service-advanced { margin-top: 1rem; padding-top: .6rem; border-top: 1px solid var(--line-soft); }
+.service-advanced > summary { font-size: .9rem; }
+.service-card h3 { margin: 1.2rem 0 .5rem; font-size: .93rem; }
+
 /* Accounts --------------------------------------------------------------- */
 
 .account-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); }

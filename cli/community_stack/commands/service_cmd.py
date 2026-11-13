@@ -12,10 +12,8 @@ from community_stack.commands.logs_cmd import SERVICE_DIR_MAP, get_services_root
 from community_stack.commands.status_cmd import run_status
 from community_stack.config import ConfigError, load_config, validate_config
 from community_stack.config_edit import (
-    ensure_facilmap_config,
-    ensure_field_map_config,
-    ensure_librebooking_config,
-    ensure_vikunja_config,
+    SERVICE_DEFAULTS,
+    ensure_service_config,
     set_value,
     write_in_place,
 )
@@ -24,16 +22,9 @@ from community_stack.continuity.connect_page import write_service_directory
 
 def _set_enabled(config_path: Path, service: str, enabled: bool) -> None:
     original = config_path.read_text(encoding="utf-8")
-    if service == "vikunja":
-        candidate = ensure_vikunja_config(original)
-    elif service == "facilmap":
-        candidate = ensure_facilmap_config(original)
-    elif service == "librebooking":
-        candidate = ensure_librebooking_config(original)
-    elif service == "field_map":
-        candidate = ensure_field_map_config(original)
-    else:
+    if service not in SERVICE_DEFAULTS:
         raise ValueError(f"Enable/disable is not supported for {service}.")
+    candidate = ensure_service_config(original, service)
     candidate = set_value(candidate, ("services", service, "enabled"), enabled)
     errors = validate_config(yaml.safe_load(candidate))
     if errors:

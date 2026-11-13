@@ -246,7 +246,19 @@
 
   // Wiring --------------------------------------------------------------------
 
+  // A link to a collapsed card, such as /admin/services#settings-vikunja, opens it.
+  function openTarget() {
+    if (!location.hash) return;
+    const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    const details = target?.matches("details") ? target : target?.querySelector(":scope > details");
+    if (details && !details.open) {
+      details.open = true;
+      target.scrollIntoView();
+    }
+  }
+
   function pageReady() {
+    openTarget();
     startToastTimers();
     for (const button of document.querySelectorAll("[data-history-back]")) button.hidden = false;
     const clipboardAvailable = window.isSecureContext && navigator.clipboard?.writeText;

@@ -9,7 +9,7 @@ and backups.
 ## Enable and manage
 
 1. Add the Field Map hostname's DNS record to the server.
-2. Open **Admin → Services and settings**. Enable **Field Map mobile mapping**,
+2. Open **Admin → Services and updates**. Enable **Field Map mobile mapping**,
    set the public hostname and tile URL, and review the anonymous map creation
    setting.
 3. Review the proposed changes and confirm with an administrator password.

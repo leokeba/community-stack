@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_settings_card.html" import settings_card with context %}
 {% block title %}Backups{% endblock %}
 {% block content %}
 <div class="page-heading">
@@ -27,7 +28,7 @@
 <table>
   <tbody>
     <tr><th scope="row">Where backups go</th><td>{{ status.where }}</td></tr>
-    <tr><th scope="row">Automatic backups</th><td>{% if status.enabled %}{{ status.schedule|capitalize }}, each checked after it is made (<a href="/admin/services">change</a>){% else %}Turned off in the configuration{% endif %}</td></tr>
+    <tr><th scope="row">Automatic backups</th><td>{% if status.enabled %}{{ status.schedule|capitalize }}, each checked after it is made (<a href="#settings-backups">change</a>){% else %}Turned off in the configuration{% endif %}</td></tr>
     <tr><th scope="row">Latest backup</th><td>{{ status.latest_backup[:16]|replace("T", " ") ~ " UTC" if status.latest_backup else "None yet" }}</td></tr>
     <tr><th scope="row">Last automatic run</th><td>{% if status.scheduler.last_result %}{{ status.scheduler.last_result }}{% if status.scheduler.last_error %}: {{ status.scheduler.last_error }}{% endif %} ({{ status.scheduler.last_attempt[:16]|replace("T", " ") }} UTC){% else %}Not run yet{% endif %}</td></tr>
   </tbody>
@@ -35,6 +36,12 @@
 </div>
 {% if status.target == "local" %}
 <p class="notice notice-warning">Backups are on the same disk as the data. If the server is lost, so are the backups. Add off-site storage below.</p>
+{% endif %}
+
+{% if settings_cards %}
+<div class="channel-list">
+  {% for card in settings_cards %}{{ settings_card(card, open=True) }}{% endfor %}
+</div>
 {% endif %}
 
 <form class="card" method="post" action="/admin/backups/offsite">

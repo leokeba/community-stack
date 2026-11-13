@@ -11,6 +11,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from community_stack.admin.common import SOCIAL_ROWS, flash
+from community_stack.admin.services import load_settings, settings_cards, timezone_names
+from community_stack.admin.store import can
 from community_stack.agent.client import AgentRefused, AgentUnavailable
 from community_stack.announcements.adapters.web_feed import WebFeedAdapter
 from community_stack.community import SOCIAL_PLATFORMS
@@ -92,7 +94,7 @@ def register_settings(
             },
         }
 
-    def community_page(
+    async def community_page(
         request: Request,
         session: dict[str, Any],
         values: dict[str, Any],
@@ -107,6 +109,11 @@ def register_settings(
             }
             for item in values["social"]
         ]
+        # The time zone is a server setting, changed through the agent like other settings.
+        cards, settings_error = [], None
+        if can(session["role"], "system"):
+            config, settings_error = await load_settings(agent, session["username"])
+            cards = settings_cards("community", config)
         return render(
             request,
             "community.html",
@@ -117,6 +124,9 @@ def register_settings(
                 platforms=list(SOCIAL_PLATFORMS.items()),
                 channels=list(community_labels.items()),
                 flash_error=error,
+                settings_cards=cards,
+                settings_error=settings_error,
+                timezones=timezone_names() if cards else [],
             ),
             status_code=status_code,
         )
@@ -124,7 +134,7 @@ def register_settings(
     @app.get("/admin/community")
     async def community_profile_page(request: Request) -> Response:
         session = require(request, "settings")
-        return community_page(request, session, community_current_values())
+        return await community_page(request, session, community_current_values())
 
     @app.post("/admin/community")
     async def community_profile_save(request: Request) -> Response:
@@ -153,10 +163,10 @@ def register_settings(
                 values[kind] = filename
         except ConnectError as exc:
             audit(request, session["username"], "community.updated", outcome="invalid_image")
-            return community_page(request, session, values, str(exc), 400)
+            return await community_page(request, session, values, str(exc), 400)
         except OSError:
             audit(request, session["username"], "community.updated", outcome="image_read_failed")
-            return community_page(
+            return await community_page(
                 request, session, values, "The uploaded image could not be read or saved.", 400
             )
         try:
@@ -165,7 +175,7 @@ def register_settings(
             )
         except AgentUnavailable:
             audit(request, session["username"], "community.updated", outcome="failed")
-            return community_page(
+            return await community_page(
                 request,
                 session,
                 values,
@@ -174,7 +184,7 @@ def register_settings(
             )
         except AgentRefused as exc:
             audit(request, session["username"], "community.updated", outcome="refused")
-            return community_page(request, session, values, str(exc), 400)
+            return await community_page(request, session, values, str(exc), 400)
         publisher.refresh_connect_page()
         audit(request, session["username"], "community.updated", outcome="succeeded")
         return redirect_with(

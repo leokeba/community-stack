@@ -62,7 +62,7 @@ Compose project, dedicated private PostgreSQL database, and a generated Caddy
 route for its HTTPS hostname.
 
 FacilMap is also optional and disabled by default. Administrators can enable
-it, set its hostname, and deploy it from **Admin → Services and settings**.
+it, set its hostname, and deploy it from **Admin → Services and updates**.
 Review its bearer-link permission model before enabling it; see the
 [FacilMap guide](facilmap.md).
 
@@ -73,7 +73,7 @@ anonymous map creation settings before enabling it; see the
 [Field Map guide](field-map.md).
 
 LibreBooking is optional and disabled by default. Enable it from
-**Admin → Services and settings** after adding the booking hostname's DNS
+**Admin → Services and updates** after adding the booking hostname's DNS
 record. The admin console provisions its database and storage, and provides a
 password-confirmed first-setup page; see the [LibreBooking guide](librebooking.md).
 

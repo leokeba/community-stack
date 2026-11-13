@@ -8,7 +8,7 @@ inside FacilMap.
 ## Enable from the web console
 
 1. Point the desired hostname (default `maps.<domain.base>`) at the server.
-2. In **Admin → Services and settings**, enable **FacilMap collaborative maps**.
+2. In **Admin → Services and updates**, enable **FacilMap collaborative maps**.
    Change the public hostname if needed.
 3. Review the warnings and proposed change. The console makes a safety backup,
    provisions database credentials and storage, deploys the service, and checks

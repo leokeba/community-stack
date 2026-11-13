@@ -1,0 +1,89 @@
+{#- One service's card: its state, its own settings form, and its software versions.
+    Import with context: {% from "_settings_card.html" import settings_card with context %}.
+    A service can add notices or actions in services/<key>.html, which sees `card`. -#}
+{% macro setting_field(setting, card) -%}
+{%- set value = card["values"][setting.key] -%}
+{%- set is_switch = setting.key == card.spec.enable_key -%}
+<label for="{{ setting.field_id }}">{{ "Service" if is_switch else (setting.short or setting.label) }}{% if setting.dangerous %} <span class="muted">(needs your password)</span>{% endif %}</label>
+{% if setting.kind == "bool" %}
+<select id="{{ setting.field_id }}" name="setting:{{ setting.key }}">
+  <option value="true" {% if value %}selected{% endif %}>On</option>
+  <option value="false" {% if not value %}selected{% endif %}>Off</option>
+</select>
+{% elif setting.kind == "choice" %}
+<select id="{{ setting.field_id }}" name="setting:{{ setting.key }}">
+  {% for choice in setting.choices %}<option value="{{ choice }}" {% if value == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}
+</select>
+{% elif setting.kind == "int" %}
+<input id="{{ setting.field_id }}" name="setting:{{ setting.key }}" type="number" min="{{ setting.minimum }}" max="{{ setting.maximum }}" value="{{ value }}" required>
+{% elif setting.kind == "email" %}
+<input id="{{ setting.field_id }}" name="setting:{{ setting.key }}" type="email" value="{{ value }}" required>
+{% elif setting.kind == "timezone" %}
+<input id="{{ setting.field_id }}" name="setting:{{ setting.key }}" type="text" list="{{ setting.field_id }}-zones" value="{{ value }}" required>
+<datalist id="{{ setting.field_id }}-zones">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
+{% else %}
+<input id="{{ setting.field_id }}" name="setting:{{ setting.key }}" type="text" value="{{ value }}" required>
+{% endif %}
+{% if not is_switch %}<p class="muted">{{ setting.help }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro settings_card(card, open=False) -%}
+{%- set spec = card.spec -%}
+<section class="channel service-card" id="{{ spec.anchor }}" aria-labelledby="{{ spec.anchor }}-name">
+  <details {% if open %}open{% endif %}>
+    <summary>
+      <span class="channel-name" id="{{ spec.anchor }}-name">{{ spec.label }}</span>
+      <span class="channel-state">
+        {% if card.update_available %}{{ badge("update", "Update available", "warning") }}{% endif %}
+        {% if card.enabled is none %}
+        {% elif card.enabled and card.running == false %}{{ badge("stopped", "On, not running", "danger") }}
+        {% elif card.enabled %}{{ badge("on", "On", "success") }}
+        {% else %}{{ badge("off", "Off", "neutral") }}{% endif %}
+      </span>
+    </summary>
+    <div class="channel-body">
+      {% if spec.description %}<p class="muted">{{ spec.description }}</p>{% endif %}
+      {% include "services/" ~ spec.key ~ ".html" ignore missing %}
+      <form class="service-form" method="post" action="/admin/services/review">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="service" value="{{ spec.key }}">
+        {% for setting in card.fields %}{{ setting_field(setting, card) }}{% endfor %}
+        {% if card.advanced %}
+        <details class="service-advanced">
+          <summary>Advanced</summary>
+          {% for setting in card.advanced %}{{ setting_field(setting, card) }}{% endfor %}
+        </details>
+        {% endif %}
+        <p><button type="submit">Review changes</button></p>
+      </form>
+      {% if card.components %}
+      <h3>Software</h3>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Running</th><th>This release</th><th></th></tr></thead>
+        <tbody>
+        {% for row in card.components %}
+        <tr>
+          <td>{{ row.component }}</td>
+          <td>{{ row.running or "not running" }}</td>
+          <td>{{ row.pinned }}{% if row.release_notes and row.update_available %} (<a href="{{ row.release_notes }}" rel="noopener noreferrer">release notes</a>){% endif %}</td>
+          <td>
+            {% if row.blocked %}<span class="muted">{{ row.blocked }}</span>
+            {% elif row.update_available %}
+            <form method="post" action="/admin/services/update" data-confirm="Update {{ row.service }} to {{ row.pinned }}? A backup is taken first, and the previous version comes back if the new one does not start healthy." data-confirm-label="Update {{ row.service }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="service" value="{{ row.service }}">
+              <button type="submit">Update</button>
+            </form>
+            {% elif row.running %}{{ badge("current", "Up to date", "success") }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+</section>
+{%- endmacro %}

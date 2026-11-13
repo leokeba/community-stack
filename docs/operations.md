@@ -348,11 +348,19 @@ why the page is limited to owners and admins.
 
 ### Services and settings
 
-With the control agent installed, owners and admins change settings on the
-console's **Services** page: the community time zone, how long backups are
-kept, backup encryption, and whether Element and Matrix run. Every change is
-shown as a review first, including the exact lines of `community-stack.yaml`
-that will change. Applying it:
+With the control agent installed, owners and admins change settings in the
+console. The **Services and updates** page has one card per service (Matrix,
+Element, the bridges, Signal, Vikunja, FacilMap, Field Map and LibreBooking),
+grouped into Chat, Bridges and messaging, and Community apps. Each card shows
+whether the service is on, its own settings, its software versions and any
+links it needs, such as **Open Vikunja**. The community time zone is a card on
+the **Community profile** page, and the backup schedule, retention and
+encryption are a card on the **Backups** page.
+
+Each card is reviewed and applied on its own, so a review only covers that
+service's settings and warnings, and only asks for a password when one of them
+needs it. Every change is shown as a review first, including the exact lines
+of `community-stack.yaml` that will change. Applying it:
 
 1. takes a safety backup (if that fails, nothing is changed);
 2. saves the previous configuration as `community-stack.yaml.previous` and
@@ -362,6 +370,12 @@ that will change. Applying it:
 4. restores the previous configuration and service state if it is not.
 
 Stopping Matrix stops all community chat, so it asks for the person's password.
+
+The cards come from the catalogue in `cli/community_stack/agent/service_catalogue.py`.
+Each entry lists a service's settings, the checks that can refuse a change, the
+warnings shown on review, and how the agent starts and stops it. A service can
+add notices or actions to its card in
+`cli/community_stack/admin/templates/services/<key>.html`.
 Domains and Matrix federation remain operator-managed. Matrix announcement
 delivery, room mirroring, and the optional WhatsApp bridge can be configured
 from **Channels** and **Services** in the admin console. The **Get started** page lists the remaining

@@ -14,9 +14,9 @@
 </dl>
 <ol>
   <li>In the installer, use the database settings above. Leave “Create database” and “Create database user” unchecked; Community Stack already created a dedicated database and account.</li>
-  <li>Before completing the installer, temporarily enable <strong>LibreBooking self-registration</strong> in <a href="/admin/services">Services and settings</a>.</li>
+  <li>Before completing the installer, temporarily enable <strong>LibreBooking self-registration</strong> in <a href="/admin/services#settings-librebooking">Services and updates</a>.</li>
   <li>Register the initial administrator with <code>{{ details.admin_email }}</code>. LibreBooking grants administrator privileges to this configured address.</li>
   <li>Immediately turn self-registration off again in Services and settings. Then configure spaces, booking approval, schedules, and roles inside LibreBooking.</li>
 </ol>
-<p><a href="{{ details.app_url }}" target="_blank" rel="noopener noreferrer">Open LibreBooking</a> · <a href="/admin/services">Back to services and settings</a></p>
+<p><a href="{{ details.app_url }}" target="_blank" rel="noopener noreferrer">Open LibreBooking</a> · <a href="/admin/services#settings-librebooking">Back to LibreBooking settings</a></p>
 {% endblock %}
